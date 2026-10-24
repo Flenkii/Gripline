@@ -13,6 +13,11 @@ void notify_show(const char *text);
    (a few seconds), then shown in the given order. Safe from any thread. */
 void notify_show_deferred(const char *text);
 
+/* Same, but the text is made when it is time to show it (a few seconds after the first
+   picture): make() fills out (UTF-8, may use "\n") and returns 1, or returns 0 for no card. */
+typedef int (*NotifyTextFn)(char *out, unsigned size);
+void notify_show_deferred_call(NotifyTextFn make);
+
 /* Installs the swap-chain hook (from the Azimuth loader, before the game creates its
    swap chain). host = azimuth.exe image. Returns 1 when hooked. */
 int notify_install(unsigned char *host);

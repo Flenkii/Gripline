@@ -5,6 +5,7 @@
 #include "features/nitro_link.h"
 #include "features/notify.h"
 #include "features/cockpit.h"
+#include "features/mod_scan.h"
 #include "features/rig_settings.h"
 #include "features/video_settings.h"
 #include "logging.h"
@@ -111,6 +112,7 @@ int runtime_initialize(unsigned char *game_image, const wchar_t *executable_path
                           wheel_bridge_setting(RIG_WHEEL_CURVE));
         }
         notify_set_enabled(options.notifications);
+        mod_scan_start(settings_directory);
         rig_settings_gripline(options.notifications, options.steering_animation);
         rig_settings_start(settings_directory);
     }

@@ -47,34 +47,51 @@ static void utf8_line(const char *text, size_t length, wchar_t *out) {
 
 #define MAX_PENDING 6
 #define DEFER_MS 4000 /* after the game's first picture, so the card is really seen */
-static char pending[MAX_PENDING][160];
+typedef struct {
+    char text[160];
+    NotifyTextFn make;
+} Pending;
+static Pending pending[MAX_PENDING];
 static volatile LONG pending_count;
 static ULONGLONG first_present;
 
-void notify_show_deferred(const char *text) {
-    if (!text) return;
+static void defer(const char *text, NotifyTextFn make) {
     AcquireSRWLockExclusive(&lock);
     if (pending_count < MAX_PENDING) {
+        Pending *p = &pending[pending_count];
         unsigned n = 0;
-        while (text[n] && n < sizeof(pending[0]) - 1) {
-            pending[pending_count][n] = text[n];
+        while (text && text[n] && n < sizeof(p->text) - 1) {
+            p->text[n] = text[n];
             ++n;
         }
-        pending[pending_count][n] = 0;
+        p->text[n] = 0;
+        p->make = make;
         InterlockedIncrement(&pending_count);
     }
     ReleaseSRWLockExclusive(&lock);
 }
 
+void notify_show_deferred(const char *text) {
+    if (text) defer(text, NULL);
+}
+
+void notify_show_deferred_call(NotifyTextFn make) {
+    if (make) defer(NULL, make);
+}
+
 static void flush_pending(void) {
-    static char local[MAX_PENDING][160];
+    static Pending local[MAX_PENDING];
     LONG count;
     AcquireSRWLockExclusive(&lock);
     count = pending_count;
-    for (LONG i = 0; i < count; ++i) memory_copy(local[i], pending[i], sizeof(local[i]));
+    for (LONG i = 0; i < count; ++i) local[i] = pending[i];
     InterlockedExchange(&pending_count, 0);
     ReleaseSRWLockExclusive(&lock);
-    for (LONG i = count; i > 0; --i) notify_show(local[i - 1]); /* the first one ends up on top */
+    for (LONG i = count; i > 0; --i) { /* the first one ends up on top */
+        Pending *p = &local[i - 1];
+        if (p->make && !p->make(p->text, sizeof(p->text))) continue;
+        notify_show(p->text);
+    }
 }
 
 void notify_show(const char *text) {

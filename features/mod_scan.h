@@ -10,4 +10,8 @@ int mod_scan_mapper_running(void);
    running and Gripline's own keyboard and wheel stay off. */
 void mod_scan_announce_mapper(void);
 
+/* Game start: remembers where fh2-mods\ is and queues the "mods found" card (shown a few
+   seconds after the first picture, when the FH2 Mod Platform has written its mod list). */
+void mod_scan_start(const wchar_t *settings_directory);
+
 #endif
