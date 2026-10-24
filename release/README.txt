@@ -61,7 +61,6 @@ Old layout (Gripline in fh2extra\): not needed any more, the FH2MP launcher move
     Note: NitroSystem's "Backfire on All Cars" lets the Mod Platform rebuild
     Mount\mediaoverride\Stripped\gamedbRC.slt from the original database. If another mod
     of yours keeps its database there, leave that option off.
-  - EXPERIMENTAL: the in-game wheel can turn faster than your real wheel (fix planned).
   - Full steering animation in the cockpit (off by default): hands hidden, the steering
     wheel turns as far as your real one (Rotation in FH2_Wheel.ini). Switch:
     "Cockpit: Full Steering Animation", applies after a restart. The first start after
