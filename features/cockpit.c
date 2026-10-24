@@ -1382,6 +1382,8 @@ static int hide_hands(unsigned char *d, size_t length) {
 static wchar_t mount_path[PATH_CAPACITY];
 static volatile LONG state; /* 0 off, 1 making, 2 ready, 3 failed */
 static int want_rotation, want_curve;
+static unsigned char *game;
+static volatile LONG patched;
 
 static size_t wlen(const wchar_t *s) {
     size_t n = 0;
@@ -1592,8 +1594,10 @@ static DWORD WINAPI maker_thread(LPVOID unused) {
     return 0;
 }
 
-void cockpit_start(const wchar_t *mount_dir, int enabled, int rotation_degrees, int curve_x10) {
+void cockpit_start(unsigned char *game_image, const wchar_t *mount_dir, int enabled, int rotation_degrees,
+                   int curve_x10) {
     if (!enabled || !mount_dir || state != 0) return;
+    game = game_image;
     if (wlen(mount_dir) + 32 >= PATH_CAPACITY) return;
     memory_copy(mount_path, mount_dir, (wlen(mount_dir) + 1) * 2);
     want_rotation = rotation_degrees < 180 ? 180 : (rotation_degrees > 2520 ? 2520 : rotation_degrees);
@@ -1618,7 +1622,61 @@ int cockpit_wait_ready(void) {
     return 0;
 }
 
+/* ------------------------------------------------------------------ game: steering range */
+
+/* The game keeps the cockpit steering angle (radians) within +-90 degrees and gives the driver
+   animation angle / 90 degrees. With a wheel that angle is the real one (steer * rotation / 2), so
+   our curve (+-rotation/2) made the in-game wheel turn rotation/180 times too fast and stop at 90
+   degrees of the real wheel. Both places load the same constant (pi/2); pointing them at our own
+   rotation/2 lets the animation show exactly the game's angle - 1:1 with the real wheel. */
+#define RVA_STEER_CLAMP 0x2a989du  /* vmovss xmm7, [pi/2]       presentation steering filter */
+#define RVA_STEER_NORMAL 0x293ff0u /* vdivss xmm0, xmm1, [pi/2] driver animation value */
+#define RVA_HALF_PI 0x2c5c58cu
+
+int cockpit_patch_game(void) {
+    static const struct {
+        unsigned rva;
+        unsigned char op[4];
+    } sites[2] = {{RVA_STEER_CLAMP, {0xc5, 0xfa, 0x10, 0x3d}}, {RVA_STEER_NORMAL, {0xc5, 0xf2, 0x5e, 0x05}}};
+    if (!game || InterlockedCompareExchange(&patched, 1, 0) != 0) return 0;
+    for (int i = 0; i < 2; ++i) {
+        const unsigned char *site = game + sites[i].rva;
+        int32_t disp;
+        memory_copy(&disp, site + 4, 4);
+        if (!memory_equal(site, sites[i].op, 4) || site + 8 + disp != game + RVA_HALF_PI) {
+            log_append("COCKPIT: game code differs - the wheel keeps the game's steering range.\r\n");
+            return 0;
+        }
+    }
+    unsigned char *page = memory_alloc_near(game, 0x1000);
+    if (!page) {
+        log_append("COCKPIT: no memory near the game - the wheel keeps the game's steering range.\r\n");
+        return 0;
+    }
+    float limit = (float)(want_rotation / 2.0 * PI / 180.0);
+    memory_copy(page, &limit, sizeof(limit));
+    DWORD old;
+    VirtualProtect(page, 0x1000, PAGE_READONLY, &old);
+    for (int i = 0; i < 2; ++i) {
+        unsigned char *at = game + sites[i].rva + 4;
+        int32_t disp = (int32_t)(page - (at + 4));
+        if (!VirtualProtect(at, 4, PAGE_EXECUTE_READWRITE, &old)) return 0;
+        memory_copy(at, &disp, 4);
+        VirtualProtect(at, 4, old, &old);
+    }
+    FlushInstructionCache(GetCurrentProcess(), game + RVA_STEER_NORMAL, RVA_STEER_CLAMP + 8 - RVA_STEER_NORMAL);
+    log_number("COCKPIT: steering range set to +-", want_rotation / 2, " degrees (1:1 with the wheel).");
+    return 1;
+}
+
 #ifdef FH2_TWEAKS_TEST
+__declspec(dllexport) int Fh2TestCockpitPatch(unsigned char *game_image, int rotation) {
+    game = game_image;
+    want_rotation = rotation;
+    InterlockedExchange(&patched, 0);
+    return cockpit_patch_game();
+}
+
 __declspec(dllexport) size_t Fh2TestCockpitGr2(const unsigned char *src, size_t length, int maxdeg, int curve_x10,
                                                unsigned char *out, size_t capacity) {
     size_t n = 0;

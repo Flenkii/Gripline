@@ -107,7 +107,7 @@ int runtime_initialize(unsigned char *game_image, const wchar_t *executable_path
                 if (executable_path[n] == L'\\' || executable_path[n] == L'/') cut = n;
             }
             mount_dir[cut] = 0; /* the Mount folder holds forza_durango_release_final.exe */
-            cockpit_start(mount_dir, 1, wheel_bridge_setting(RIG_WHEEL_ROTATION),
+            cockpit_start(game_image, mount_dir, 1, wheel_bridge_setting(RIG_WHEEL_ROTATION),
                           wheel_bridge_setting(RIG_WHEEL_CURVE));
         }
         notify_set_enabled(options.notifications);

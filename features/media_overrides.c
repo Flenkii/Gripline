@@ -84,9 +84,10 @@ static void ensure_folders_mounted(void *filesystem) {
     }
     if (mount_cockpit && cockpit_wait_ready()) {
         /* Gripline steering animation (cockpit.c): below mediaoverride, above the game */
-        log_append(mount_folder(filesystem, "game:\\gripline_cockpit\\", 0x7ffffffc)
-                       ? "FILES: Gripline cockpit folder mounted (full steering animation).\r\n"
-                       : "FILES: Gripline cockpit folder could not be mounted.\r\n");
+        int cockpit = mount_folder(filesystem, "game:\\gripline_cockpit\\", 0x7ffffffc);
+        log_append(cockpit ? "FILES: Gripline cockpit folder mounted (full steering animation).\r\n"
+                           : "FILES: Gripline cockpit folder could not be mounted.\r\n");
+        if (cockpit) cockpit_patch_game();
     }
     void **methods = *(void ***)filesystem;
     ((SortVolumes)methods[0x1f8 / 8])(filesystem);

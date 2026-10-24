@@ -309,35 +309,6 @@ void wheel_buttons_update(unsigned held, unsigned char *byte0, unsigned char *by
 
 /* ------------------------------------------------------------------ installation */
 
-static unsigned char *alloc_near(unsigned char *base, size_t size) {
-    SYSTEM_INFO info;
-    GetSystemInfo(&info);
-    uintptr_t step = info.dwAllocationGranularity ? info.dwAllocationGranularity : 0x10000;
-    uintptr_t start = (uintptr_t)base, end = start + GAME_IMAGE_SIZE;
-    const uintptr_t reach = 0x60000000; /* well inside +-2 GB of every patch site */
-    for (int direction = 0; direction < 2; ++direction) {
-        uintptr_t address = direction == 0 ? ((start - step) & ~(step - 1))
-                                           : ((end + step - 1) & ~(step - 1));
-        for (unsigned tries = 0; tries < 0x8000; ++tries) {
-            if (direction == 0 ? (address < 0x10000 || start - address > reach)
-                               : (address - end > reach)) {
-                break;
-            }
-            MEMORY_BASIC_INFORMATION region;
-            if (VirtualQuery((void *)address, &region, sizeof(region)) == sizeof(region) &&
-                region.State == MEM_FREE) {
-                void *memory = VirtualAlloc((void *)address, size, MEM_RESERVE | MEM_COMMIT,
-                                            PAGE_READWRITE);
-                if (memory) {
-                    return memory;
-                }
-            }
-            address = direction == 0 ? address - step : address + step;
-        }
-    }
-    return NULL;
-}
-
 static int rel32(const unsigned char *from_next, const unsigned char *to, int32_t *out) {
     int64_t delta = (int64_t)((intptr_t)to - (intptr_t)from_next);
     if (delta < INT32_MIN || delta > INT32_MAX) {
@@ -425,7 +396,7 @@ int wheel_buttons_install(unsigned char *game_image) {
                        "andere Funktionen gehen trotzdem.");
         return 0;
     }
-    unsigned char *page = alloc_near(image, 0x1000);
+    unsigned char *page = memory_alloc_near(image, 0x1000);
     if (!page) {
         wheel_log_text("Zusatztasten: kein Speicher nahe am Spiel - Blicke nicht verfuegbar.");
         return 0;
