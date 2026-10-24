@@ -22,6 +22,7 @@
 
 #define MAX_CARDS 3
 #define CARD_MS 5000u
+#define STARTUP_CARD_MS 9000u /* start cards (mods found, Mapper) stay longer */
 #define FADE_IN_MS 250u
 #define FADE_OUT_MS 500u
 #define TEXT_CAPACITY 96
@@ -29,6 +30,7 @@
 typedef struct {
     wchar_t line1[TEXT_CAPACITY], line2[TEXT_CAPACITY];
     ULONGLONG shown;
+    ULONGLONG hold; /* ms fully visible before the fade-out */
     unsigned id;
 } Card;
 
@@ -54,6 +56,8 @@ typedef struct {
 static Pending pending[MAX_PENDING];
 static volatile LONG pending_count;
 static ULONGLONG first_present;
+
+static void show_card(const char *text, ULONGLONG hold);
 
 static void defer(const char *text, NotifyTextFn make) {
     AcquireSRWLockExclusive(&lock);
@@ -90,11 +94,15 @@ static void flush_pending(void) {
     for (LONG i = count; i > 0; --i) { /* the first one ends up on top */
         Pending *p = &local[i - 1];
         if (p->make && !p->make(p->text, sizeof(p->text))) continue;
-        notify_show(p->text);
+        show_card(p->text, STARTUP_CARD_MS);
     }
 }
 
 void notify_show(const char *text) {
+    show_card(text, CARD_MS);
+}
+
+static void show_card(const char *text, ULONGLONG hold) {
     if (!text) return;
     log_append("GRIPLINE: ");
     for (const char *p = text; *p; ++p) {
@@ -113,6 +121,7 @@ void notify_show(const char *text) {
     utf8_line(text[first] ? text + first + 1 : text + first, text[first] ? text_length(text + first + 1) : 0,
               card.line2);
     card.shown = GetTickCount64();
+    card.hold = hold;
     AcquireSRWLockExclusive(&lock);
     card.id = next_id++;
     for (unsigned i = MAX_CARDS - 1; i > 0; --i) cards[i] = cards[i - 1];
@@ -571,7 +580,7 @@ static void barrier(ID3D12Resource *resource, D3D12_RESOURCE_STATES before, D3D1
 }
 
 /* fade/slide of one card: alpha 0..1 and slide offset 0..1, 0 when gone */
-static float card_alpha(ULONGLONG age, float *slide) {
+static float card_alpha(ULONGLONG age, ULONGLONG hold, float *slide) {
     *slide = 0.0f;
     if (age < FADE_IN_MS) {
         float t = (float)age / FADE_IN_MS;
@@ -579,8 +588,8 @@ static float card_alpha(ULONGLONG age, float *slide) {
         *slide = 1.0f - e;
         return e;
     }
-    if (age < CARD_MS) return 1.0f;
-    if (age < CARD_MS + FADE_OUT_MS) return 1.0f - (float)(age - CARD_MS) / FADE_OUT_MS;
+    if (age < hold) return 1.0f;
+    if (age < hold + FADE_OUT_MS) return 1.0f - (float)(age - hold) / FADE_OUT_MS;
     return 0.0f;
 }
 
@@ -589,7 +598,7 @@ static void render(IDXGISwapChain *swapchain) {
     unsigned count;
     ULONGLONG now = GetTickCount64();
     AcquireSRWLockExclusive(&lock);
-    while (card_count && now - cards[card_count - 1].shown >= CARD_MS + FADE_OUT_MS) --card_count;
+    while (card_count && now - cards[card_count - 1].shown >= cards[card_count - 1].hold + FADE_OUT_MS) --card_count;
     count = card_count;
     for (unsigned i = 0; i < count; ++i) list[i] = cards[i];
     ReleaseSRWLockExclusive(&lock);
@@ -686,7 +695,7 @@ static void render(IDXGISwapChain *swapchain) {
     float y = (float)l->margin;
     for (unsigned i = 0; i < count; ++i) {
         float slide;
-        float a = card_alpha(now - list[i].shown, &slide);
+        float a = card_alpha(now - list[i].shown, list[i].hold, &slide);
         float x0 = (float)width - l->margin - l->width + slide * 40.0f * l->height / 88.0f;
         float c[12] = {x0 / width * 2.0f - 1.0f,
                        1.0f - y / height * 2.0f,
