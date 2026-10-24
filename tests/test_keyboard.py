@@ -280,11 +280,11 @@ hr = e.call(hook, e.put_wstr('Windows.Gaming.Input.Gamepad'), e.put_bytes(IID_ST
 check(e.rq(out) == real_statics, 'Enabled=0: Azimuth bekommt die echten Gamepads wie vorher')
 
 # Azimuth Mapper laeuft: Gripline-Tastatur bleibt aus (jede Taste kaeme doppelt an)
-def mapper_case(processes):
+def mapper_case(running):
     open(p, 'wb').write(text.replace(b'Enabled=0', b'Enabled=1'))
     global e
     em = e = KEmu(DLL, root)
-    em.processes = processes
+    em.mapper_running = running
     orig3 = em.stub('RoGetActivationFactory', original_factory)
     em.call('Fh2TestKeyboardAsync', em.stub('k', async_key), em.stub('f', foreground), em.stub('w', window_pid), em.stub('r', raw_buffer))
     em.call('Fh2TestKeyboardSetup', orig3, em.put_wstr('C:\\test'))
@@ -292,10 +292,8 @@ def mapper_case(processes):
     em.call(em.call('Fh2TestKeyboardFactoryHook'), em.put_wstr('Windows.Gaming.Input.Gamepad'), em.put_bytes(IID_STATICS), o)
     return em.rq(o)
 
-check(mapper_case(['explorer.exe', 'AzimuthMapper.exe']) == real_statics, 'Azimuth Mapper laeuft: Tastatur aus, echte Gamepads unveraendert')
-check(mapper_case(['explorer.exe', 'azimuth mapper v1.5.exe']) == real_statics, 'Name in anderer Schreibweise wird auch erkannt')
-check(mapper_case(['explorer.exe', 'azimuth.exe', 'MapperTool.exe']) not in (0, real_statics), 'anderer Prozess (azimuth.exe): Tastatur bleibt an')
-check(mapper_case([]) not in (0, real_statics), 'ohne Mapper: Tastatur bleibt an')
+check(mapper_case(True) == real_statics, 'Azimuth Mapper laeuft: Tastatur aus, echte Gamepads unveraendert')
+check(mapper_case(False) not in (0, real_statics), 'ohne Mapper: Tastatur bleibt an')
 
 print()
 print('ALLE TESTS OK (%d Pruefungen)' % checks[0] if not fails else '%d FEHLER' % len(fails))

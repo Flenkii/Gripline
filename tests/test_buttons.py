@@ -349,7 +349,7 @@ print()
 print('Azimuth Mapper laeuft')
 e3, root3 = make(True)
 CURRENT[0] = e3
-e3.processes = ['explorer.exe', 'AzimuthMapper.exe']
+e3.mapper_running = True
 before3 = {s_: bytes(e3.mu.mem_read(GAME + s_, 5)) for s_ in original}
 e3.call('Fh2TestVideoPrepare', GAME)
 e3.call('Fh2TestRigStart', GAME, e3.put_wstr('C:\\test\\game\\forza_durango_release_final.exe'), e3.put_wstr('C:\\test'))

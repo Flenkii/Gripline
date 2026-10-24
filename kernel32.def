@@ -38,9 +38,7 @@ EXPORTS
     GetTickCount64
     MultiByteToWideChar
     lstrcmpiW
-    CreateToolhelp32Snapshot
-    Process32FirstW
-    Process32NextW
+    OpenEventW
     lstrcpyW
     DisableThreadLibraryCalls
     InitOnceExecuteOnce
