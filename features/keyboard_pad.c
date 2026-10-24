@@ -1,7 +1,6 @@
 /* Keyboard as a gamepad (unofficial add-on). See keyboard_pad.h. */
 #include "keyboard_pad.h"
 #include "mod_scan.h"
-#include "notify.h"
 #include "ini_migrate.h"
 #include "game_addresses.h"
 #include "logging.h"
@@ -754,7 +753,7 @@ static HRESULT WINAPI hook_get_factory(void *name, const GUID *iid, void **out) 
     }
     if (mod_scan_mapper_running()) {
         log_append("KEYBOARD: Azimuth Mapper is running; Gripline keyboard off, gamepads unchanged.\r\n");
-        notify_show_deferred("Azimuth Mapper detected\nGripline keyboard off - the Mapper's controller is used");
+        mod_scan_announce_mapper();
         return original_get_factory(name, iid, out);
     }
     if (!real_statics) {
@@ -822,7 +821,7 @@ void keyboard_pad_game_start(unsigned char *game_image, const wchar_t *settings_
     ini_migrate(settings_directory);
     if (!loaded) settings_load();
     game_base = game_image;
-    if (values[KEY_SETTING_ENABLED]) wheel_buttons_install(game_image); /* follows the controller layout */
+    if (values[KEY_SETTING_ENABLED] && !mod_scan_mapper_running()) wheel_buttons_install(game_image); /* follows the controller layout */
 }
 
 #ifdef FH2_TWEAKS_TEST

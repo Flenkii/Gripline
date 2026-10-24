@@ -5,6 +5,8 @@
 #include "extra_options.h"
 #include <tlhelp32.h>
 #include "mod_scan.h"
+#include "logging.h"
+#include "notify.h"
 
 /* lower case parts of the program's file name */
 static const wchar_t *const mapper_names[] = {L"azimuthmapper", L"azimuth-mapper", L"azimuth_mapper",
@@ -35,4 +37,11 @@ int mod_scan_mapper_running(void) {
     }
     CloseHandle(snapshot);
     return found;
+}
+
+void mod_scan_announce_mapper(void) {
+    static volatile LONG announced;
+    if (InterlockedCompareExchange(&announced, 1, 0) != 0) return;
+    log_append("GRIPLINE: Azimuth Mapper is running; Gripline keyboard and wheel stay off.\r\n");
+    notify_show_deferred("Azimuth Mapper detected\nGripline keyboard and wheel off - the Mapper's controller is used");
 }

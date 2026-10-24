@@ -345,5 +345,18 @@ v = e2.call('Fh2TestWheelReport', 1 << 8)
 check(v == 0 and e2.call('Fh2TestWheelExtraState') == 0x10, 'Blick zurück ohne Hook: nichts (kein Fehler)')
 
 print()
+# =====================================================================================
+print('Azimuth Mapper laeuft')
+e3, root3 = make(True)
+CURRENT[0] = e3
+e3.processes = ['explorer.exe', 'AzimuthMapper.exe']
+before3 = {s_: bytes(e3.mu.mem_read(GAME + s_, 5)) for s_ in original}
+e3.call('Fh2TestVideoPrepare', GAME)
+e3.call('Fh2TestRigStart', GAME, e3.put_wstr('C:\\test\\game\\forza_durango_release_final.exe'), e3.put_wstr('C:\\test'))
+check(e3.allocations == [] and all(bytes(e3.mu.mem_read(GAME + s_, 5)) == b_ for s_, b_ in before3.items()),
+      'Lenkrad-Zusatztasten: keine Hooks, Spielcode nicht angefasst')
+log3 = open(os.path.join(root3, 'FH2_Wheel.log'), 'rb').read().decode('latin1')
+check('Azimuth Mapper is running - Gripline wheel off' in log3, 'Log: Lenkrad aus wegen Mapper')
+
 print('FEHLER:' if fails else 'ALLE TESTS OK', len(fails) or '')
 sys.exit(1 if fails else 0)

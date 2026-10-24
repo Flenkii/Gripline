@@ -22,6 +22,7 @@
 #include "ini_migrate.h"
 #include "rig_settings.h"
 #include "wheel_buttons.h"
+#include "mod_scan.h"
 #include "support.h"
 
 #define DIRECTINPUT_VERSION 0x0800
@@ -2593,6 +2594,11 @@ void wheel_bridge_start(unsigned char *game_image, const wchar_t *executable_pat
          cfg.shifter);
     if (!cfg.enabled) {
         wlog("Ausgeschaltet in FH2_Wheel.ini (Enabled=0).");
+        return;
+    }
+    if (mod_scan_mapper_running()) {
+        wlog("Azimuth Mapper is running - Gripline wheel off (the Mapper provides the controller).");
+        mod_scan_announce_mapper();
         return;
     }
     wlog("Zusatztasten: Taste %d -> Funktion %d, Taste %d -> Funktion %d, Taste %d -> Funktion %d.",
