@@ -29,7 +29,7 @@
 
 typedef struct {
     wchar_t line1[TEXT_CAPACITY], line2[TEXT_CAPACITY];
-    ULONGLONG shown;
+    ULONGLONG shown; /* tick of the first frame it was drawn in; 0 = not shown yet */
     ULONGLONG hold; /* ms fully visible before the fade-out */
     unsigned id;
 } Card;
@@ -120,7 +120,7 @@ static void show_card(const char *text, ULONGLONG hold) {
     utf8_line(text, first, card.line1);
     utf8_line(text[first] ? text + first + 1 : text + first, text[first] ? text_length(text + first + 1) : 0,
               card.line2);
-    card.shown = GetTickCount64();
+    card.shown = 0;
     card.hold = hold;
     AcquireSRWLockExclusive(&lock);
     card.id = next_id++;
@@ -598,7 +598,14 @@ static void render(IDXGISwapChain *swapchain) {
     unsigned count;
     ULONGLONG now = GetTickCount64();
     AcquireSRWLockExclusive(&lock);
-    while (card_count && now - cards[card_count - 1].shown >= cards[card_count - 1].hold + FADE_OUT_MS) --card_count;
+    /* the time runs from the first picture a card is drawn in, so frames the game does not
+       present (loading) do not use it up */
+    if (queue)
+        for (unsigned i = 0; i < card_count; ++i)
+            if (!cards[i].shown) cards[i].shown = now;
+    while (card_count && cards[card_count - 1].shown &&
+           now - cards[card_count - 1].shown >= cards[card_count - 1].hold + FADE_OUT_MS)
+        --card_count;
     count = card_count;
     for (unsigned i = 0; i < count; ++i) list[i] = cards[i];
     ReleaseSRWLockExclusive(&lock);
