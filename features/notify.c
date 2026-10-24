@@ -45,6 +45,38 @@ static void utf8_line(const char *text, size_t length, wchar_t *out) {
     out[n > 0 ? n : 0] = 0;
 }
 
+#define MAX_PENDING 6
+#define DEFER_MS 4000 /* after the game's first picture, so the card is really seen */
+static char pending[MAX_PENDING][160];
+static volatile LONG pending_count;
+static ULONGLONG first_present;
+
+void notify_show_deferred(const char *text) {
+    if (!text) return;
+    AcquireSRWLockExclusive(&lock);
+    if (pending_count < MAX_PENDING) {
+        unsigned n = 0;
+        while (text[n] && n < sizeof(pending[0]) - 1) {
+            pending[pending_count][n] = text[n];
+            ++n;
+        }
+        pending[pending_count][n] = 0;
+        InterlockedIncrement(&pending_count);
+    }
+    ReleaseSRWLockExclusive(&lock);
+}
+
+static void flush_pending(void) {
+    static char local[MAX_PENDING][160];
+    LONG count;
+    AcquireSRWLockExclusive(&lock);
+    count = pending_count;
+    for (LONG i = 0; i < count; ++i) memory_copy(local[i], pending[i], sizeof(local[i]));
+    InterlockedExchange(&pending_count, 0);
+    ReleaseSRWLockExclusive(&lock);
+    for (LONG i = count; i > 0; --i) notify_show(local[i - 1]); /* the first one ends up on top */
+}
+
 void notify_show(const char *text) {
     if (!text) return;
     log_append("GRIPLINE: ");
@@ -703,6 +735,11 @@ static int swap_slot(void **slot, void *hook, void **original) {
 }
 
 static void before_present(IDXGISwapChain *swapchain) {
+    if (pending_count && enabled && !broken && swapchain == swapchain_seen) {
+        ULONGLONG now = GetTickCount64();
+        if (!first_present) first_present = now;
+        if (now - first_present >= DEFER_MS) flush_pending();
+    }
     if (!enabled || broken || !card_count || swapchain != swapchain_seen) return;
     __try {
         render(swapchain);

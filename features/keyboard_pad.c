@@ -1,5 +1,7 @@
 /* Keyboard as a gamepad (unofficial add-on). See keyboard_pad.h. */
 #include "keyboard_pad.h"
+#include "mod_scan.h"
+#include "notify.h"
 #include "ini_migrate.h"
 #include "game_addresses.h"
 #include "logging.h"
@@ -748,6 +750,11 @@ static HRESULT WINAPI hook_get_factory(void *name, const GUID *iid, void **out) 
     if (!loaded) settings_load();
     if (!values[KEY_SETTING_ENABLED]) {
         log_append("KEYBOARD: keyboard off (FH2_Keyboard.ini Enabled=0); gamepads unchanged.\r\n");
+        return original_get_factory(name, iid, out);
+    }
+    if (mod_scan_mapper_running()) {
+        log_append("KEYBOARD: Azimuth Mapper is running; Gripline keyboard off, gamepads unchanged.\r\n");
+        notify_show_deferred("Azimuth Mapper detected\nGripline keyboard off - the Mapper's controller is used");
         return original_get_factory(name, iid, out);
     }
     if (!real_statics) {

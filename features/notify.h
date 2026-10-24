@@ -9,6 +9,10 @@
 /* UTF-8 text, one or two lines ("\n"). Safe from any thread. */
 void notify_show(const char *text);
 
+/* Same, but for messages from game start: kept until the game has shown its first picture
+   (a few seconds), then shown in the given order. Safe from any thread. */
+void notify_show_deferred(const char *text);
+
 /* Installs the swap-chain hook (from the Azimuth loader, before the game creates its
    swap chain). host = azimuth.exe image. Returns 1 when hooked. */
 int notify_install(unsigned char *host);

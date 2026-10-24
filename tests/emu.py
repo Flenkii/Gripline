@@ -297,6 +297,26 @@ class Emu:
         self.threads.append(self.arg(2))
         return 0x9999
 
+    # process list for CreateToolhelp32Snapshot (set e.processes = ['name.exe', ...])
+    def k_CreateToolhelp32Snapshot(self):
+        self.proc_pos = 0
+        return 0x777
+
+    def _proc_entry(self):
+        procs = getattr(self, 'processes', [])
+        if self.proc_pos >= len(procs):
+            return 0
+        entry = self.arg(1)
+        self.mu.mem_write(entry + 44, procs[self.proc_pos].encode('utf-16le') + b'\0\0')  # szExeFile
+        self.proc_pos += 1
+        return 1
+
+    def k_Process32FirstW(self):
+        self.proc_pos = 0
+        return self._proc_entry()
+
+    def k_Process32NextW(self): return self._proc_entry()
+
     def k_AcquireSRWLockExclusive(self): pass
     def k_ReleaseSRWLockExclusive(self): pass
     def k_AcquireSRWLockShared(self): pass
