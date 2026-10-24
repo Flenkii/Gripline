@@ -39,7 +39,7 @@ enum {
     RIG_GRIP_NOTIFICATIONS = RIG_GRIP_FIRST, /* Notifications      0/1 */
     RIG_GRIP_STEERING,                   /* SteeringAnimation  0/1, next game start */
     RIG_GRIP_END,
-    RIG_WHEEL_PROFILE = RIG_GRIP_END,     /* FFB profile: not stored, derived from the FFB values */
+    RIG_WHEEL_PROFILE = RIG_GRIP_END,     /* input profile: not stored, derived from wheel / keyboard / clutch-as-brake */
     RIG_TRAFFIC_PRESET,                  /* traffic preset: not stored, derived from level + rush hour */
     RIG_SETTING_COUNT
 };
@@ -61,7 +61,7 @@ enum {
 int rig_kind_is_choice(unsigned kind);
 const char *rig_kind_collection(unsigned kind);
 
-#define RIG_PROFILE_COUNT 6
+#define RIG_PROFILE_COUNT 5
 #define RIG_DENSITY_COUNT 6
 #define RIG_WEATHER_COUNT 6
 #define RIG_FFB_MODE_COUNT 2

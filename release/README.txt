@@ -74,7 +74,8 @@ Old layout (Gripline in fh2extra\): not needed any more, the FH2MP launcher move
 
 3. OPTIONAL: READY-MADE PROFILES  (folder Optional\Profiles)
 -----------------------------------------------------------
-Only needed if you don't want to use the in-game menu. Copy both INI files of a profile
+The same four profiles can be switched in the game: "Input: Profile" at the top of the
+Gripline page (wheel and keyboard on/off apply after a restart). Without the menu: copy both INI files of a profile
 into your Azimuth folder (replaces your FH2_Wheel.ini and FH2_Keyboard.ini):
 
   Controller   – controller only: wheel and keyboard off

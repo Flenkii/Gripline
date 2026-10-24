@@ -130,7 +130,7 @@ Optional parts of the ZIP:
 | `Optional/Profiles/Wheel` | wheel with the game's force feedback (= default) |
 | `Optional/Profiles/Wheel_ClutchAsBrake` | like Wheel, but the clutch pedal brakes (the G920 brake pedal is stiff) |
 
-A profile is a pair `FH2_Wheel.ini` + `FH2_Keyboard.ini`; copy both next to `azimuth.exe` (replaces yours).
+The same four profiles can be switched **in the game** (V6): *Input: Profile* at the top of the Gripline page (the GRIPLINE tile). Wheel and keyboard on/off apply after restarting the game. Alternatively a profile is a pair `FH2_Wheel.ini` + `FH2_Keyboard.ini`; copy both next to `azimuth.exe` (replaces yours).
 
 New INI keys of this fork in `FH2_ExtraOptions.ini`, section `[Traffic]`:
 `TrafficLevel` (0–5), `RushHourAllDay` (0/1), `Weather` (0 original, 1 sunny, 2 cloudy, 3 storm clouds, 4 rain, 5 fog;

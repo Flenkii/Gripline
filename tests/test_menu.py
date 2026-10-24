@@ -9,6 +9,7 @@ HUD = os.path.join(GAME_DIR, 'ui/Scenes/Anthem/A_HUDOptions.xaml')
 VIDEO = os.path.join(GAME_DIR, 'ui/Scenes/Anthem/A_VideoOptions.xaml')
 fails = []
 # setting ids (rig_settings.h)
+ENABLED = 0
 FFB_MODE, CLUTCH_BRAKE, LEVEL, ALLDAY, WEATHER = 17, 18, 19, 20, 21
 KEY_ENABLED, KEY_STEER, KEY_RETURN, KEY_PEDAL = 22, 23, 24, 25
 PROFILE, PRESET = 28, 29
@@ -115,11 +116,11 @@ except Exception as ex:
     dom = None
     check(False, f'HUD-XAML wohlgeformt: {ex}')
 open(os.path.join(tempfile.gettempdir(), 'hud_de.xaml'), 'wb').write(hud)
-props = ['EoRigWheelEnabled', 'EoRigForceFeedback', 'EoRigStrength', 'EoRigRumble', 'EoRigRotation',
+props = ['EoRigProfile', 'EoRigWheelEnabled', 'EoRigForceFeedback', 'EoRigStrength', 'EoRigRumble', 'EoRigRotation',
          'EoRigClutchBrake', 'EoRigButton1', 'EoRigButton2', 'EoRigButton3', 'EoKeyEnabled', 'EoKeySteer',
          'EoKeyReturn', 'EoKeyPedal', 'EoRigDensity',
          'EoRigTrafficLevel', 'EoRigRushHour', 'EoRigWeather', 'EoGripSteering', 'EoGripNotify']
-hidden = ['EoRigFfbMode', 'EoRigProfile', 'EoRigDamping', 'EoRigFriction', 'EoRigSmoothing', 'EoRigMinimumForce',
+hidden = ['EoRigFfbMode', 'EoRigDamping', 'EoRigFriction', 'EoRigSmoothing', 'EoRigMinimumForce',
           'EoRigOutward', 'EoRigCentering', 'EoRigLock', 'EoRigCurve', 'EoRigShifter']
 if dom:
     lst = [n for n in dom.getElementsByTagName('local:CommonListBox') if n.getAttribute('x:Name') == 'OptionsList'][0]
@@ -145,9 +146,9 @@ if dom:
     check(used <= keys, f'alle EO-Ressourcen definiert ({len(used)} benutzt): fehlend {sorted(used - keys)}')
     headings = [n.getAttribute('Heading') for n in dom.getElementsByTagName('local:TileMenuDataItem')
                 if n.getAttribute('x:Key')[3:] in props]
-    want = {2: 'Lenkrad: FFB-Stärke', 4: 'Lenkrad: Drehwinkel (Grad)', 5: 'Lenkrad: Kupplung als Bremse',
-            6: 'Lenkrad: Taste RSB', 9: 'Tastatur: Tastatur', 12: 'Tastatur: Pedalzeit (ms)',
-            13: 'Verkehr: Voreinstellung', 14: 'Verkehr: Menge', 16: 'Wetter'}
+    want = {0: 'Eingabe: Profil', 3: 'Lenkrad: FFB-Stärke', 5: 'Lenkrad: Drehwinkel (Grad)',
+            6: 'Lenkrad: Kupplung als Bremse', 7: 'Lenkrad: Taste RSB', 10: 'Tastatur: Tastatur',
+            13: 'Tastatur: Pedalzeit (ms)', 14: 'Verkehr: Voreinstellung', 15: 'Verkehr: Menge', 17: 'Wetter'}
     check(all(headings[i] == t for i, t in want.items()), 'deutsche Texte: ' + ', '.join(repr(headings[i]) for i in want))
     for name, coll in (('EoRigButton1', 'FunctionChoices'), ('EoKeyEnabled', 'ToggleChoices'),
                        ('EoRigClutchBrake', 'ToggleChoices')):
@@ -192,12 +193,11 @@ def set_box(i, value, as_float):
 expect = [1, 1, 0.75, 0.5, 0.06, 0.04, 35.0, 0.02, 0.3, 0.2, 450.0, 3.0, 180.0, 0, 2, 1, 0, 0, 0, 5, 0]
 got = [get(i) for i in range(21)]
 check(got == expect, f'Startwerte aus deinen INIs (FFB-Art Spiel neu): {got}')
-check(get(PROFILE) == 1, f'Profil beim Start: Mein Setup erkannt ({get(PROFILE)})')
+check(get(PROFILE) == 3, f'Profil beim Start: Lenkrad erkannt ({get(PROFILE)})')
 kb = [get(i) for i in range(KEY_ENABLED, KEY_PEDAL + 1)]
 check(kb == [1, 150.0, 90.0, 60.0], f'Tastatur-Startwerte (FH2_Keyboard.ini neu angelegt): {kb}')
 
 ok = set_box(2, 0.85, True); check(ok and get(2) == 0.85, 'FFB-Stärke 75% -> 85%')
-check(get(PROFILE) == 0, 'Profil springt auf Eigene Werte, sobald ein Wert geändert wird')
 ok = set_box(2, 0.85, True); check(not ok, 'gleicher Wert -> keine Änderung gemeldet')
 ok = set_box(3, 1.5, True); check(ok and get(3) == 1.5, 'Vibration -> 150%')
 ok = set_box(11, 2.9999998, True); check(not ok or get(11) == 3.0, 'Kurve 2.9999998 wird zu 3.0 gerundet (keine Änderung)')
@@ -309,19 +309,29 @@ check(get(13) == 0 and get(2) == 0.6 and get(ALLDAY) == 1, f'neue Werte übernom
 check(open(p, 'rb').read() == text, 'dabei nichts zurückgeschrieben')
 
 # ---- profiles
-print('FFB-Profile')
+print('Eingabe-Profile')
+set_box(PROFILE, 3, False)
+ok = set_box(PROFILE, 4, False)
+check(ok and get(ENABLED) == 1 and get(KEY_ENABLED) == 1 and get(CLUTCH_BRAKE) == 1 and get(PROFILE) == 4, 'Lenkrad (Kupplung = Bremse): Lenkrad an, Tastatur an, Kupplung als Bremse an')
 ok = set_box(PROFILE, 3, False)
-vals = [get(i) for i in (2, 3, 4, 5, 6, 7, 8, 9)]
-check(ok and vals == [0.9, 0.4, 0.04, 0.03, 20.0, 0.03, 0.4, 0.2] and get(PROFILE) == 3, f'Profil Direkt setzt alle 8 Werte: {vals}')
-ok = set_box(PROFILE, 0, False); check(not ok and get(2) == 0.9, 'Eigene Werte wählen ändert nichts')
+check(ok and get(CLUTCH_BRAKE) == 0 and get(ENABLED) == 1 and get(PROFILE) == 3, 'Lenkrad: Kupplung als Bremse wieder aus')
+ok = set_box(PROFILE, 2, False)
+check(ok and get(ENABLED) == 0 and get(KEY_ENABLED) == 1 and get(PROFILE) == 2, 'Tastatur: Lenkrad aus, Tastatur an')
 ok = set_box(PROFILE, 1, False)
-check(ok and [get(i) for i in (2, 3, 4, 5, 6, 7, 8, 9)] == [0.75, 0.5, 0.06, 0.04, 35.0, 0.02, 0.3, 0.2] and get(PROFILE) == 1, 'Mein Setup stellt deine Werte wieder her')
-ok = set_box(PROFILE, 6, False); check(not ok, 'Profil 6 (gibt es nicht) abgelehnt')
+check(ok and get(ENABLED) == 0 and get(KEY_ENABLED) == 0 and get(PROFILE) == 1, 'Controller: Lenkrad und Tastatur aus')
+ok = set_box(PROFILE, 0, False); check(not ok and get(PROFILE) == 1, 'Eigene Werte wählen ändert nichts')
+ok = set_box(PROFILE, 1, False); check(not ok, 'schon aktives Profil: keine Änderung')
+ok = set_box(KEY_ENABLED, 1, False)
+check(ok and get(PROFILE) == 2, 'Tastatur von Hand an: Profil zeigt Tastatur')
+ok = set_box(CLUTCH_BRAKE, 1, False)
+check(ok and get(PROFILE) == 2, 'Kupplung als Bremse spielt bei Tastatur/Controller keine Rolle')
+ok = set_box(ENABLED, 1, False)
+check(ok and get(PROFILE) == 4, 'Lenkrad von Hand an (Tastatur an, Kupplung Bremse an): Profil zeigt Lenkrad (Kupplung = Bremse)')
+ok = set_box(PROFILE, 5, False); check(not ok, 'Profil 5 (gibt es nicht) abgelehnt')
 e.tick += 700
 e.call('Fh2TestRigStep', e.tick)
 w2 = open(p, 'rb').read()
-check(b'\n=' not in w2 and b'Profil' not in w2, 'Profil selbst wird nicht in die INI geschrieben')
-check(b'FFBStrength=75' in w2 and b'Smoothing=35' in w2, 'Profilwerte gespeichert')
+check(b'EoRigProfile' not in w2 and b'Profil' not in w2, 'Profil selbst wird nicht in die INI geschrieben')
 
 # ---- Verkehrs-Voreinstellung
 print('Verkehrs-Voreinstellung')

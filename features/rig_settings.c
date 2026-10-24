@@ -86,6 +86,7 @@ static const RigSettingInfo infos[RIG_SETTING_COUNT] = {
    The H-pattern shifter is hidden too: the game reads the gear from the wheel but never
    uses it (FH2 only knows shift up / shift down). */
 static const unsigned char order[] = {
+    RIG_WHEEL_PROFILE,
     RIG_WHEEL_ENABLED,   RIG_WHEEL_FFB,     RIG_WHEEL_STRENGTH, RIG_WHEEL_RUMBLE,
     RIG_WHEEL_ROTATION,  RIG_WHEEL_CLUTCH_BRAKE, RIG_WHEEL_BUTTON1, RIG_WHEEL_BUTTON2,  RIG_WHEEL_BUTTON3,
     RIG_KEY_ENABLED,     RIG_KEY_STEER,     RIG_KEY_RETURN,     RIG_KEY_PEDAL,
@@ -120,23 +121,20 @@ unsigned rig_setting_order(unsigned position) {
     return position < sizeof(order) ? order[position] : 0;
 }
 
-/* ------------------------------------------------------------------ FFB profiles */
+/* ------------------------------------------------------------------ input profiles */
 
 /* The profile is not stored anywhere: it is whichever preset the current values match
-   ("Eigene Werte" otherwise). Choosing a preset simply sets these values. */
-static const unsigned char profile_ids[] = {RIG_WHEEL_STRENGTH, RIG_WHEEL_RUMBLE,
-                                            RIG_WHEEL_DAMPING,  RIG_WHEEL_FRICTION,
-                                            RIG_WHEEL_SMOOTHING, RIG_WHEEL_MINFORCE,
-                                            RIG_WHEEL_OUTWARD,  RIG_WHEEL_CENTERING};
-#define PROFILE_VALUES ARRAY_COUNT(profile_ids)
-static const unsigned char presets[RIG_PROFILE_COUNT][PROFILE_VALUES] = {
-    {0},                                /* 0 = own values (not a preset) */
-    {75, 50, 6, 4, 35, 2, 30, 20},      /* 1 = Mein Setup (eigene Werte vom 18.10.2026) */
-    {50, 30, 10, 6, 60, 1, 20, 20},     /* 2 = weich / Komfort */
-    {90, 40, 4, 3, 20, 3, 40, 20},      /* 3 = direkt / Rennen */
-    {80, 100, 5, 3, 25, 2, 35, 20},     /* 4 = Offroad */
-    {60, 40, 3, 2, 25, 2, 70, 20},      /* 5 = Drift */
+   ("Eigene Werte" otherwise). Choosing a preset sets the wheel / keyboard switches (and the
+   clutch pedal as brake); these are the ready-made profiles of the release ZIP, without copying
+   files. Wheel and keyboard on/off apply after a restart. */
+static const signed char profile_presets[RIG_PROFILE_COUNT][3] = {
+    {0, 0, 0},   /* 0 = own values (not a preset) */
+    {0, 0, -1},  /* 1 = Controller: no wheel, no keyboard (clutch as brake untouched) */
+    {0, 1, -1},  /* 2 = Keyboard */
+    {1, 1, 0},   /* 3 = Wheel */
+    {1, 1, 1},   /* 4 = Wheel, clutch pedal as brake */
 };
+static const unsigned char profile_ids[3] = {RIG_WHEEL_ENABLED, RIG_KEY_ENABLED, RIG_WHEEL_CLUTCH_BRAKE};
 
 /* Traffic presets: whichever one matches TrafficLevel + RushHourAllDay is shown. */
 static const unsigned char density_presets[RIG_DENSITY_COUNT][2] = {
@@ -161,10 +159,10 @@ static int density_current(void) {
 static int profile_current(void) {
     for (unsigned p = 1; p < RIG_PROFILE_COUNT; ++p) {
         unsigned i = 0;
-        while (i < PROFILE_VALUES && wheel_bridge_setting(profile_ids[i]) == presets[p][i]) {
+        while (i < 3 && (profile_presets[p][i] < 0 || rig_setting_get(profile_ids[i]) == profile_presets[p][i])) {
             ++i;
         }
-        if (i == PROFILE_VALUES) {
+        if (i == 3) {
             return (int)p;
         }
     }
@@ -251,11 +249,11 @@ static const RigText german[RIG_SETTING_COUNT] = {
                             "um die Uhr). Änderst du danach Menge oder Rushhour, steht hier Eigene "
                             "Werte. Wird sofort gespeichert, die Menge wirkt aber erst nach einem "
                             "Neustart von Azimuth."},
-    [RIG_WHEEL_PROFILE] = {"Lenkrad: FFB-Profil",
-                           "Lädt fertige Werte für Stärke, Vibration, Dämpfung, Reibung, Glättung, "
-                           "Mindestkraft, Kraft nach außen und Zentrierung. Nur bei FFB-Art "
-                           "Eigenes. Änderst du danach etwas, steht hier Eigene Werte. Wirkt "
-                           "sofort."},
+    [RIG_WHEEL_PROFILE] = {"Eingabe: Profil",
+                           "Stellt Lenkrad im Spiel, Tastatur und Kupplung als Bremse mit einem "
+                           "Klick ein: Controller, Tastatur, Lenkrad oder Lenkrad mit Kupplung als "
+                           "Bremse. Änderst du danach einen der Schalter, steht hier Eigene Werte. "
+                           "Lenkrad und Tastatur wirken erst nach einem Neustart des Spiels."},
     [RIG_WHEEL_FFB_MODE] = {"Lenkrad: FFB-Art",
                             "Spiel = die originalen Lenkrad-Programme von FH2, genau wie auf der "
                             "Xbox: Rückstellkraft, Lenkgewicht, Dämpfung, Vibration und die "
@@ -361,10 +359,11 @@ static const RigText english[RIG_SETTING_COUNT] = {
                             "Rush Hour (64, all day) or Chaos (100, all day). Changing amount or "
                             "rush hour afterwards shows Custom. Saved immediately, the amount only "
                             "applies after restarting Azimuth."},
-    [RIG_WHEEL_PROFILE] = {"Wheel: Force Feedback Profile",
-                           "Loads ready-made values for strength, rumble, damping, friction, "
-                           "smoothing, minimum force, outward force and centring. Type Own only. "
-                           "Changing any of them afterwards shows Custom. Applies immediately."},
+    [RIG_WHEEL_PROFILE] = {"Input: Profile",
+                           "Sets wheel in game, keyboard and clutch pedal as brake in one go: "
+                           "Controller, Keyboard, Wheel or Wheel with the clutch pedal as brake. "
+                           "Changing one of the switches afterwards shows Custom. Wheel and "
+                           "keyboard only apply after restarting the game."},
     [RIG_WHEEL_FFB_MODE] = {"Wheel: Force Feedback Type",
                             "Game = FH2's original wheel programs, exactly like on the Xbox: "
                             "aligning torque, steering weight, damping, rumble and the centring in "
@@ -399,9 +398,9 @@ static const RigText english[RIG_SETTING_COUNT] = {
 };
 
 static const wchar_t *const profile_german[RIG_PROFILE_COUNT] = {
-    L"Eigene Werte", L"Mein Setup", L"Weich", L"Direkt (Rennen)", L"Offroad", L"Drift"};
+    L"Eigene Werte", L"Controller", L"Tastatur", L"Lenkrad", L"Lenkrad (Kupplung = Bremse)"};
 static const wchar_t *const profile_english[RIG_PROFILE_COUNT] = {
-    L"Custom", L"My Setup", L"Soft", L"Direct (Racing)", L"Off-Road", L"Drift"};
+    L"Custom", L"Controller", L"Keyboard", L"Wheel", L"Wheel (Clutch as Brake)"};
 
 static const wchar_t *const density_german[RIG_DENSITY_COUNT] = {
     L"Eigene Werte", L"Original", L"Ruhig", L"Lebhaft", L"Rushhour", L"Chaos"};
@@ -575,9 +574,13 @@ int rig_setting_set(unsigned id, int value) {
             return 0;
         }
         int changed = 0;
-        for (unsigned i = 0; i < PROFILE_VALUES; ++i) {
-            changed |= rig_setting_set(profile_ids[i], presets[value][i]);
+        for (unsigned i = 0; i < 3; ++i) {
+            if (profile_presets[value][i] >= 0) changed |= rig_setting_set(profile_ids[i], profile_presets[value][i]);
         }
+        notify_show(value == 1   ? "Profile: Controller\nApplies after a restart"
+                    : value == 2 ? "Profile: Keyboard\nApplies after a restart"
+                    : value == 3 ? "Profile: Wheel\nApplies after a restart"
+                                 : "Profile: Wheel, clutch as brake\nApplies after a restart");
         return changed;
     }
     if (id == RIG_TRAFFIC_PRESET) {
