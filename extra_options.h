@@ -7,7 +7,7 @@
 
 #define MOD_NAME "Forza Horizon 2 Extra Options"
 #define MOD_VERSION "0.2.98"
-#define GRIPLINE_VERSION "V5"
+#define GRIPLINE_VERSION "V6"
 #define MOD_INI_NAME L"FH2_ExtraOptions.ini"
 #define MOD_LOG_NAME L"FH2_ExtraOptions.log"
 #define GAME_EXE_NAME L"forza_durango_release_final.exe"

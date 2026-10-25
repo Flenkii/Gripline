@@ -1,4 +1,4 @@
-GRIPLINE V5 – wheel, keyboard, traffic & weather for Forza Horizon 2 (Azimuth)
+GRIPLINE V6 – wheel, keyboard, traffic & weather for Forza Horizon 2 (Azimuth)
 =============================================================================
 Based on Extra Options 0.2.98 by RokkuDayo.
 
@@ -67,9 +67,12 @@ Old layout (Gripline in fh2extra\): not needed any more, the FH2MP launcher move
     switching it on (or changing the rotation) takes a little longer: Gripline makes the
     files once into Mount\gripline_cockpit (game files are never changed; delete that
     folder any time).
-  - Works well with fh2wheels by conner-mcvay (rims, tire widths, ride height, camber):
+  - Works with fh2wheels by conner-mcvay (rims, tire widths, ride height, camber), tested:
     https://github.com/conner-mcvay/fh2-mods – its installer finds Gripline as
-    "Extra Options".
+    "Extra Options". If it asks about Mount\mediaoverride, answer Y.
+  - Azimuth Mapper: while it runs, Gripline keyboard and wheel stay off (the Mapper's
+    controller is used). A card says so at the start.
+  - Start card: lists the mods Gripline found.
 
 
 3. OPTIONAL: READY-MADE PROFILES  (folder Optional\Profiles)
@@ -114,5 +117,8 @@ Optionen > HUD > ganz unten, oder FH2_Wheel.ini / FH2_Keyboard.ini / FH2_ExtraOp
 Neu in V5: Gripline-Kachel, Benachrichtigungen im Bild, Nitro auf N bzw. Lenkradtaste
 (Funktion 14, braucht NitroSystem), volle Lenkrad-Animation im Cockpit (Standard aus,
 wirkt nach Neustart; der erste Start danach dauert etwas länger), passt zu fh2wheels.
+Neu in V6: Lenkrad im Cockpit dreht 1:1 mit, Azimuth Mapper wird erkannt (Gripline-
+Tastatur und -Lenkrad dann aus), Start-Karte mit gefundenen Mods, Eingabe-Profil im Spiel
+umschaltbar, fh2wheels getestet.
 Probleme bitte auf GitHub unter "Issues" melden und FH2_ExtraOptions.log, FH2_Wheel.log,
 FH2_Wheel.ini, FH2_Keyboard.ini und fh2-mods\platform.log anhängen.

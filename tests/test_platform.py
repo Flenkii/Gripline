@@ -78,13 +78,13 @@ for n in names:
 
 print('anmelden:')
 check(e.call('GriplinePlatformAttach', api) == 0, 'GriplinePlatformAttach returns 0')
-check(seen['info'] and seen['info'][0] == 'Gripline' and seen['info'][1] == 'V5' and seen['info'][2] == 'Flenkii/Gripline'
+check(seen['info'] and seen['info'][0] == 'Gripline' and seen['info'][1] == 'V6' and seen['info'][2] == 'Flenkii/Gripline'
       and seen['info'][3] == 0, f'register_mod: {seen["info"]}')
 check(seen['page'] and seen['page'][0] == 'Settings' and seen['page'][2] == 'Achievements' and seen['page'][3] != 0,
       f'page on the Achievements tile with on_open: {seen["page"]}')
 check(seen['colors'] == (0xFF1D4F91, 0xFFFFFFFF), f'tile colours {seen["colors"]}')
 check(seen['text'] == 'SETTINGS', f'tile text {seen["text"]!r}')
-check(seen.get('string') == ('PauseMenu.str', 0xF655, 'GRIPLINE V5'), f'tile title ERFOLGE -> GRIPLINE V5: {seen.get("string")}')
+check(seen.get('string') == ('PauseMenu.str', 0xF655, 'GRIPLINE V6'), f'tile title ERFOLGE -> GRIPLINE V6: {seen.get("string")}')
 check(e.call('GriplinePlatformAttach', api) == 1, 'second attach is ignored')
 
 print('XAML der Kachel-Seite:')

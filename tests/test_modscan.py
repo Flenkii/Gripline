@@ -33,13 +33,13 @@ def text_for(mods_list, modules=None):
 
 
 r, t = text_for(LIST)
-check(r == 1 and t == 'Gripline V5 - mods found\nFH2MP, NitroSystem', f'Platform-Liste: {t!r}')
+check(r == 1 and t == 'Gripline V6 - mods found\nFH2MP, NitroSystem', f'Platform-Liste: {t!r}')
 r, t = text_for(LIST, {'fh2wheels.dll': 0x1000})
 check(r == 1 and t.endswith('FH2MP, NitroSystem, fh2wheels'), 'fh2wheels (Modulname) kommt dazu')
 r, t = text_for(LIST, {'fh2wheels.dll': 0x1000, 'fh2wheels-next.dll': 0x2000})
 check(t.count('fh2wheels') == 1, 'fh2wheels nur einmal')
 r, t = text_for(None, {'fh2wheels.dll': 0x1000})
-check(r == 1 and t == 'Gripline V5 - mods found\nfh2wheels', 'ohne Platform-Datei: nur bekannte Module')
+check(r == 1 and t == 'Gripline V6 - mods found\nfh2wheels', 'ohne Platform-Datei: nur bekannte Module')
 r, t = text_for(None)
 check(r == 0, 'nichts gefunden: keine Karte')
 r, t = text_for('# x\r\nGripline.dll\tGripline\tV5\r\n')

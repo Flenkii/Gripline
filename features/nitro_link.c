@@ -52,10 +52,10 @@ static int nitro_blocked(void) {
         if (before != online && (before != -1 || online)) {
             if (online) {
                 log_append("NITRO: online session - nitro off.\r\n");
-                if (linked_module) notify_show("Nitro off\nReason: online session (FH2MP)");
+                if (linked_module) notify_show("Nitro off\nOnline session (FH2MP)");
             } else {
                 log_append("NITRO: offline again - nitro on.\r\n");
-                if (linked_module) notify_show("Nitro on again\nOffline");
+                if (linked_module) notify_show("Nitro on again\nOffline session");
             }
         }
     }

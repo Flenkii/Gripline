@@ -72,7 +72,7 @@ __declspec(dllexport) int GriplinePlatformAttach(const FH2ModApi *platform) {
         api->set_page_xaml(mod, PAGE_KEY, page_resources, page_content, NULL)) {
         api->set_page_tile_colors(mod, PAGE_KEY, TILE_BACKGROUND, TILE_TEXT);
         api->set_page_tile_text(mod, PAGE_KEY, "SETTINGS");
-        if (api->set_string) { /* the tile's big title: ERFOLGE -> GRIPLINE V5 (from fh2mod_init: in time) */
+        if (api->set_string) { /* the tile's big title: ERFOLGE -> GRIPLINE V6 (from fh2mod_init: in time) */
             static wchar_t title[32];
             const char *text = "GRIPLINE " GRIPLINE_VERSION;
             unsigned i = 0;
