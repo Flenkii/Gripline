@@ -78,7 +78,7 @@ int runtime_initialize(unsigned char *game_image, const wchar_t *executable_path
     if (initialized && options.enabled) {
         initialized = verify_game_file(executable_path);
     }
-    media_overrides_configure(options.media_overrides, options.steering_animation);
+    media_overrides_configure(options.media_overrides, options.enabled); /* cockpit files: always */
     if (initialized) {
         initialized = patch_engine_apply(game_image, &options);
     }
@@ -103,7 +103,9 @@ int runtime_initialize(unsigned char *game_image, const wchar_t *executable_path
         keyboard_pad_game_start(game_image, settings_directory);
         nitro_link_start(game_image);
         cockpit_view_start(game_image);
-        if (options.steering_animation) {
+        {
+            /* always: the second cockpit view hides the wheel with these files; the full steering
+               animation (1:1, hands hidden) only when it is on */
             static wchar_t mount_dir[PATH_CAPACITY];
             size_t n = 0, cut = 0;
             for (; executable_path[n] && n + 1 < PATH_CAPACITY; ++n) {
@@ -111,7 +113,7 @@ int runtime_initialize(unsigned char *game_image, const wchar_t *executable_path
                 if (executable_path[n] == L'\\' || executable_path[n] == L'/') cut = n;
             }
             mount_dir[cut] = 0; /* the Mount folder holds forza_durango_release_final.exe */
-            cockpit_start(game_image, mount_dir, 1, wheel_bridge_setting(RIG_WHEEL_ROTATION),
+            cockpit_start(game_image, mount_dir, options.steering_animation, wheel_bridge_setting(RIG_WHEEL_ROTATION),
                           wheel_bridge_setting(RIG_WHEEL_CURVE));
         }
         notify_set_enabled(options.notifications);

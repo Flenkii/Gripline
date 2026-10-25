@@ -1185,29 +1185,36 @@ static unsigned char *steering_gr2(const unsigned char *src, size_t src_length, 
     }
     *why = "no steering wheel bone";
     if (track == UINT32_MAX) goto done;
-    double q0[4], q1[4];
+    /* turning: the original wheel turns, it gets the new curve. Otherwise its curve stays (moved into
+       the first part like the driver) and only the hidden part is added. */
+    double q0[4], q1[4], qc[4] = {0, 0, 0, 1}, axis[3] = {0, 0, 1}, ang0 = 0;
+    int turning = 0;
     uint32_t vt = gr2_p(&g, track + track_oc);
-    *why = "the steering wheel does not turn in the original";
-    if (vt == UINT32_MAX || !curve_ends(&g, vt, gr2_p(&g, track + track_oc + P), q0, q1)) goto done;
-    double mid[4], qc[4], ln = 0;
-    for (int k = 0; k < 4; ++k) {
-        mid[k] = (q0[k] + q1[k]) / 2;
-        ln += mid[k] * mid[k];
+    if (vt != UINT32_MAX && curve_ends(&g, vt, gr2_p(&g, track + track_oc + P), q0, q1)) {
+        double mid[4], ln = 0;
+        for (int k = 0; k < 4; ++k) {
+            mid[k] = (q0[k] + q1[k]) / 2;
+            ln += mid[k] * mid[k];
+        }
+        ln = dsqrt(ln);
+        if (ln >= 1e-6) {
+            for (int k = 0; k < 4; ++k) qc[k] = mid[k] / ln;
+            double inv[4] = {-qc[0], -qc[1], -qc[2], qc[3]}, rel[4];
+            qmul(q0, inv, rel);
+            if (rel[3] < 0)
+                for (int k = 0; k < 4; ++k) rel[k] = -rel[k];
+            double w = rel[3] > 1 ? 1 : (rel[3] < -1 ? -1 : rel[3]);
+            double s0 = 1 - w * w;
+            ang0 = 2 * dacos(w);
+            s0 = dsqrt(s0 > 1e-12 ? s0 : 1e-12);
+            axis[0] = rel[0] / s0;
+            axis[1] = rel[1] / s0;
+            axis[2] = rel[2] / s0;
+            turning = ang0 * 180.0 / PI >= 5;
+        }
     }
-    ln = dsqrt(ln);
-    *why = "unexpected curve";
-    if (ln < 1e-6) goto done;
-    for (int k = 0; k < 4; ++k) qc[k] = mid[k] / ln;
-    double inv[4] = {-qc[0], -qc[1], -qc[2], qc[3]}, rel[4];
-    qmul(q0, inv, rel);
-    if (rel[3] < 0)
-        for (int k = 0; k < 4; ++k) rel[k] = -rel[k];
-    double w = rel[3] > 1 ? 1 : (rel[3] < -1 ? -1 : rel[3]);
-    double ang0 = 2 * dacos(w), s0 = 1 - w * w;
-    s0 = dsqrt(s0 > 1e-12 ? s0 : 1e-12);
-    double axis[3] = {rel[0] / s0, rel[1] / s0, rel[2] / s0};
-    *why = "the steering wheel hardly turns in the original";
-    if (ang0 * 180.0 / PI < 5) goto done;
+    /* maxdeg 0: as far as the original turns (no full steering animation) */
+    double degrees = maxdeg > 0 ? maxdeg : ang0 * 180.0 / PI;
     Member am;
     uint32_t ao = gr2_member(&g, rtd, "Animations", &am);
     *why = "no animation";
@@ -1231,7 +1238,7 @@ static unsigned char *steering_gr2(const unsigned char *src, size_t src_length, 
         const char *curves[3] = {"OrientationCurve", "PositionCurve", "ScaleShearCurve"};
         for (uint32_t k = 0; es && k < count; ++k) {
             uint32_t e = array + k * es;
-            if (e == track) continue;
+            if (e == track && turning) continue;
             for (int c = 0; c < 3; ++c) {
                 uint32_t co = gr2_member(&g, ttm.sub, curves[c], NULL);
                 if (co != UINT32_MAX) squeeze_curve(&g, gr2_p(&g, e + co), gr2_p(&g, e + co + P), squeezed, &squeezed_count);
@@ -1281,36 +1288,39 @@ static unsigned char *steering_gr2(const unsigned char *src, size_t src_length, 
     } else if (!gr2_sec_of(&g, dak_td, &dak_section, &dak_offset)) {
         goto done;
     }
-    bytes_align(&sec0, 8);
-    uint32_t obj = (uint32_t)sec0.length;
     unsigned char head[4] = {1, 1, 0, 0};
-    bytes_put(&sec0, head, 4);
-    bytes_u32(&sec0, SAMPLES);
-    bytes_put(&sec0, NULL, P);
-    bytes_u32(&sec0, SAMPLES * 4);
-    bytes_put(&sec0, NULL, P);
-    bytes_align(&sec0, 8);
-    uint32_t kn = (uint32_t)sec0.length;
-    for (int i = 0; i < SAMPLES; ++i) {
-        double part = (double)(i % HALF_SAMPLES) / (HALF_SAMPLES - 1);
-        float k = (float)(dur * ((i < HALF_SAMPLES ? 0.0 : 1.0 - TURN_SPLIT) + TURN_SPLIT * part));
-        bytes_put(&sec0, &k, 4);
-    }
-    bytes_align(&sec0, 8);
-    uint32_t cn = (uint32_t)sec0.length;
-    for (int i = 0; i < SAMPLES; ++i) {
-        double u = 1 - 2 * (double)(i % HALF_SAMPLES) / (HALF_SAMPLES - 1);
-        if (curve > 1.0) {
-            double a = u < 0 ? -u : u;
-            double m = 1 - dpow(1 - (a < 1.0 ? a : 1.0), 1.0 / curve);
-            u = u < 0 ? -m : m;
+    uint32_t obj = 0, kn = 0, cn = 0;
+    if (turning) {
+        bytes_align(&sec0, 8);
+        obj = (uint32_t)sec0.length;
+        bytes_put(&sec0, head, 4);
+        bytes_u32(&sec0, SAMPLES);
+        bytes_put(&sec0, NULL, P);
+        bytes_u32(&sec0, SAMPLES * 4);
+        bytes_put(&sec0, NULL, P);
+        bytes_align(&sec0, 8);
+        kn = (uint32_t)sec0.length;
+        for (int i = 0; i < SAMPLES; ++i) {
+            double part = (double)(i % HALF_SAMPLES) / (HALF_SAMPLES - 1);
+            float k = (float)(dur * ((i < HALF_SAMPLES ? 0.0 : 1.0 - TURN_SPLIT) + TURN_SPLIT * part));
+            bytes_put(&sec0, &k, 4);
         }
-        double th = maxdeg * PI / 180.0 * u, s = dsin(th / 2);
-        double r[4] = {axis[0] * s, axis[1] * s, axis[2] * s, dcos(th / 2)}, q[4];
-        qmul(r, qc, q);
-        for (int k = 0; k < 4; ++k) {
-            float f = (float)q[k];
-            bytes_put(&sec0, &f, 4);
+        bytes_align(&sec0, 8);
+        cn = (uint32_t)sec0.length;
+        for (int i = 0; i < SAMPLES; ++i) {
+            double u = 1 - 2 * (double)(i % HALF_SAMPLES) / (HALF_SAMPLES - 1);
+            if (curve > 1.0) {
+                double a = u < 0 ? -u : u;
+                double m = 1 - dpow(1 - (a < 1.0 ? a : 1.0), 1.0 / curve);
+                u = u < 0 ? -m : m;
+            }
+            double th = degrees * PI / 180.0 * u, s = dsin(th / 2);
+            double r[4] = {axis[0] * s, axis[1] * s, axis[2] * s, dcos(th / 2)}, q[4];
+            qmul(r, qc, q);
+            for (int k = 0; k < 4; ++k) {
+                float f = (float)q[k];
+                bytes_put(&sec0, &f, 4);
+            }
         }
     }
     /* scale of the wheel: 1 in the first part, almost 0 in the second (3x3 matrix per knot) */
@@ -1332,11 +1342,14 @@ static unsigned char *steering_gr2(const unsigned char *src, size_t src_length, 
         for (int cell = 0; cell < 9; ++cell) bytes_put(&sec0, cell % 4 == 0 ? &v : &zero, 4);
     }
     *why = "pointer not found";
-    if (sec0.failed || !point_curve(&g, track + track_oc, dak_section, dak_offset, obj, relocs0, relocs0_count) ||
+    if (sec0.failed ||
+        (turning && !point_curve(&g, track + track_oc, dak_section, dak_offset, obj, relocs0, relocs0_count)) ||
         !point_curve(&g, track + track_ss, dak_section, dak_offset, sobj, relocs0, relocs0_count))
         goto done;
-    reloc_add(&relocs0, &relocs0_count, &relocs0_capacity, obj + 8, 0, kn);
-    reloc_add(&relocs0, &relocs0_count, &relocs0_capacity, obj + 8 + P + 4, 0, cn);
+    if (turning) {
+        reloc_add(&relocs0, &relocs0_count, &relocs0_capacity, obj + 8, 0, kn);
+        reloc_add(&relocs0, &relocs0_count, &relocs0_capacity, obj + 8 + P + 4, 0, cn);
+    }
     reloc_add(&relocs0, &relocs0_count, &relocs0_capacity, sobj + 8, 0, skn);
     reloc_add(&relocs0, &relocs0_count, &relocs0_capacity, sobj + 8 + P + 4, 0, scn);
     /* write: header, sections uncompressed, relocations, marshalling */
@@ -1572,7 +1585,7 @@ static int make_files(void) {
     static wchar_t root[PATH_CAPACITY], media[PATH_CAPACITY], path[PATH_CAPACITY], pattern[PATH_CAPACITY];
     static char manifest[256], existing[256];
     if (!wjoin(root, mount_path, COCKPIT_FOLDER) || !wjoin(media, mount_path, L"media")) return 0;
-    format_manifest(manifest, sizeof(manifest), want_rotation, want_curve);
+    format_manifest(manifest, sizeof(manifest), want_rotation, want_rotation ? want_curve : 0);
     if (!wjoin(path, root, L"gripline_cockpit.txt")) return 0;
     if (read_small(path, existing, sizeof(existing)) && same_text(existing, manifest)) {
         log_append("COCKPIT: steering animation files are up to date.\r\n");
@@ -1581,11 +1594,13 @@ static int make_files(void) {
     log_append("COCKPIT: making the steering animation files (once per rotation) ...\r\n");
     ULONGLONG started = GetTickCount64();
     DeleteFileW(path); /* half-made folders are never taken as ready */
-    double maxdeg = want_rotation / 2.0, curve = want_curve / 10.0;
+    /* want_rotation 0: no full steering animation, the wheel turns as in the original and the hands
+       stay; the files are still made for the second cockpit view */
+    double maxdeg = want_rotation / 2.0, curve = want_rotation ? want_curve / 10.0 : 1.0;
     int cars = 0, hands = 0, skipped = 0;
     /* driver models */
     static const char *const drivers[] = {"default", "defaultRace", "suited", "unsuited", "stig"};
-    for (unsigned i = 0; i < ARRAY_COUNT(drivers); ++i) {
+    for (unsigned i = 0; want_rotation && i < ARRAY_COUNT(drivers); ++i) {
         static char rel[96];
         size_t n = 0;
         for (const char *s = "drivers\\"; *s; ++s) rel[n++] = *s;
@@ -1695,13 +1710,21 @@ static DWORD WINAPI maker_thread(LPVOID unused) {
     return 0;
 }
 
-void cockpit_start(unsigned char *game_image, const wchar_t *mount_dir, int enabled, int rotation_degrees,
+static int turn_site_ok(void);
+static int prepare_page(void);
+
+void cockpit_start(unsigned char *game_image, const wchar_t *mount_dir, int full, int rotation_degrees,
                    int curve_x10) {
-    if (!enabled || !mount_dir || state != 0) return;
+    if (!mount_dir || state != 0) return;
     game = game_image;
-    if (wlen(mount_dir) + 32 >= PATH_CAPACITY) return;
+    /* the files only work together with the Turn hook: without it the original files stay */
+    if (wlen(mount_dir) + 32 >= PATH_CAPACITY || !turn_site_ok() || !prepare_page()) {
+        log_append("COCKPIT: game code differs - original cockpit animation.\r\n");
+        InterlockedExchange(&state, 3);
+        return;
+    }
     memory_copy(mount_path, mount_dir, (wlen(mount_dir) + 1) * 2);
-    want_rotation = rotation_degrees < 180 ? 180 : (rotation_degrees > 2520 ? 2520 : rotation_degrees);
+    want_rotation = !full ? 0 : rotation_degrees < 180 ? 180 : (rotation_degrees > 2520 ? 2520 : rotation_degrees);
     want_curve = curve_x10 < 10 ? 10 : (curve_x10 > 60 ? 60 : curve_x10);
     InterlockedExchange(&state, 1);
     HANDLE thread = CreateThread(NULL, 0, maker_thread, NULL, 0, NULL);
@@ -1745,12 +1768,17 @@ static float turn_value(float value) {
     return turn * 2.0f - 0.999f;
 }
 
+/* call [rax+0x160]; vaddss xmm1, xmm0, xmm9 */
+static const unsigned char turn_original[10] = {0xff, 0x90, 0x60, 0x01, 0x00, 0x00, 0xc4, 0xc1, 0x7a, 0x58};
+
+static int turn_site_ok(void) {
+    return game && memory_equal(game + RVA_TURN_CALL, turn_original, sizeof(turn_original));
+}
+
 /* call [rax+0x160] -> call stub: the original call, then turn_value */
 static int hook_turn(unsigned char *page) {
-    /* call [rax+0x160]; vaddss xmm1, xmm0, xmm9 */
-    static const unsigned char original[10] = {0xff, 0x90, 0x60, 0x01, 0x00, 0x00, 0xc4, 0xc1, 0x7a, 0x58};
     unsigned char *site = game + RVA_TURN_CALL;
-    if (!memory_equal(site, original, sizeof(original))) return 0;
+    if (!turn_site_ok()) return 0;
     unsigned char stub[32] = {0x48, 0x83, 0xec, 0x28, 0xff, 0x90, 0x60, 0x01, 0x00, 0x00, 0x48, 0xb8};
     uint64_t function = (uint64_t)(uintptr_t)turn_value;
     memory_copy(stub + 12, &function, 8);
@@ -1768,12 +1796,15 @@ static int hook_turn(unsigned char *page) {
     return 1;
 }
 
-int cockpit_patch_game(void) {
+/* page near the game: the steering range constant at +0, the Turn stub at +0x40 */
+static unsigned char *patch_page;
+
+/* full steering animation: the game's +-90 degrees become +-rotation/2 (page + 0) */
+static int patch_range(void) {
     static const struct {
         unsigned rva;
         unsigned char op[4];
     } sites[2] = {{RVA_STEER_CLAMP, {0xc5, 0xfa, 0x10, 0x3d}}, {RVA_STEER_NORMAL, {0xc5, 0xf2, 0x5e, 0x05}}};
-    if (!game || InterlockedCompareExchange(&patched, 1, 0) != 0) return 0;
     for (int i = 0; i < 2; ++i) {
         const unsigned char *site = game + sites[i].rva;
         int32_t disp;
@@ -1783,22 +1814,12 @@ int cockpit_patch_game(void) {
             return 0;
         }
     }
-    unsigned char *page = memory_alloc_near(game, 0x1000);
-    if (!page) {
-        log_append("COCKPIT: no memory near the game - the wheel keeps the game's steering range.\r\n");
-        return 0;
-    }
     float limit = (float)(want_rotation / 2.0 * PI / 180.0);
-    memory_copy(page, &limit, sizeof(limit));
-    int turn_hooked = hook_turn(page + 0x40);
+    memory_copy(patch_page, &limit, sizeof(limit));
     DWORD old;
-    VirtualProtect(page, 0x1000, PAGE_EXECUTE_READ, &old);
-    FlushInstructionCache(GetCurrentProcess(), page, 0x1000);
-    log_append(turn_hooked ? "COCKPIT: second cockpit view hides the steering wheel.\r\n"
-                           : "COCKPIT: game code differs - the second cockpit view keeps the steering wheel.\r\n");
     for (int i = 0; i < 2; ++i) {
         unsigned char *at = game + sites[i].rva + 4;
-        int32_t disp = (int32_t)(page - (at + 4));
+        int32_t disp = (int32_t)(patch_page - (at + 4));
         if (!VirtualProtect(at, 4, PAGE_EXECUTE_READWRITE, &old)) return 0;
         memory_copy(at, &disp, 4);
         VirtualProtect(at, 4, old, &old);
@@ -1806,6 +1827,24 @@ int cockpit_patch_game(void) {
     FlushInstructionCache(GetCurrentProcess(), game + RVA_STEER_NORMAL, RVA_STEER_CLAMP + 8 - RVA_STEER_NORMAL);
     log_number("COCKPIT: steering range set to +-", want_rotation / 2, " degrees (1:1 with the wheel).");
     return 1;
+}
+
+static int prepare_page(void) {
+    if (!patch_page) patch_page = memory_alloc_near(game, 0x1000);
+    return patch_page != NULL;
+}
+
+/* After the folder is mounted. The Turn hook must go in: the files hold two parts. */
+int cockpit_patch_game(void) {
+    if (!game || !patch_page || InterlockedCompareExchange(&patched, 1, 0) != 0) return 0;
+    int turn_hooked = hook_turn(patch_page + 0x40);
+    log_append(turn_hooked ? "COCKPIT: second cockpit view hides the steering wheel.\r\n"
+                           : "COCKPIT: game code differs - the second cockpit view keeps the steering wheel.\r\n");
+    int range = want_rotation > 0 && patch_range();
+    DWORD old;
+    VirtualProtect(patch_page, 0x1000, PAGE_EXECUTE_READ, &old);
+    FlushInstructionCache(GetCurrentProcess(), patch_page, 0x1000);
+    return turn_hooked || range;
 }
 
 #ifdef FH2_TWEAKS_TEST
@@ -1817,6 +1856,8 @@ __declspec(dllexport) int Fh2TestCockpitPatch(unsigned char *game_image, int rot
     game = game_image;
     want_rotation = rotation;
     InterlockedExchange(&patched, 0);
+    patch_page = NULL;
+    if (!prepare_page()) return 0;
     return cockpit_patch_game();
 }
 

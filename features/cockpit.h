@@ -13,8 +13,11 @@
    which Gripline mounts over game:\media while the option is on. The game files are never
    changed; switching the option off simply leaves the folder unmounted. */
 
-/* Game start: makes the files if needed (own thread). mount_dir = the game's Mount folder. */
-void cockpit_start(unsigned char *game_image, const wchar_t *mount_dir, int enabled, int rotation_degrees,
+/* Game start: makes the files if needed (own thread). mount_dir = the game's Mount folder.
+   The files are made in every case: they also hold the part of the animation without the wheel for the
+   second cockpit view (cockpit_view.h). full = 0 (no full steering animation): the wheel turns as in
+   the original and the hands stay. */
+void cockpit_start(unsigned char *game_image, const wchar_t *mount_dir, int full, int rotation_degrees,
                    int curve_x10);
 
 /* For the mount: 1 = mount the folder, 0 = not. Waits (up to 60 s) until the files are made. */

@@ -18,6 +18,58 @@ def check(cond, text):
         fails.append(text)
 
 
+def spindle_curves(data):
+    """quaternions of the steering wheel curve, knots and the scale curve (knots, diagonal) of a GR2"""
+    g = L.GR2(data)
+    P = g.P
+    rtd = g.base[g.root_type[0]] + g.root_type[1]
+    rob = g.base[g.root_obj[0]] + g.root_obj[1]
+    o, _, tg_td = g.member(rtd, 'TrackGroups')
+    tg = g.p(g.p(rob + o + 4))
+    oo, _, ss = g.member(tg_td, 'TransformTracks')
+    count, array, es = struct.unpack_from('<I', g.buf, tg + oo)[0], g.p(tg + oo + 4), g.size_of(ss)
+    result = {}
+    for k in range(count):
+        at = array + k * es
+        name = g.cstr(g.p(at))
+        for curve in ('OrientationCurve', 'ScaleShearCurve'):
+            co, _, _ = g.member(ss, curve)
+            vt, obj = g.p(at + co), g.p(at + co + P)
+            kind = g.typedef(vt)[0][1]
+            if kind != 'CurveDataHeader_DaK32fC32f':
+                result[(name, curve)] = (kind, None, None)
+                continue
+            ko, _, _ = g.member(vt, 'Knots')
+            cc, _, _ = g.member(vt, 'Controls')
+            nk, nc = struct.unpack_from('<I', g.buf, obj + ko)[0], struct.unpack_from('<I', g.buf, obj + cc)[0]
+            knots = struct.unpack_from('<%df' % nk, g.buf, g.p(obj + ko + 4))
+            controls = struct.unpack_from('<%df' % nc, g.buf, g.p(obj + cc + 4))
+            result[(name, curve)] = (kind, knots, controls)
+    return result
+
+
+def check_two_parts(got, ref, label):
+    """the new file: [0, 0.48] the script's curve (every second sample), [0.52, 1] the same with the wheel
+    scaled to almost 0; the driver tracks squeezed into [0, 0.48]"""
+    if not got:
+        check(False, label + ': keine Datei')
+        return
+    ours, script = spindle_curves(got), spindle_curves(ref)
+    key = ('boneSteeringWheelSpindle', 'OrientationCurve')
+    _, knots, q = ours[key]
+    _, rknots, rq = script[key]
+    dur = rknots[-1]
+    half = len(knots) // 2
+    worst = max(abs(q[4 * j + c] - rq[8 * j + c]) for j in range(half) for c in range(4))
+    same = all(abs(q[4 * (half + j) + c] - q[4 * j + c]) < 1e-6 for j in range(half) for c in range(4))
+    check(len(knots) == 242 and abs(knots[half - 1] - 0.48 * dur) < 1e-4 and abs(knots[half] - 0.52 * dur) < 1e-4,
+          f'{label}: Lenkrad-Kurve in zwei Teilen (0..0.48, 0.52..1)')
+    check(worst < 1e-5 and same, f'{label}: beide Teile drehen wie das Skript (Abw. {worst:.2e})')
+    kind, sk, sc = ours[('boneSteeringWheelSpindle', 'ScaleShearCurve')]
+    check(kind == 'CurveDataHeader_DaK32fC32f' and sc[0::9][:2] == (1.0, 1.0) and max(sc[0::9][2:]) < 0.001,
+          f'{label}: Lenkrad-Größe 1 im ersten Teil, ~0 im zweiten')
+
+
 here = os.path.dirname(os.path.abspath(__file__))
 spec = importlib.util.spec_from_file_location('L', os.path.join(here, '..', 'tools', 'fh2_lenkrad.py'))
 L = importlib.util.module_from_spec(spec)
@@ -67,22 +119,12 @@ if not DATA:
 else:
     print('Lenkrad-Animation (MER_SLR_05):')
     src = zipfile.ZipFile(os.path.join(DATA, 'media/cars/MER_SLR_05.zip')).read('scene/Drivers/default/leftRightTurn.gr2')
-    for deg, curve in ((450, 1.0), (450, 2.5), (1260, 1.0)):
-        ref, info = L.steering_gr2(src, deg, curve=curve)
-        out = e.alloc(len(ref) * 2)
-        n = e.call('Fh2TestCockpitGr2', put(src), len(src), deg, int(curve * 10), out, len(ref) * 2)
+    for deg, curve in ((450, 1.0), (450, 2.5), (1260, 1.0), (0, 1.0)):
+        ref, info = L.steering_gr2(src, deg or 90, curve=curve)
+        out = e.alloc(len(ref) * 3)
+        n = e.call('Fh2TestCockpitGr2', put(src), len(src), deg, int(curve * 10), out, len(ref) * 3)
         got = bytes(e.mu.mem_read(out, n)) if n else b''
-        same_len = n == len(ref)
-        diff = 0
-        if same_len:
-            for i in range(0, len(ref) - 3, 4):
-                if got[i:i + 4] != ref[i:i + 4] and i not in (0x28,):
-                    a, b = struct.unpack('<f', got[i:i + 4])[0], struct.unpack('<f', ref[i:i + 4])[0]
-                    if not (math.isfinite(a) and abs(a - b) < 1e-6):
-                        diff += 1
-        check(same_len and diff == 0, f'{deg} Grad, Kurve {curve}: {n} Bytes wie das Skript ({len(ref)}), {diff} echte Abweichungen')
-        g = L.GR2(got) if same_len else None
-        check(g is not None, '  Ergebnis lässt sich als GR2 wieder lesen')
+        check_two_parts(got, ref, f'{deg or "Original"} Grad, Kurve {curve}')
     print('Hände ausblenden:')
     for dm in ('default', 'unsuited'):
         m = zipfile.ZipFile(os.path.join(DATA, f'media/drivers/{dm}.zip')).read('driver.modelbin')
@@ -140,13 +182,19 @@ if DATA:
                     'drivers/unsuited/driver.modelbin', 'gripline_cockpit.txt'], f'Dateien: {files}')
     ref, _ = L.steering_gr2(src, 450, curve=1.0)
     got = open(os.path.join(out, 'cars/MER_SLR_05/scene/Drivers/default/leftRightTurn.gr2'), 'rb').read()
-    check(len(got) == len(ref), 'SLR-Animation wie das Skript (900 Grad)')
+    check_two_parts(got, ref, 'make_files SLR (900 Grad)')
     check('Rotation=900' in open(os.path.join(out, 'gripline_cockpit.txt')).read(), 'Manifest mit Drehwinkel')
     t0 = os.path.getmtime(os.path.join(out, 'drivers/unsuited/driver.modelbin'))
     check(c.call('Fh2TestCockpitMake', c.put_wstr('C:\\test\\Mount'), 900, 10) == 1 and
           os.path.getmtime(os.path.join(out, 'drivers/unsuited/driver.modelbin')) == t0, 'zweiter Start: nichts neu erzeugt')
     check(c.call('Fh2TestCockpitMake', c.put_wstr('C:\\test\\Mount'), 540, 10) == 1 and
           'Rotation=540' in open(os.path.join(out, 'gripline_cockpit.txt')).read(), 'anderer Drehwinkel: neu erzeugt')
+    shutil.rmtree(out)
+    check(c.call('Fh2TestCockpitMake', c.put_wstr('C:\\test\\Mount'), 0, 10) == 1 and
+          'Rotation=0' in open(os.path.join(out, 'gripline_cockpit.txt')).read() and
+          not os.path.exists(os.path.join(out, 'drivers')) and
+          os.path.exists(os.path.join(out, 'cars/MER_SLR_05/scene/Drivers/default/leftRightTurn.gr2')),
+          'ohne volle Lenkrad-Animation: Lenkrad-Dateien trotzdem, Hände bleiben')
 
 print('%d checks, %d failed' % (checks[0], len(fails)))
 sys.exit(1 if fails else 0)

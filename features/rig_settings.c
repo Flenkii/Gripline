@@ -298,7 +298,7 @@ static const RigText german[RIG_SETTING_COUNT] = {
     [RIG_GRIP_VIEW_FORWARD] = {"Cockpit-Ansicht 2: vor (cm)",
                             "Zweite Cockpit-Ansicht wie in FH5: so viele Zentimeter weiter vorne am "
                             "Tacho. Kamera-Taste: Cockpit, Cockpit 2, nächste Kamera (auch V oder eine freie "
-                            "Lenkradtaste). Das Lenkrad verschwindet dort, wenn die volle Lenkrad-Animation an ist. "
+                            "Lenkradtaste). Das Lenkrad verschwindet dort. "
                             "Wirkt sofort."},
     [RIG_GRIP_VIEW_UP] = {"Cockpit-Ansicht 2: hoch (cm)",
                           "So viele Zentimeter sitzt du in der zweiten Cockpit-Ansicht höher "
@@ -420,7 +420,7 @@ static const RigText english[RIG_SETTING_COUNT] = {
     [RIG_GRIP_VIEW_FORWARD] = {"Cockpit View 2: Forward (cm)",
                             "Second cockpit view like in FH5: this many centimetres closer to the "
                             "gauges. Camera button: cockpit, cockpit 2, next camera (also V or a free wheel button). "
-                            "The steering wheel disappears there when the full steering animation is on. "
+                            "The steering wheel disappears there. "
                             "Applies immediately."},
     [RIG_GRIP_VIEW_UP] = {"Cockpit View 2: Up (cm)",
                           "You sit this many centimetres higher in the second cockpit view "
