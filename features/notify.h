@@ -1,6 +1,8 @@
 #ifndef FH2_NOTIFY_H
 #define FH2_NOTIFY_H
 
+#include <wchar.h>
+
 /* Gripline notifications: a small card with the Gripline logo at the top right of the game
    picture (drawn into the game's own swap chain, so it also shows in fullscreen). Fades out
    after a few seconds, several stack, never takes the focus. Every message also goes to
@@ -32,5 +34,15 @@ int notify_enabled(void);
 
 /* Creator mode (creator_mode.h): while hidden no card is drawn; new cards wait and show afterwards. */
 void notify_set_hidden(int hidden);
+
+/* Key list panel (keyboard_pad.c, key Keybinds): a tall card at the right edge of the picture,
+   one row per key, shown until it is switched off; cards move to its left meanwhile. It is only
+   drawn, the game keeps every input. count 0 hides it. Safe from any thread. */
+#define NOTIFY_PANEL_ROWS 44
+typedef struct {
+    wchar_t label[32], keys[32];
+} NotifyPanelRow;
+void notify_panel_set(const wchar_t *title, const NotifyPanelRow *rows, unsigned count);
+int notify_panel_visible(void);
 
 #endif

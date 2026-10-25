@@ -8,6 +8,8 @@
 #include "nitro_link.h"
 #include "cockpit_view.h"
 #include "creator_mode.h"
+#include "notify.h"
+#include "video_options_text.h"
 
 #define KEY_INI L"FH2_Keyboard.ini"
 #define MAX_PADS 8
@@ -73,6 +75,7 @@ enum {
     KIND_NITRO,  /* NitroSystem nitro button, see nitro_link.h */
     KIND_COCKPIT_VIEW, /* second cockpit view on/off, see cockpit_view.h */
     KIND_CREATOR, /* creator mode on/off, see creator_mode.h */
+    KIND_KEYLIST, /* key list panel on/off (notify.h), the game keeps the key */
 };
 
 typedef struct {
@@ -111,6 +114,7 @@ static Binding bindings[] = {
     {L"Nitro", KIND_NITRO, 0, L"N", {0}},
     {L"CockpitView", KIND_COCKPIT_VIEW, 0, L"V", {0}},
     {L"CreatorMode", KIND_CREATOR, 0, L"H", {0}},
+    {L"Keybinds", KIND_KEYLIST, 0, L"F1", {0}},
     {L"Lights", KIND_FIXED, IN_RS, L"L", {0}},
     {L"Map", KIND_FIXED, IN_VIEW, L"M", {0}},
     {L"Pause", KIND_FIXED, IN_MENU, L"Esc", {0}},
@@ -231,7 +235,8 @@ static const char default_ini[] =
     "; Arrow keys: in menus = left stick, while driving = camera (right stick).\r\n"
     "; Nitro: only with the NitroSystem mod (presses its NitroButton).\r\n"
     "; CockpitView: second cockpit view on/off (close to the dashboard, set in GRIPLINE).\r\n"
-    "; CreatorMode: hides HUD, minimap and Gripline cards for clean recordings, again = back.\r\n";
+    "; CreatorMode: hides HUD, minimap and Gripline cards for clean recordings, again = back.\r\n"
+    "; Keybinds: shows this key list at the right of the picture, again = off (the game keeps running).\r\n";
 
 /* Default file text including the key bindings (also used by ini_migrate.c). Returns the
    length, 0 if it does not fit. */
@@ -264,6 +269,86 @@ static void write_default_ini(void) {
     CloseHandle(file);
 }
 
+/* ------------------------------------------------------------------ key list panel */
+
+static const wchar_t *const labels_german[ARRAY_COUNT(bindings)] = {
+    L"Gas", L"Bremse", L"Links lenken", L"Rechts lenken", L"Handbremse", L"Hochschalten", L"Runterschalten",
+    L"Kupplung", L"Kamera wechseln", L"Zurückspulen", L"Telemetrie", L"Fotomodus", L"Radio: zurück",
+    L"Radio: weiter", L"Blick zurück", L"Blick links", L"Blick rechts", L"Nitro (NitroSystem)",
+    L"Cockpit-Ansicht 2", L"Creator-Modus", L"Tastenliste ein/aus", L"Licht", L"Karte", L"Pause",
+    L"Bestätigen (A)", L"Zurück (B)", L"Taste X", L"Taste Y", L"Reiter links (LB)", L"Reiter rechts (RB)",
+    L"Menü/Kamera hoch", L"Menü/Kamera runter", L"Menü/Kamera links", L"Menü/Kamera rechts",
+    L"Steuerkreuz hoch", L"Steuerkreuz runter", L"Steuerkreuz links", L"Steuerkreuz rechts"};
+static const wchar_t *const labels_english[ARRAY_COUNT(bindings)] = {
+    L"Throttle", L"Brake", L"Steer left", L"Steer right", L"Handbrake", L"Shift up", L"Shift down",
+    L"Clutch", L"Change camera", L"Rewind", L"Telemetry", L"Photo mode", L"Radio: previous",
+    L"Radio: next", L"Look back", L"Look left", L"Look right", L"Nitro (NitroSystem)",
+    L"Cockpit view 2", L"Creator mode", L"Key list on/off", L"Lights", L"Map", L"Pause",
+    L"Confirm (A)", L"Back (B)", L"Button X", L"Button Y", L"Tab left (LB)", L"Tab right (RB)",
+    L"Menu/camera up", L"Menu/camera down", L"Menu/camera left", L"Menu/camera right",
+    L"D-pad up", L"D-pad down", L"D-pad left", L"D-pad right"};
+_Static_assert(ARRAY_COUNT(bindings) + 1 <= NOTIFY_PANEL_ROWS, "key list rows");
+
+static unsigned char *game_base;
+static wchar_t key_texts[ARRAY_COUNT(bindings)][32]; /* keys as written in the INI, "" = none */
+static volatile LONG key_list_held, key_list_on;
+
+/* "C,Num2" -> "C, Num2"; empty when no key of the binding is known */
+static void key_list_text(unsigned index, const wchar_t *text) {
+    wchar_t *out = key_texts[index];
+    unsigned n = 0;
+    if (bindings[index].vk[0]) {
+        for (const wchar_t *p = text; *p && n < 28; ++p) {
+            if (*p == L' ') continue;
+            if (*p == L',' || *p == L';') {
+                out[n++] = L',';
+                out[n++] = L' ';
+            } else {
+                out[n++] = *p;
+            }
+        }
+    }
+    out[n] = 0;
+}
+
+static void copy_text(wchar_t *out, const wchar_t *text, unsigned capacity) {
+    unsigned n = 0;
+    while (text[n] && n + 1 < capacity) {
+        out[n] = text[n];
+        ++n;
+    }
+    out[n] = 0;
+}
+
+static void key_list_show(void) {
+    static NotifyPanelRow rows[NOTIFY_PANEL_ROWS];
+    int german = video_options_text_is_german(game_base);
+    unsigned count = 0;
+    for (unsigned i = 0; i < ARRAY_COUNT(bindings); ++i) {
+        if (!key_texts[i][0]) continue;
+        copy_text(rows[count].label, german ? labels_german[i] : labels_english[i], 32);
+        copy_text(rows[count].keys, key_texts[i], 32);
+        ++count;
+    }
+    copy_text(rows[count].label, L"Autodrive", 32); /* fixed key, game_input.c */
+    copy_text(rows[count].keys, L"F2", 32);
+    ++count;
+    notify_panel_set(german ? L"Tastenbelegung" : L"Key Bindings", rows, count);
+}
+
+static void key_list_input(int pressed) {
+    LONG before = InterlockedExchange(&key_list_held, pressed ? 1 : 0);
+    if (!pressed || before) return;
+    LONG on = !key_list_on;
+    InterlockedExchange(&key_list_on, on);
+    if (on) {
+        key_list_show();
+    } else {
+        notify_panel_set(NULL, NULL, 0);
+    }
+    log_append(on ? "KEYBOARD: key list shown\r\n" : "KEYBOARD: key list hidden\r\n");
+}
+
 static void settings_load(void) {
     if (GetFileAttributesW(ini_path) == INVALID_FILE_ATTRIBUTES) write_default_ini();
     for (unsigned id = 0; id < KEY_SETTING_COUNT; ++id) {
@@ -275,6 +360,7 @@ static void settings_load(void) {
         wchar_t text[96];
         GetPrivateProfileStringW(L"Keyboard", bindings[i].key, bindings[i].defaults, text, 96, ini_path);
         parse_keys(&bindings[i], text);
+        key_list_text(i, text);
     }
     loaded = 1;
 }
@@ -330,7 +416,6 @@ static int game_has_focus(void) {
 /* While the simulation runs (free roam, races) the arrows move the camera; in menus, the pause
    menu, loading screens and before the world is loaded they move the left stick. Same check
    as autodrive: player manager -> simulation -> paused flag. */
-static unsigned char *game_base;
 
 static int simulation_running(void) {
     void *manager, *simulation;
@@ -444,6 +529,9 @@ static void keyboard_reading(PadReading *r) {
                 break;
             case KIND_CREATOR:
                 creator_mode_input(CREATOR_KEYBOARD, pressed);
+                break;
+            case KIND_KEYLIST:
+                key_list_input(pressed);
                 break;
             case KIND_ACTION: {
                 int input = controller_action_input(b->target);

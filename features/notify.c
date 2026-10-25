@@ -41,6 +41,11 @@ static unsigned card_count, next_id = 1;
 static volatile LONG cards_changed;
 static volatile LONG enabled = 1, broken, hidden;
 
+static wchar_t panel_title[TEXT_CAPACITY];
+static NotifyPanelRow panel_rows[NOTIFY_PANEL_ROWS];
+static volatile LONG panel_count; /* 0 = panel off */
+static unsigned panel_id; /* changes with every notify_panel_set: the panel is drawn again */
+
 /* ------------------------------------------------------------------ public */
 
 static void utf8_line(const char *text, size_t length, wchar_t *out) {
@@ -158,6 +163,27 @@ int notify_enabled(void) {
     return (int)enabled;
 }
 
+void notify_panel_set(const wchar_t *title, const NotifyPanelRow *rows, unsigned count) {
+    if (count > NOTIFY_PANEL_ROWS) count = NOTIFY_PANEL_ROWS;
+    if (!rows) count = 0;
+    AcquireSRWLockExclusive(&lock);
+    unsigned n = 0;
+    while (title && title[n] && n < TEXT_CAPACITY - 1) {
+        panel_title[n] = title[n];
+        ++n;
+    }
+    panel_title[n] = 0;
+    for (unsigned i = 0; i < count; ++i) panel_rows[i] = rows[i];
+    ++panel_id;
+    InterlockedExchange(&panel_count, (LONG)count);
+    InterlockedExchange(&cards_changed, 1);
+    ReleaseSRWLockExclusive(&lock);
+}
+
+int notify_panel_visible(void) {
+    return panel_count != 0;
+}
+
 /* ------------------------------------------------------------------ GDI card bitmap */
 
 typedef HDC(WINAPI *CreateCompatibleDCFn)(HDC);
@@ -209,6 +235,7 @@ static int gdi_ready(void) {
 /* layout in pixels for the current screen height */
 typedef struct {
     int width, height, gap, margin, radius, icon, pad, bar;
+    int panel_header, panel_row, panel_height; /* key list panel; panel_height = all rows */
 } Layout;
 
 static Layout layout_for(UINT screen_height) {
@@ -224,6 +251,9 @@ static Layout layout_for(UINT screen_height) {
     l.icon = (int)(58 * s);
     l.pad = (int)(14 * s);
     l.bar = (int)(5 * s) > 2 ? (int)(5 * s) : 2;
+    l.panel_header = (int)(60 * s);
+    l.panel_row = (int)(20 * s);
+    l.panel_height = l.panel_header + NOTIFY_PANEL_ROWS * l.panel_row + l.pad;
     return l;
 }
 
@@ -362,6 +392,97 @@ static int draw_cards(const Card *list, unsigned count, const Layout *l, unsigne
     return 1;
 }
 
+/* height in pixels of the key list panel with `count` rows */
+static int panel_pixels(const Layout *l, unsigned count) {
+    return l->panel_header + (int)count * l->panel_row + l->pad;
+}
+
+/* Draws the key list panel into l->panel_height rows (premultiplied BGRA, unused rows clear). */
+static int draw_panel(const wchar_t *title, const NotifyPanelRow *rows, unsigned count, const Layout *l,
+                      unsigned char *pixels, int pitch) {
+    static BITMAPINFO info;
+    void *bits = NULL;
+    int w = l->width, h = panel_pixels(l, count);
+    info.bmiHeader.biSize = sizeof(info.bmiHeader);
+    info.bmiHeader.biWidth = w;
+    info.bmiHeader.biHeight = -h;
+    info.bmiHeader.biPlanes = 1;
+    info.bmiHeader.biBitCount = 32;
+    info.bmiHeader.biCompression = BI_RGB;
+    HDC dc = gdi.CreateCompatibleDC(NULL);
+    if (!dc) return 0;
+    HBITMAP bitmap = gdi.CreateDIBSection(dc, &info, DIB_RGB_COLORS, &bits, NULL, 0);
+    if (!bitmap || !bits) {
+        gdi.DeleteDC(dc);
+        return 0;
+    }
+    HGDIOBJ old_bitmap = gdi.SelectObject(dc, bitmap);
+    unsigned char *px = (unsigned char *)bits;
+    const unsigned char bg[3] = {32, 23, 17};
+    const unsigned char accent[3] = {225, 120, 38};
+    for (int y = 0; y < h; ++y) {
+        unsigned char *row = px + (size_t)y * w * 4;
+        for (int x = 0; x < w; ++x) {
+            const unsigned char *col = x < l->bar ? accent : bg;
+            row[x * 4 + 0] = col[0];
+            row[x * 4 + 1] = col[1];
+            row[x * 4 + 2] = col[2];
+            row[x * 4 + 3] = 0;
+        }
+    }
+    gdi.GdiFlush();
+    float s = (float)l->height / 88.0f;
+    HFONT small_bold = gdi.CreateFontW(-(int)(13 * s), 0, 0, 0, FW_BOLD, 0, 0, 0, DEFAULT_CHARSET, 0, 0,
+                                       ANTIALIASED_QUALITY, 0, L"Segoe UI");
+    HFONT main = gdi.CreateFontW(-(int)(18 * s), 0, 0, 0, FW_SEMIBOLD, 0, 0, 0, DEFAULT_CHARSET, 0, 0,
+                                 ANTIALIASED_QUALITY, 0, L"Segoe UI");
+    HFONT label = gdi.CreateFontW(-(int)(15 * s), 0, 0, 0, FW_NORMAL, 0, 0, 0, DEFAULT_CHARSET, 0, 0,
+                                  ANTIALIASED_QUALITY, 0, L"Segoe UI");
+    HFONT keys = gdi.CreateFontW(-(int)(15 * s), 0, 0, 0, FW_SEMIBOLD, 0, 0, 0, DEFAULT_CHARSET, 0, 0,
+                                 ANTIALIASED_QUALITY, 0, L"Segoe UI");
+    gdi.SetBkMode(dc, TRANSPARENT);
+    int tx = l->bar + l->pad, kx = w * 58 / 100;
+    RECT clip = {tx, 0, w - l->pad, h};
+    HGDIOBJ old_font = gdi.SelectObject(dc, small_bold);
+    gdi.SetTextColor(dc, RGB(110, 185, 255));
+    gdi.ExtTextOutW(dc, tx, (int)(10 * s), ETO_CLIPPED, &clip, L"GRIPLINE", 8, NULL);
+    gdi.SelectObject(dc, main);
+    gdi.SetTextColor(dc, RGB(245, 247, 250));
+    gdi.ExtTextOutW(dc, tx, (int)(28 * s), ETO_CLIPPED, &clip, title, (UINT)text_width_chars(title), NULL);
+    for (unsigned i = 0; i < count; ++i) {
+        int y = l->panel_header + (int)i * l->panel_row;
+        RECT left = {tx, y, kx - l->pad / 2, y + l->panel_row};
+        RECT right = {kx, y, w - l->pad, y + l->panel_row};
+        gdi.SelectObject(dc, label);
+        gdi.SetTextColor(dc, RGB(200, 207, 218));
+        gdi.ExtTextOutW(dc, tx, y, ETO_CLIPPED, &left, rows[i].label, (UINT)text_width_chars(rows[i].label), NULL);
+        gdi.SelectObject(dc, keys);
+        gdi.SetTextColor(dc, RGB(130, 195, 255));
+        gdi.ExtTextOutW(dc, kx, y, ETO_CLIPPED, &right, rows[i].keys, (UINT)text_width_chars(rows[i].keys), NULL);
+    }
+    gdi.SelectObject(dc, old_font);
+    gdi.GdiFlush();
+    for (int y = 0; y < l->panel_height; ++y) {
+        unsigned char *src = px + (size_t)y * w * 4;
+        unsigned char *dst = pixels + (size_t)y * pitch;
+        for (int x = 0; x < w; ++x) {
+            float a = y < h ? 0.92f * card_coverage(x, y, w, h, l->radius) : 0.0f;
+            dst[x * 4 + 0] = y < h ? (unsigned char)(src[x * 4 + 0] * a + 0.5f) : 0;
+            dst[x * 4 + 1] = y < h ? (unsigned char)(src[x * 4 + 1] * a + 0.5f) : 0;
+            dst[x * 4 + 2] = y < h ? (unsigned char)(src[x * 4 + 2] * a + 0.5f) : 0;
+            dst[x * 4 + 3] = (unsigned char)(255.0f * a + 0.5f);
+        }
+    }
+    gdi.SelectObject(dc, old_bitmap);
+    gdi.DeleteObject(small_bold);
+    gdi.DeleteObject(main);
+    gdi.DeleteObject(label);
+    gdi.DeleteObject(keys);
+    gdi.DeleteObject(bitmap);
+    gdi.DeleteDC(dc);
+    return 1;
+}
+
 /* ------------------------------------------------------------------ D3D12 */
 
 typedef HRESULT(WINAPI *SerializeRootSignatureFn)(const D3D12_ROOT_SIGNATURE_DESC *, D3D_ROOT_SIGNATURE_VERSION,
@@ -390,7 +511,7 @@ static struct {
     UINT upload_pitch;
     Layout layout;
     UINT screen_height;
-    unsigned drawn_ids[MAX_CARDS], drawn_count;
+    unsigned drawn_ids[MAX_CARDS], drawn_count, drawn_panel_id;
     int texture_ready;
 } gpu;
 
@@ -627,8 +748,9 @@ static void render(IDXGISwapChain *swapchain) {
         --card_count;
     count = card_count;
     for (unsigned i = 0; i < count; ++i) list[i] = cards[i];
+    unsigned panel = (unsigned)panel_count, shown_panel_id = panel_id;
     ReleaseSRWLockExclusive(&lock);
-    if (!count || !queue) return;
+    if ((!count && !panel) || !queue) return;
     if (!gpu_init()) {
         fail("D3D12 setup failed");
         return;
@@ -656,19 +778,32 @@ static void render(IDXGISwapChain *swapchain) {
         gpu.drawn_count = (unsigned)-1;
     }
     const Layout *l = &gpu.layout;
-    if (!create_texture(l->width, l->height * MAX_CARDS)) {
+    int card_rows = l->height * MAX_CARDS;
+    if (!create_texture(l->width, card_rows + l->panel_height)) {
         fail("could not create the card texture");
         return;
     }
-    int redraw = !gpu.texture_ready || gpu.drawn_count != count;
+    int redraw = !gpu.texture_ready || gpu.drawn_count != count || gpu.drawn_panel_id != shown_panel_id;
     for (unsigned i = 0; !redraw && i < count; ++i) redraw = gpu.drawn_ids[i] != list[i].id;
     wait_fence(gpu.allocator_fence[index]);
     if (redraw) {
         void *mapped = NULL;
         D3D12_RANGE none = {0, 0};
         wait_fence(gpu.fence_value); /* the upload buffer may still be read */
+        static wchar_t title[TEXT_CAPACITY];
+        static NotifyPanelRow rows[NOTIFY_PANEL_ROWS];
+        if (panel) {
+            AcquireSRWLockExclusive(&lock);
+            panel = (unsigned)panel_count;
+            shown_panel_id = panel_id;
+            memory_copy(title, panel_title, sizeof(title));
+            memory_copy(rows, panel_rows, sizeof(rows[0]) * panel);
+            ReleaseSRWLockExclusive(&lock);
+        }
         if (!gdi_ready() || FAILED(ID3D12Resource_Map(gpu.upload, 0, &none, &mapped)) ||
-            !draw_cards(list, count, l, (unsigned char *)mapped, (int)gpu.upload_pitch)) {
+            !draw_cards(list, count, l, (unsigned char *)mapped, (int)gpu.upload_pitch) ||
+            (panel && !draw_panel(title, rows, panel, l, (unsigned char *)mapped + (size_t)card_rows * gpu.upload_pitch,
+                                  (int)gpu.upload_pitch))) {
             if (mapped) ID3D12Resource_Unmap(gpu.upload, 0, NULL);
             fail("could not draw the cards");
             return;
@@ -696,6 +831,7 @@ static void render(IDXGISwapChain *swapchain) {
         barrier(gpu.texture, D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
         gpu.texture_ready = 1;
         gpu.drawn_count = count;
+        gpu.drawn_panel_id = shown_panel_id;
         for (unsigned i = 0; i < count; ++i) gpu.drawn_ids[i] = list[i].id;
     }
     ID3D12Resource *back = NULL;
@@ -718,11 +854,30 @@ static void render(IDXGISwapChain *swapchain) {
     ID3D12GraphicsCommandList_SetGraphicsRootDescriptorTable(
         gpu.list, 0, ID3D12DescriptorHeap_GetGPUDescriptorHandleForHeapStart(gpu.srv_heap));
     ID3D12GraphicsCommandList_IASetPrimitiveTopology(gpu.list, D3D_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP);
+    float shift = 0.0f; /* cards stand left of the key list panel while it is shown */
+    if (panel) {
+        float ph = (float)panel_pixels(l, panel);
+        float x0 = (float)width - l->margin - l->width;
+        float y0 = ((float)height - ph) * 0.5f;
+        if (y0 < (float)l->margin) y0 = (float)l->margin;
+        float c[12] = {x0 / width * 2.0f - 1.0f,
+                       1.0f - y0 / height * 2.0f,
+                       (x0 + l->width) / width * 2.0f - 1.0f,
+                       1.0f - (y0 + ph) / height * 2.0f,
+                       0.0f,
+                       (float)card_rows / gpu.tex_height,
+                       1.0f,
+                       ((float)card_rows + ph) / gpu.tex_height,
+                       1.0f, 0.0f, 0.0f, 0.0f};
+        ID3D12GraphicsCommandList_SetGraphicsRoot32BitConstants(gpu.list, 1, 12, c, 0);
+        ID3D12GraphicsCommandList_DrawInstanced(gpu.list, 4, 1, 0, 0);
+        shift = (float)(l->width + l->gap);
+    }
     float y = (float)l->margin;
     for (unsigned i = 0; i < count; ++i) {
         float slide;
         float a = card_alpha(now - list[i].shown, list[i].hold, &slide);
-        float x0 = (float)width - l->margin - l->width + slide * 40.0f * l->height / 88.0f;
+        float x0 = (float)width - l->margin - l->width - shift + slide * 40.0f * l->height / 88.0f;
         float c[12] = {x0 / width * 2.0f - 1.0f,
                        1.0f - y / height * 2.0f,
                        (x0 + l->width) / width * 2.0f - 1.0f,
@@ -792,7 +947,7 @@ static void before_present(IDXGISwapChain *swapchain) {
         if (!first_present) first_present = now;
         if (now - first_present >= DEFER_MS) flush_pending();
     }
-    if (!enabled || hidden || broken || !card_count || swapchain != swapchain_seen) return;
+    if (!enabled || hidden || broken || (!card_count && !panel_count) || swapchain != swapchain_seen) return;
     __try {
         render(swapchain);
     } __except (EXCEPTION_EXECUTE_HANDLER) {
@@ -998,5 +1153,22 @@ __declspec(dllexport) int Fh2TestNotifyDraw(unsigned height, unsigned char *pixe
     if (!pixels) return 1;
     if (!gdi_ready()) return 0;
     return draw_cards(cards, card_count, &l, pixels, pitch);
+}
+
+/* Key list panel: rows/width of its bitmap; with pixels, draws it (l.panel_height rows). */
+__declspec(dllexport) int Fh2TestNotifyPanelDraw(unsigned height, unsigned char *pixels, int pitch, int *width,
+                                                 int *rows, unsigned *count, wchar_t *first_label,
+                                                 wchar_t *first_keys) {
+    Layout l = layout_for(height);
+    *width = l.width;
+    *rows = l.panel_height;
+    *count = (unsigned)panel_count;
+    if (panel_count) {
+        memory_copy(first_label, panel_rows[0].label, sizeof(panel_rows[0].label));
+        memory_copy(first_keys, panel_rows[0].keys, sizeof(panel_rows[0].keys));
+    }
+    if (!pixels) return 1;
+    if (!gdi_ready()) return 0;
+    return draw_panel(panel_title, panel_rows, (unsigned)panel_count, &l, pixels, pitch);
 }
 #endif
