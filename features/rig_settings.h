@@ -29,6 +29,7 @@ enum {
     RIG_TRAFFIC_LEVEL = RIG_WHEEL_COUNT, /* [Traffic] TrafficLevel   0..5 */
     RIG_TRAFFIC_ALL_DAY,                 /* [Traffic] RushHourAllDay 0/1 */
     RIG_WEATHER,                         /* [Traffic] Wetter         0..5 (weather.h) */
+    RIG_TIME_OF_DAY,                     /* [Traffic] TimeOfDay      0..5 (time_of_day.h) */
     RIG_KEY_FIRST,                       /* FH2_Keyboard.ini [Keyboard], keyboard_pad.h order */
     RIG_KEY_ENABLED = RIG_KEY_FIRST,     /* Aktiv                0/1, next game start */
     RIG_KEY_STEER,                       /* Lenkzeit             ms */
@@ -58,6 +59,7 @@ enum {
     RIG_KIND_DENSITY,  /* SpinnerControl, DensityChoices (traffic presets) */
     RIG_KIND_WEATHER,  /* SpinnerControl, WeatherChoices */
     RIG_KIND_FFB_MODE, /* SpinnerControl, FfbModeChoices */
+    RIG_KIND_TIME,     /* SpinnerControl, TimeChoices */
 };
 
 /* kinds shown as a list of choices (SpinnerControl) and the name of their collection */
@@ -67,6 +69,7 @@ const char *rig_kind_collection(unsigned kind);
 #define RIG_PROFILE_COUNT 6 /* the last one starts the wheel setup assistant */
 #define RIG_DENSITY_COUNT 6
 #define RIG_WEATHER_COUNT 6
+#define RIG_TIME_COUNT 6
 #define RIG_FFB_MODE_COUNT 2
 
 typedef struct {
@@ -94,6 +97,7 @@ const wchar_t *rig_traffic_choice(unsigned char *game_image, unsigned index);
 const wchar_t *rig_profile_choice(unsigned char *game_image, unsigned index);
 const wchar_t *rig_density_choice(unsigned char *game_image, unsigned index);
 const wchar_t *rig_weather_choice(unsigned char *game_image, unsigned index);
+const wchar_t *rig_time_choice(unsigned char *game_image, unsigned index);
 const wchar_t *rig_function_choice(unsigned char *game_image, unsigned index);
 const wchar_t *rig_ffb_mode_choice(unsigned char *game_image, unsigned index);
 /* Rows of the menu: rig_setting_order(0 .. rig_setting_menu_count() - 1) are setting ids.

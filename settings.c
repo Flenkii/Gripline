@@ -28,6 +28,7 @@ const SettingDefinition setting_definitions[] = {
     SETTING("Traffic", "TrafficLevel", traffic_level, SETTING_TRAFFIC_LEVEL),
     SETTING("Traffic", "RushHourAllDay", traffic_all_day, SETTING_BOOLEAN),
     SETTING("Traffic", "Weather", weather, SETTING_WEATHER),
+    SETTING("Traffic", "TimeOfDay", time_of_day, SETTING_TIME_OF_DAY),
     SETTING("Gripline", "Notifications", notifications, SETTING_BOOLEAN),
     SETTING("Gripline", "SteeringAnimation", steering_animation, SETTING_BOOLEAN),
     SETTING("Gripline", "CockpitViewForward", cockpit_view_forward, SETTING_CENTIMETERS),
@@ -164,7 +165,7 @@ static int parse_value(const SettingDefinition *definition, const char *text, in
         *value = (int)samples;
         return 1;
     }
-    if (definition->type == SETTING_WEATHER) {
+    if (definition->type == SETTING_WEATHER || definition->type == SETTING_TIME_OF_DAY) {
         if (text[0] >= '0' && text[0] <= '5' && !text[1]) {
             *value = text[0] - '0';
             return 1;

@@ -4,11 +4,12 @@
  * changes to the live modules and persists them in the launcher's INI files:
  *   FH2_Wheel.ini         [Wheel]     Enabled, ForceFeedback, FFBStrength, ...
  *   FH2_Keyboard.ini      [Keyboard]  Enabled, SteerTime, ReturnTime, PedalTime
- *   FH2_ExtraOptions.ini  [Traffic]   TrafficLevel, RushHourAllDay, Weather
+ *   FH2_ExtraOptions.ini  [Traffic]   TrafficLevel, RushHourAllDay, Weather, TimeOfDay
  * Saving happens on a background thread shortly after the last change, by editing only the
  * affected lines (comments and every other key stay untouched). When the launcher changes
  * one of the files while the game runs, the new values are picked up within a second. */
 #include "weather.h"
+#include "time_of_day.h"
 #include "rig_settings.h"
 #include "ini_edit.h"
 #include "report.h"
@@ -69,6 +70,8 @@ static const RigSettingInfo infos[RIG_SETTING_COUNT] = {
                             NULL},
     [RIG_WEATHER] = {"EoRigWeather", "Weather", 0, RIG_WEATHER_COUNT - 1, RIG_KIND_WEATHER, 0, 1,
                      NULL},
+    [RIG_TIME_OF_DAY] = {"EoRigTimeOfDay", "TimeOfDay", 0, RIG_TIME_COUNT - 1, RIG_KIND_TIME, 0, 1,
+                         NULL},
     [RIG_WHEEL_FFB_MODE] = {"EoRigFfbMode", "FFBMode", 0, RIG_FFB_MODE_COUNT - 1, RIG_KIND_FFB_MODE,
                             0, 1, NULL},
     [RIG_WHEEL_CLUTCH_BRAKE] = {"EoRigClutchBrake", "ClutchAsBrake", 0, 1, RIG_KIND_TOGGLE, 0, 1, NULL},
@@ -95,7 +98,7 @@ static const unsigned char order[] = {
     RIG_WHEEL_ENABLED,   RIG_WHEEL_FFB,     RIG_WHEEL_STRENGTH, RIG_WHEEL_RUMBLE,
     RIG_WHEEL_ROTATION,  RIG_WHEEL_CLUTCH_BRAKE, RIG_WHEEL_BUTTON1, RIG_WHEEL_BUTTON2,  RIG_WHEEL_BUTTON3,
     RIG_KEY_ENABLED,     RIG_KEY_STEER,     RIG_KEY_RETURN,     RIG_KEY_PEDAL,
-    RIG_TRAFFIC_PRESET,  RIG_TRAFFIC_LEVEL, RIG_TRAFFIC_ALL_DAY, RIG_WEATHER,
+    RIG_TRAFFIC_PRESET,  RIG_TRAFFIC_LEVEL, RIG_TRAFFIC_ALL_DAY, RIG_WEATHER, RIG_TIME_OF_DAY,
     RIG_GRIP_STEERING,   RIG_GRIP_VIEW_FORWARD, RIG_GRIP_VIEW_UP, RIG_GRIP_NOTIFICATIONS, RIG_GRIP_REPORT,
 };
 _Static_assert(sizeof(order) <= RIG_SETTING_COUNT, "menu rows");
@@ -103,7 +106,7 @@ _Static_assert(sizeof(order) <= RIG_SETTING_COUNT, "menu rows");
 int rig_kind_is_choice(unsigned kind) {
     return kind == RIG_KIND_TOGGLE || kind == RIG_KIND_TRAFFIC || kind == RIG_KIND_PROFILE ||
            kind == RIG_KIND_FUNCTION || kind == RIG_KIND_DENSITY || kind == RIG_KIND_WEATHER ||
-           kind == RIG_KIND_FFB_MODE;
+           kind == RIG_KIND_FFB_MODE || kind == RIG_KIND_TIME;
 }
 
 const char *rig_kind_collection(unsigned kind) {
@@ -114,6 +117,7 @@ const char *rig_kind_collection(unsigned kind) {
         case RIG_KIND_WEATHER: return "WeatherChoices";
         case RIG_KIND_FUNCTION: return "FunctionChoices";
         case RIG_KIND_FFB_MODE: return "FfbModeChoices";
+        case RIG_KIND_TIME: return "TimeChoices";
     }
     return "ToggleChoices";
 }
@@ -250,6 +254,12 @@ static const RigText german[RIG_SETTING_COUNT] = {
                      "oder Nebel (Nebel nur auf der Sturm-Insel, sonst sonnig). Original = das "
                      "Wetter wechselt wie im Spiel. Rennen und Treffen mit eigenem Wetter behalten "
                      "es, danach kommt deine Wahl zurück. Wirkt nach dem Schließen des Menüs."},
+    [RIG_TIME_OF_DAY] = {"Tageszeit",
+                         "Feste Tageszeit in der freien Fahrt: Morgen, Mittag, Sonnenuntergang "
+                         "oder Nacht. Langsamer Tag = die Uhr läuft weiter, aber viermal "
+                         "langsamer. Original = Tag und Nacht wie im Spiel. Rennen und Events "
+                         "behalten ihre Zeit, danach kommt deine Wahl zurück. Online (FH2MP) "
+                         "kommt die Zeit aus der Session. Wirkt nach dem Schließen des Menüs."},
     [RIG_TRAFFIC_PRESET] = {"Verkehr: Voreinstellung",
                             "Stellt Menge und Rushhour mit einem Klick ein: Original, Ruhig (24), "
                             "Lebhaft (48), Rushhour (64, rund um die Uhr) oder Chaos (100, rund "
@@ -375,6 +385,12 @@ static const RigText english[RIG_SETTING_COUNT] = {
                      "only on Storm Island, sunny elsewhere). Original = the game's normal "
                      "weather changes. Races and meets with their own weather keep it; your "
                      "choice returns afterwards. Applies after closing the menu."},
+    [RIG_TIME_OF_DAY] = {"Time of Day",
+                         "Fixed time of day in free roam: Morning, Midday, Sunset or Night. Slow "
+                         "Day = the clock keeps running, four times slower. Original = the game's "
+                         "normal day and night. Races and events keep their own time; your "
+                         "choice returns afterwards. Online (FH2MP) the time comes from the "
+                         "session. Applies after closing the menu."},
     [RIG_TRAFFIC_PRESET] = {"Traffic: Preset",
                             "Sets amount and rush hour in one go: Original, Calm (24), Busy (48), "
                             "Rush Hour (64, all day) or Chaos (100, all day). Changing amount or "
@@ -446,6 +462,11 @@ static const wchar_t *const weather_german[RIG_WEATHER_COUNT] = {
 static const wchar_t *const weather_english[RIG_WEATHER_COUNT] = {
     L"Original", L"Sunny", L"Cloudy", L"Storm Clouds", L"Rain", L"Fog"};
 
+static const wchar_t *const time_german[RIG_TIME_COUNT] = {
+    L"Original", L"Morgen", L"Mittag", L"Sonnenuntergang", L"Nacht", L"Langsamer Tag"};
+static const wchar_t *const time_english[RIG_TIME_COUNT] = {
+    L"Original", L"Morning", L"Midday", L"Sunset", L"Night", L"Slow Day"};
+
 static const wchar_t *const ffb_mode_german[RIG_FFB_MODE_COUNT] = {L"Spiel (original)", L"Eigenes (alt)"};
 static const wchar_t *const ffb_mode_english[RIG_FFB_MODE_COUNT] = {L"Game (original)", L"Own (old)"};
 
@@ -462,6 +483,13 @@ const wchar_t *rig_weather_choice(unsigned char *game_image, unsigned index) {
     }
     return video_options_text_is_german(game_image) ? weather_german[index]
                                                      : weather_english[index];
+}
+
+const wchar_t *rig_time_choice(unsigned char *game_image, unsigned index) {
+    if (index >= RIG_TIME_COUNT) {
+        return L"";
+    }
+    return video_options_text_is_german(game_image) ? time_german[index] : time_english[index];
 }
 
 const wchar_t *rig_density_choice(unsigned char *game_image, unsigned index) {
@@ -545,6 +573,9 @@ static int stored_value(unsigned id) {
     if (is_gripline(id)) {
         return (int)gripline_values[id - RIG_GRIP_FIRST];
     }
+    if (id == RIG_TIME_OF_DAY) {
+        return time_of_day_setting();
+    }
     return id == RIG_WEATHER ? weather_setting() : traffic_setting(id);
 }
 
@@ -601,6 +632,8 @@ static void forward(unsigned id, int value) {
     } else {
         if (id == RIG_WEATHER) {
             weather_set_setting(value);
+        } else if (id == RIG_TIME_OF_DAY) {
+            time_of_day_set_setting(value);
         } else {
             traffic_set_setting(id, value);
         }
@@ -734,7 +767,7 @@ typedef struct {
 static RigFile files[4] = {
     {NULL, WHEEL_SECTION, 0, RIG_WHEEL_COUNT, FILE_LIMIT, 1, 0, "FH2_Wheel.ini", 0},
     /* never create the Extra Options INI: its absence means "all defaults" */
-    {traffic_ini, TRAFFIC_SECTION, RIG_TRAFFIC_LEVEL, RIG_WEATHER + 1, EO_INI_LIMIT, 0, 0,
+    {traffic_ini, TRAFFIC_SECTION, RIG_TRAFFIC_LEVEL, RIG_TIME_OF_DAY + 1, EO_INI_LIMIT, 0, 0,
      "FH2_ExtraOptions.ini", 0},
     {NULL, KEYBOARD_SECTION, RIG_KEY_FIRST, RIG_KEY_END, FILE_LIMIT, 1, 0, "FH2_Keyboard.ini", 0},
     {traffic_ini, GRIPLINE_SECTION, RIG_GRIP_FIRST, RIG_GRIP_END, EO_INI_LIMIT, 0, 0,
@@ -920,6 +953,7 @@ __declspec(dllexport) int Fh2TestRigStart(unsigned char *image, const wchar_t *e
     log_set_directory(directory);
     traffic_tunables_start(image, &options);
     weather_start(image, &options);
+    time_of_day_start(image, &options);
     wheel_bridge_start(image, executable, directory);
     keyboard_pad_game_start(image, directory);
     rig_settings_start(directory);

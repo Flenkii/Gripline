@@ -97,6 +97,7 @@ int runtime_initialize(unsigned char *game_image, const wchar_t *executable_path
         log_set_directory(settings_directory);
         traffic_tunables_start(game_image, &options);
         weather_start(game_image, &options);
+        time_of_day_start(game_image, &options);
     }
     if (initialized && options.enabled) {
         wheel_bridge_start(game_image, executable_path, settings_directory);
