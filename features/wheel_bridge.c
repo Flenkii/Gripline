@@ -1339,8 +1339,12 @@ static BOOL CALLBACK enum_device(const DIDEVICEINSTANCEW *instance, void *contex
         match = type == DI8DEVTYPE_DRIVING || wide_contains_ci(instance->tszProductName, L"G920") ||
                 wide_contains_ci(instance->tszProductName, L"G29") ||
                 wide_contains_ci(instance->tszProductName, L"G923") ||
-                wide_contains_ci(instance->tszProductName, L"Racing Wheel") ||
-                wide_contains_ci(instance->tszProductName, L"Driving Force");
+                wide_contains_ci(instance->tszProductName, L"Wheel") ||
+                wide_contains_ci(instance->tszProductName, L"Driving Force") ||
+                wide_contains_ci(instance->tszProductName, L"Thrustmaster") ||
+                wide_contains_ci(instance->tszProductName, L"Fanatec") ||
+                wide_contains_ci(instance->tszProductName, L"MOZA") ||
+                wide_contains_ci(instance->tszProductName, L"Simagic");
     }
     if (match && !device_found) {
         device_found = 1;
@@ -1349,6 +1353,18 @@ static BOOL CALLBACK enum_device(const DIDEVICEINSTANCEW *instance, void *contex
         for (; instance->tszProductName[i] && i < MAX_PATH - 1; ++i) device_name[i] = instance->tszProductName[i];
         device_name[i] = 0;
     }
+    return DIENUM_CONTINUE;
+}
+
+static BOOL CALLBACK enum_ffb_device(const DIDEVICEINSTANCEW *instance, void *context) {
+    (void)context;
+    if ((BYTE)(instance->dwDevType & 0xff) == DI8DEVTYPE_GAMEPAD || device_found) return DIENUM_CONTINUE;
+    wlog("Force-Feedback-Geraet ohne bekannten Namen genommen: \"%S\"", instance->tszProductName);
+    device_found = 1;
+    device_guid = instance->guidInstance;
+    unsigned i = 0;
+    for (; instance->tszProductName[i] && i < MAX_PATH - 1; ++i) device_name[i] = instance->tszProductName[i];
+    device_name[i] = 0;
     return DIENUM_CONTINUE;
 }
 
@@ -1368,6 +1384,10 @@ static int dinput_find(void) {
         return 0;
     }
     dinput->lpVtbl->EnumDevices(dinput, DI8DEVCLASS_GAMECTRL, enum_device, NULL, DIEDFL_ATTACHEDONLY);
+    if (!device_found && !cfg.device[0]) { /* a wheel with an unknown name: the first force-feedback device */
+        dinput->lpVtbl->EnumDevices(dinput, DI8DEVCLASS_GAMECTRL, enum_ffb_device, NULL,
+                                    DIEDFL_ATTACHEDONLY | DIEDFL_FORCEFEEDBACK);
+    }
     if (!device_found) {
         wlog("Kein Lenkrad gefunden - Bruecke bleibt aus.");
         return 0;
@@ -2198,7 +2218,13 @@ static int device_attached(void);
 static int device_reopen(void) {
     device_found = 0;
     if (!dinput || dinput->lpVtbl->EnumDevices(dinput, DI8DEVCLASS_GAMECTRL, enum_device, NULL,
-                                              DIEDFL_ATTACHEDONLY) < 0 || !device_found || !device_attached()) {
+                                              DIEDFL_ATTACHEDONLY) < 0) {
+        return 0;
+    }
+    if (!device_found && !cfg.device[0])
+        dinput->lpVtbl->EnumDevices(dinput, DI8DEVCLASS_GAMECTRL, enum_ffb_device, NULL,
+                                    DIEDFL_ATTACHEDONLY | DIEDFL_FORCEFEEDBACK);
+    if (!device_found || !device_attached()) {
         return 0;
     }
     return dinput_open();
