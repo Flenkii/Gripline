@@ -59,7 +59,7 @@ __declspec(dllexport) int GriplinePlatformAttach(const FH2ModApi *platform) {
     page.key = PAGE_KEY;
     page.title = "Gripline";
     page.label = "Gripline settings";
-    page.description = "Wheel, keyboard, traffic, weather, cockpit and notifications.";
+    page.description = "Wheel, keyboard, traffic, weather, time of day, cockpit and notifications.";
     page.tile = "Achievements";
     page.on_open = page_open;
     if (!api->add_page(mod, &page)) {

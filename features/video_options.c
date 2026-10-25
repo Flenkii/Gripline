@@ -92,6 +92,7 @@ enum {
     CHOICES_DENSITY,
     CHOICES_WEATHER,
     CHOICES_FFB_MODE,
+    CHOICES_TIME,
     CHOICE_COLLECTION_COUNT
 };
 
@@ -112,7 +113,7 @@ static NativePropertyLink links[2][PROPERTY_COUNT];
 static void *choices[CHOICE_COLLECTION_COUNT];
 static const unsigned choice_counts[] = {3, 2, 6, 2, 3, 2, 3, 2, 2, 2, 6, RIG_PROFILE_COUNT,
                                         WHEEL_FUNCTION_COUNT, RIG_DENSITY_COUNT,
-                                        RIG_WEATHER_COUNT, RIG_FFB_MODE_COUNT};
+                                        RIG_WEATHER_COUNT, RIG_FFB_MODE_COUNT, RIG_TIME_COUNT};
 _Static_assert(ARRAY_COUNT(choice_counts) == CHOICE_COLLECTION_COUNT, "choice counts");
 static void *registered_image[2], *initialized_image;
 static void *resource_vtable[7];
@@ -163,7 +164,8 @@ static const char *const property_names[] = {"DriftMode",
                                              "FunctionChoices",
                                              "DensityChoices",
                                              "WeatherChoices",
-                                             "FfbModeChoices"};
+                                             "FfbModeChoices",
+                                             "TimeChoices"};
 _Static_assert(ARRAY_COUNT(property_names) == RIG_PROPERTY_BASE, "property names");
 
 static const char *property_name(unsigned index) {
@@ -329,6 +331,8 @@ static const wchar_t *choice_text(unsigned collection, unsigned index) {
             return rig_weather_choice(image, index);
         case CHOICES_FFB_MODE:
             return rig_ffb_mode_choice(image, index);
+        case CHOICES_TIME:
+            return rig_time_choice(image, index);
     }
     return NULL;
 }

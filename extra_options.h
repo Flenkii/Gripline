@@ -94,6 +94,7 @@ typedef struct {
     int enable_social, enable_clubs, enable_rivals;
     int traffic_level, traffic_all_day;
     int weather;
+    int time_of_day; /* [Traffic] TimeOfDay 0..5 (time_of_day.h) */
     int notifications, steering_animation; /* [Gripline] */
     int cockpit_view_forward, cockpit_view_up; /* [Gripline] second cockpit view, cm */
 } ModOptions;

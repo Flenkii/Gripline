@@ -57,6 +57,7 @@ void autodrive_prepare_hooks(unsigned char *game_image, const ModOptions *option
 void gamerpic_set_directory(const wchar_t *directory);
 void traffic_tunables_start(unsigned char *game_image, const ModOptions *options);
 void weather_start(unsigned char *game_image, const ModOptions *options);
+void time_of_day_start(unsigned char *game_image, const ModOptions *options);
 void wheel_bridge_start(unsigned char *game_image, const wchar_t *executable_path,
                         const wchar_t *settings_directory);
 

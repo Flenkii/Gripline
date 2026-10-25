@@ -10,11 +10,11 @@ VIDEO = os.path.join(GAME_DIR, 'ui/Scenes/Anthem/A_VideoOptions.xaml')
 fails = []
 # setting ids (rig_settings.h)
 ENABLED = 0
-FFB_MODE, CLUTCH_BRAKE, LEVEL, ALLDAY, WEATHER = 17, 18, 19, 20, 21
-KEY_ENABLED, KEY_STEER, KEY_RETURN, KEY_PEDAL = 22, 23, 24, 25
-PROFILE, PRESET = 30, 31
-VIEW_FORWARD, VIEW_UP = 28, 29
-GRIP_NOTIFY, GRIP_STEERING = 26, 27
+FFB_MODE, CLUTCH_BRAKE, LEVEL, ALLDAY, WEATHER, TIME = 17, 18, 19, 20, 21, 22
+KEY_ENABLED, KEY_STEER, KEY_RETURN, KEY_PEDAL = 23, 24, 25, 26
+PROFILE, PRESET = 31, 32
+VIEW_FORWARD, VIEW_UP = 29, 30
+GRIP_NOTIFY, GRIP_STEERING = 27, 28
 
 def check(cond, text):
     print(('  ok   ' if cond else '  FAIL ') + text)
@@ -120,7 +120,7 @@ open(os.path.join(tempfile.gettempdir(), 'hud_de.xaml'), 'wb').write(hud)
 props = ['EoRigProfile', 'EoRigWheelEnabled', 'EoRigForceFeedback', 'EoRigStrength', 'EoRigRumble', 'EoRigRotation',
          'EoRigClutchBrake', 'EoRigButton1', 'EoRigButton2', 'EoRigButton3', 'EoKeyEnabled', 'EoKeySteer',
          'EoKeyReturn', 'EoKeyPedal', 'EoRigDensity',
-         'EoRigTrafficLevel', 'EoRigRushHour', 'EoRigWeather', 'EoGripSteering', 'EoGripViewForward', 'EoGripViewUp', 'EoGripNotify', 'EoGripReport']
+         'EoRigTrafficLevel', 'EoRigRushHour', 'EoRigWeather', 'EoRigTimeOfDay', 'EoGripSteering', 'EoGripViewForward', 'EoGripViewUp', 'EoGripNotify', 'EoGripReport']
 hidden = ['EoRigFfbMode', 'EoRigDamping', 'EoRigFriction', 'EoRigSmoothing', 'EoRigMinimumForce',
           'EoRigOutward', 'EoRigCentering', 'EoRigLock', 'EoRigCurve', 'EoRigShifter']
 if dom:
@@ -369,6 +369,24 @@ e.tick += 700
 e.call('Fh2TestRigStep', e.tick)
 check(ok and b'Weather=0' in open(pe, 'rb').read(), 'Wetter zurück auf Original gespeichert')
 check(e.call('Fh2TestWeatherManager') == 0, 'ohne Spielwelt: kein WeatherManager, nichts passiert')
+
+# ---- Tageszeit
+print('Tageszeit')
+check(get(TIME) == 0, f'Tageszeit beim Start: Original ({get(TIME)})')
+ok = set_box(TIME, 3, False)
+check(ok and get(TIME) == 3, f'Tageszeit Sonnenuntergang gewählt: {get(TIME)}')
+ok = set_box(TIME, 6, False); check(not ok and get(TIME) == 3, 'Tageszeit 6 (gibt es nicht) abgelehnt')
+e.tick += 700
+e.call('Fh2TestRigStep', e.tick)
+pe_now = open(pe, 'rb').read()
+check(b'TimeOfDay=3' in pe_now and b'Weather=0' in pe_now, 'Tageszeit in FH2_ExtraOptions.ini gespeichert ([Traffic] TimeOfDay=3)')
+r = e.call('Fh2TestReadOptions', directory, e.alloc(400))
+check(r == 1, 'Extra Options akzeptiert die INI mit TimeOfDay-Zeile')
+ok = set_box(TIME, 0, False)
+e.tick += 700
+e.call('Fh2TestRigStep', e.tick)
+check(ok and b'TimeOfDay=0' in open(pe, 'rb').read(), 'Tageszeit zurück auf Original gespeichert')
+check(e.call('Fh2TestTimeClock') == 0, 'ohne Spielwelt: keine Tageszeit-Uhr, nichts passiert')
 
 # ---- English
 print('Englisch')
