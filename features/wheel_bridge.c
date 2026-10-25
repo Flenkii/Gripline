@@ -23,6 +23,8 @@
 #include "rig_settings.h"
 #include "wheel_buttons.h"
 #include "mod_scan.h"
+#include "notify.h"
+#include "ini_edit.h"
 #include "support.h"
 
 #define DIRECTINPUT_VERSION 0x0800
@@ -2226,6 +2228,241 @@ static void neutral_report(unsigned char *packet) {
     build_report(&neutral, packet);
 }
 
+/* ------------------------------------------------------------------ setup assistant (any wheel) */
+
+/* Started from the menu (Input: Profile > Set up wheel). A card asks for one control at a time;
+   the axis that moves the most (or the button that goes down) is taken. At the end the result
+   is used at once and saved to FH2_Wheel.ini. The game gets "hands off" meanwhile.
+   Steering, throttle and brake are needed (20 s each, else nothing is changed); clutch and
+   buttons can be skipped by waiting 10 s (the old value stays). */
+enum {
+    SETUP_STEER,
+    SETUP_THROTTLE,
+    SETUP_BRAKE,
+    SETUP_CLUTCH,
+    SETUP_PADDLE_RIGHT,
+    SETUP_PADDLE_LEFT,
+    SETUP_A,
+    SETUP_B,
+    SETUP_STEPS
+};
+#define SETUP_TAG 0x5e7u
+#define SETUP_NEEDED_MS 20000u
+#define SETUP_OPTIONAL_MS 10000u
+
+static const char *const setup_texts[SETUP_STEPS] = {
+    "Wheel setup 1/8\nTurn the wheel fully left and right",
+    "Wheel setup 2/8\nPress the throttle fully, then let go",
+    "Wheel setup 3/8\nPress the brake fully, then let go",
+    "Wheel setup 4/8\nPress the clutch (none: wait 10 s)",
+    "Wheel setup 5/8\nPress the right paddle (shift up)",
+    "Wheel setup 6/8\nPress the left paddle (shift down)",
+    "Wheel setup 7/8\nPress the button for A (confirm)",
+    "Wheel setup 8/8\nPress the button for B (back)",
+};
+
+static volatile LONG setup_request;
+static int setup_step = -1;
+static ULONGLONG setup_step_at;
+static LONG setup_lo[8], setup_hi[8], setup_start[8];
+static BYTE setup_held[32];
+static int setup_candidate;
+static int setup_result[SETUP_STEPS];
+
+int wheel_bridge_start_setup(void) {
+    if (!wheel_ready) return 0;
+    InterlockedExchange(&setup_request, 1);
+    return 1;
+}
+
+static void setup_begin_step(int step, const JoyState *s) {
+    setup_step = step;
+    setup_step_at = GetTickCount64();
+    setup_candidate = -1;
+    for (int i = 0; i < 8; ++i) setup_lo[i] = setup_hi[i] = setup_start[i] = s->axis[i];
+    for (int b = 0; b < 32; ++b) setup_held[b] = s->buttons[b] & 0x80;
+    notify_show_step(setup_texts[step], SETUP_TAG, step <= SETUP_BRAKE ? SETUP_NEEDED_MS : SETUP_OPTIONAL_MS);
+}
+
+static int setup_axis_used(int axis, int step) {
+    for (int k = 0; k < step && k <= SETUP_CLUTCH; ++k)
+        if (setup_result[k] == axis) return 1;
+    return 0;
+}
+
+static LONG setup_abs(LONG v) {
+    return v < 0 ? -v : v;
+}
+
+/* 1 = this step is done (setup_result[step] set, -1 = skipped) */
+static int setup_check(int step, const JoyState *s) {
+    if (step == SETUP_STEER) { /* the axis with the widest swing, once it is back near the middle */
+        int best = -1;
+        LONG best_range = 0;
+        for (int i = 0; i < 8; ++i) {
+            if (s->axis[i] < setup_lo[i]) setup_lo[i] = s->axis[i];
+            if (s->axis[i] > setup_hi[i]) setup_hi[i] = s->axis[i];
+            if (setup_hi[i] - setup_lo[i] > best_range) best_range = setup_hi[i] - setup_lo[i], best = i;
+        }
+        if (best >= 0 && best_range >= 40000 && setup_abs(s->axis[best] - (setup_lo[best] + setup_hi[best]) / 2) < 10000) {
+            setup_result[step] = best;
+            return 1;
+        }
+        return 0;
+    }
+    if (step <= SETUP_CLUTCH) { /* a pedal: the axis that went furthest from where it was, once let go */
+        if (setup_candidate < 0) {
+            LONG best_move = 0;
+            for (int i = 0; i < 8; ++i) {
+                if (setup_axis_used(i, step)) continue;
+                LONG move = setup_abs(s->axis[i] - setup_start[i]);
+                if (move > best_move) best_move = move, setup_candidate = i;
+            }
+            if (best_move < 30000) setup_candidate = -1;
+            return 0;
+        }
+        if (setup_abs(s->axis[setup_candidate] - setup_start[setup_candidate]) < 8000) {
+            setup_result[step] = setup_candidate;
+            return 1;
+        }
+        return 0;
+    }
+    /* a button: one that was not held when the step began, taken when it is let go */
+    if (setup_candidate < 0) {
+        for (int b = 0; b < 32; ++b) {
+            if (!(s->buttons[b] & 0x80)) setup_held[b] = 0;
+            else if (!setup_held[b]) {
+                setup_candidate = b;
+                break;
+            }
+        }
+        return 0;
+    }
+    if (!(s->buttons[setup_candidate] & 0x80)) {
+        setup_result[step] = setup_candidate;
+        return 1;
+    }
+    return 0;
+}
+
+static char setup_file[16384], setup_edit[2][16384];
+
+static void setup_save(void) {
+    HANDLE file = CreateFileW(ini_path, GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE, NULL, OPEN_EXISTING,
+                              FILE_ATTRIBUTE_NORMAL, NULL);
+    DWORD length = 0;
+    if (file != INVALID_HANDLE_VALUE) {
+        if (!ReadFile(file, setup_file, sizeof(setup_file) - 1, &length, NULL)) length = 0;
+        CloseHandle(file);
+    }
+    static const char *const keys[SETUP_STEPS] = {"SteeringAxis", "ThrottleAxis", "BrakeAxis", "ClutchAxis",
+                                                  "PaddleRight", "PaddleLeft", "ButtonA", "ButtonB"};
+    const char *source = setup_file;
+    size_t source_length = length;
+    unsigned slot = 0;
+    for (int k = 0; k < SETUP_STEPS; ++k) {
+        char number[12];
+        const char *value;
+        if (k <= SETUP_CLUTCH) {
+            int axis = k == SETUP_CLUTCH ? cfg.axis_clutch : setup_result[k];
+            value = axis >= 0 && axis < 8 ? axis_names[axis] : "-";
+        } else {
+            static int *const fields[4] = {&cfg.btn_paddle_right, &cfg.btn_paddle_left, &cfg.btn_a, &cfg.btn_b};
+            value = ini_format_int(*fields[k - SETUP_PADDLE_RIGHT], number);
+        }
+        size_t written = ini_set_value(source, source_length, "Wheel", keys[k], value, setup_edit[slot],
+                                       sizeof(setup_edit[slot]));
+        if (!written) {
+            wlog("Einrichtung: FH2_Wheel.ini zu gross, nicht gespeichert.");
+            return;
+        }
+        source = setup_edit[slot];
+        source_length = written;
+        slot ^= 1;
+    }
+    char done[2] = {'1', 0};
+    size_t written = ini_set_value(source, source_length, "Wheel", "SetupDone", done, setup_edit[slot],
+                                   sizeof(setup_edit[slot]));
+    if (written) source = setup_edit[slot], source_length = written;
+    file = CreateFileW(ini_path, GENERIC_WRITE, FILE_SHARE_READ, NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+    if (file == INVALID_HANDLE_VALUE) {
+        wlog("Einrichtung: FH2_Wheel.ini nicht schreibbar.");
+        return;
+    }
+    DWORD out;
+    WriteFile(file, source, (DWORD)source_length, &out, NULL);
+    CloseHandle(file);
+}
+
+/* Runs in the poll thread with the raw reading. Returns 1 while the assistant has the wheel. */
+static int known_wheel_name(const wchar_t *name);
+
+static int setup_run(const JoyState *s) {
+    static int hint_checked;
+    if (!hint_checked && ini_path[0]) { /* a wheel Gripline has no layout for: point to the assistant once */
+        hint_checked = 1;
+        if (!cfg.device[0] && !known_wheel_name(device_name) && read_int(L"SetupDone", 0) != 1) {
+            wlog("Unbekanntes Lenkrad \"%S\" - Hinweis auf den Einrichtungs-Assistenten.", device_name);
+            notify_show_deferred("New wheel - set it up in GRIPLINE\nInput: Profile > Set up wheel");
+        }
+    }
+    if (setup_step < 0) {
+        if (!InterlockedExchange(&setup_request, 0)) return 0;
+        wlog("Einrichtungs-Assistent gestartet.");
+        setup_begin_step(SETUP_STEER, s);
+        return 1;
+    }
+    int step = setup_step;
+    if (setup_check(step, s)) {
+        if (step <= SETUP_CLUTCH) wlog("Einrichtung: Schritt %d = Achse %s", step + 1, axis_names[setup_result[step]]);
+        else wlog("Einrichtung: Schritt %d = Taste %d", step + 1, setup_result[step]);
+    } else if (GetTickCount64() - setup_step_at >= (step <= SETUP_BRAKE ? SETUP_NEEDED_MS : SETUP_OPTIONAL_MS)) {
+        if (step <= SETUP_BRAKE) {
+            wlog("Einrichtung abgebrochen (Schritt %d: nichts erkannt).", step + 1);
+            notify_show_step("Wheel setup cancelled\nNothing changed", SETUP_TAG, 5000);
+            setup_step = -1;
+            return 1;
+        }
+        setup_result[step] = -1;
+        wlog("Einrichtung: Schritt %d uebersprungen.", step + 1);
+    } else {
+        return 1;
+    }
+    if (step + 1 < SETUP_STEPS) {
+        setup_begin_step(step + 1, s);
+        return 1;
+    }
+    /* done: use it now (this is the poll thread, the only one that reads cfg) */
+    setup_step = -1;
+    cfg.axis_steer = setup_result[SETUP_STEER];
+    cfg.axis_throttle = setup_result[SETUP_THROTTLE];
+    cfg.axis_brake = setup_result[SETUP_BRAKE];
+    if (setup_result[SETUP_CLUTCH] >= 0) cfg.axis_clutch = setup_result[SETUP_CLUTCH];
+    else cfg.axis_clutch = -1;
+    int *buttons[4] = {&cfg.btn_paddle_right, &cfg.btn_paddle_left, &cfg.btn_a, &cfg.btn_b};
+    for (int k = 0; k < 4; ++k)
+        if (setup_result[SETUP_PADDLE_RIGHT + k] >= 0) *buttons[k] = setup_result[SETUP_PADDLE_RIGHT + k];
+    for (int i = 0; i < 8; ++i) /* the pedals were let go: this is their rest position */
+        if (i == cfg.axis_throttle || i == cfg.axis_brake || i == cfg.axis_clutch) {
+            pedal_rest[i] = s->axis[i] > 32767 ? 65535 : 0;
+            rest_decided |= 1u << i;
+        }
+    setup_save();
+    wlog("Einrichtung fertig: Lenkung %s, Gas %s, Bremse %s, Kupplung %s, Wippen %d/%d, A %d, B %d",
+         axis_names[cfg.axis_steer], axis_names[cfg.axis_throttle], axis_names[cfg.axis_brake],
+         cfg.axis_clutch >= 0 ? axis_names[cfg.axis_clutch] : "-", cfg.btn_paddle_right, cfg.btn_paddle_left,
+         cfg.btn_a, cfg.btn_b);
+    notify_show_step(cfg.axis_clutch >= 0 ? "Wheel set up and saved\nSteering, pedals, clutch and buttons"
+                                          : "Wheel set up and saved\nSteering, pedals and buttons (no clutch)",
+                     SETUP_TAG, 6000);
+    return 1;
+}
+
+static int known_wheel_name(const wchar_t *name) {
+    return wide_contains_ci(name, L"G920") || wide_contains_ci(name, L"G29") || wide_contains_ci(name, L"G923") ||
+           wide_contains_ci(name, L"Driving Force");
+}
+
 static DWORD WINAPI poll_thread(LPVOID unused) {
     (void)unused;
     unsigned char packet[0x14 + 0x11], last[0x14 + 0x11];
@@ -2333,6 +2570,17 @@ static DWORD WINAPI poll_thread(LPVOID unused) {
             wlog("Startwerte: X=%d Y=%d Z=%d Rx=%d Ry=%d Rz=%d S0=%d S1=%d", (int)state.axis[0], (int)state.axis[1],
                  (int)state.axis[2], (int)state.axis[3], (int)state.axis[4], (int)state.axis[5], (int)state.axis[6],
                  (int)state.axis[7]);
+        }
+        if (setup_run(&state)) { /* the setup assistant has the wheel: the game gets "hands off" */
+            if (now - last_send >= 100) {
+                neutral_report(packet);
+                if (deliver(packet, sizeof(packet))) {
+                    memory_copy(last, packet, sizeof(packet));
+                    last_send = now;
+                }
+            }
+            Sleep(5);
+            continue;
         }
         /* until a pedal axis reports a real value (DirectInput starts at 32768), keep it released;
            then snap its rest position to the nearer end */
@@ -2716,5 +2964,26 @@ __declspec(dllexport) int Fh2TestWheelConfig(unsigned id) {
 }
 __declspec(dllexport) unsigned Fh2TestWheelCurve(unsigned raw) {
     return apply_curve(raw);
+}
+/* setup assistant: start it, feed one raw reading (8 axes, bit n = button n), read the result */
+__declspec(dllexport) void Fh2TestWheelSetupStart(const wchar_t *ini) {
+    unsigned i = 0;
+    for (; ini[i] && i < PATH_CAPACITY - 1; ++i) ini_path[i] = ini[i];
+    ini_path[i] = 0;
+    InterlockedExchange(&setup_request, 1);
+}
+__declspec(dllexport) int Fh2TestWheelSetupFeed(const LONG *axes, unsigned buttons) {
+    JoyState s;
+    zero(&s, sizeof(s));
+    s.pov = 0xffffffff;
+    for (int i = 0; i < 8; ++i) s.axis[i] = axes[i];
+    for (int i = 0; i < 32; ++i)
+        if (buttons & (1u << i)) s.buttons[i] = 0x80;
+    return setup_run(&s) | (setup_step + 1) << 4;
+}
+__declspec(dllexport) int Fh2TestWheelSetupResult(int k) {
+    int values[8] = {cfg.axis_steer, cfg.axis_throttle, cfg.axis_brake, cfg.axis_clutch,
+                     cfg.btn_paddle_right, cfg.btn_paddle_left, cfg.btn_a, cfg.btn_b};
+    return k >= 0 && k < 8 ? values[k] : -100;
 }
 #endif

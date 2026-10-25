@@ -32,6 +32,7 @@ typedef struct {
     ULONGLONG shown; /* tick of the first frame it was drawn in; 0 = not shown yet */
     ULONGLONG hold; /* ms fully visible before the fade-out */
     unsigned id;
+    unsigned tag; /* notify_show_step: the card a later step replaces (0 = none) */
 } Card;
 
 static SRWLOCK lock = SRWLOCK_INIT;
@@ -57,7 +58,7 @@ static Pending pending[MAX_PENDING];
 static volatile LONG pending_count;
 static ULONGLONG first_present;
 
-static void show_card(const char *text, ULONGLONG hold);
+static void show_card(const char *text, ULONGLONG hold, unsigned tag);
 
 static void defer(const char *text, NotifyTextFn make) {
     AcquireSRWLockExclusive(&lock);
@@ -94,15 +95,19 @@ static void flush_pending(void) {
     for (LONG i = count; i > 0; --i) { /* the first one ends up on top */
         Pending *p = &local[i - 1];
         if (p->make && !p->make(p->text, sizeof(p->text))) continue;
-        show_card(p->text, STARTUP_CARD_MS);
+        show_card(p->text, STARTUP_CARD_MS, 0);
     }
 }
 
 void notify_show(const char *text) {
-    show_card(text, CARD_MS);
+    show_card(text, CARD_MS, 0);
 }
 
-static void show_card(const char *text, ULONGLONG hold) {
+void notify_show_step(const char *text, unsigned tag, unsigned hold_ms) {
+    show_card(text, hold_ms, tag);
+}
+
+static void show_card(const char *text, ULONGLONG hold, unsigned tag) {
     if (!text) return;
     log_append("GRIPLINE: ");
     for (const char *p = text; *p; ++p) {
@@ -122,7 +127,17 @@ static void show_card(const char *text, ULONGLONG hold) {
               card.line2);
     card.shown = 0;
     card.hold = hold;
+    card.tag = tag;
     AcquireSRWLockExclusive(&lock);
+    if (tag && card_count && cards[0].tag == tag) { /* the next step of the same card: new text in place */
+        if (cards[0].shown) card.hold += GetTickCount64() - cards[0].shown;
+        card.shown = cards[0].shown;
+        card.id = next_id++; /* new id: the text is drawn again */
+        cards[0] = card;
+        InterlockedExchange(&cards_changed, 1);
+        ReleaseSRWLockExclusive(&lock);
+        return;
+    }
     card.id = next_id++;
     for (unsigned i = MAX_CARDS - 1; i > 0; --i) cards[i] = cards[i - 1];
     cards[0] = card;

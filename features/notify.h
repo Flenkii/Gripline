@@ -9,6 +9,10 @@
 /* UTF-8 text, one or two lines ("\n"). Safe from any thread. */
 void notify_show(const char *text);
 
+/* For steps of one task (the wheel setup): when the newest card has the same tag, its text is
+   replaced in place instead of stacking a new card; it stays hold_ms from now. */
+void notify_show_step(const char *text, unsigned tag, unsigned hold_ms);
+
 /* Same, but for messages from game start: kept until the game has shown its first picture
    (a few seconds), then shown in the given order. Safe from any thread. */
 void notify_show_deferred(const char *text);

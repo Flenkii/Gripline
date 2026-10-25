@@ -61,7 +61,7 @@ enum {
 int rig_kind_is_choice(unsigned kind);
 const char *rig_kind_collection(unsigned kind);
 
-#define RIG_PROFILE_COUNT 5
+#define RIG_PROFILE_COUNT 6 /* the last one starts the wheel setup assistant */
 #define RIG_DENSITY_COUNT 6
 #define RIG_WEATHER_COUNT 6
 #define RIG_FFB_MODE_COUNT 2
@@ -102,6 +102,8 @@ unsigned rig_setting_order(unsigned position);
 int wheel_bridge_setting(unsigned id);
 void wheel_bridge_set_setting(unsigned id, int value);
 const wchar_t *wheel_bridge_ini_path(void);
+/* Starts the setup assistant (cards ask for steering, pedals, buttons). 0 = no wheel running. */
+int wheel_bridge_start_setup(void);
 int traffic_setting(unsigned id);
 void traffic_set_setting(unsigned id, int value);
 #endif

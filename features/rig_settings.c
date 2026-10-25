@@ -133,7 +133,9 @@ static const signed char profile_presets[RIG_PROFILE_COUNT][3] = {
     {0, 1, -1},  /* 2 = Keyboard */
     {1, 1, 0},   /* 3 = Wheel */
     {1, 1, 1},   /* 4 = Wheel, clutch pedal as brake */
+    {0, 0, 0},   /* 5 = Set up wheel: starts the assistant, changes no switches (never "current") */
 };
+#define PROFILE_SETUP 5
 static const unsigned char profile_ids[3] = {RIG_WHEEL_ENABLED, RIG_KEY_ENABLED, RIG_WHEEL_CLUTCH_BRAKE};
 
 /* Traffic presets: whichever one matches TrafficLevel + RushHourAllDay is shown. */
@@ -157,7 +159,7 @@ static int density_current(void) {
 }
 
 static int profile_current(void) {
-    for (unsigned p = 1; p < RIG_PROFILE_COUNT; ++p) {
+    for (unsigned p = 1; p < PROFILE_SETUP; ++p) {
         unsigned i = 0;
         while (i < 3 && (profile_presets[p][i] < 0 || rig_setting_get(profile_ids[i]) == profile_presets[p][i])) {
             ++i;
@@ -398,9 +400,9 @@ static const RigText english[RIG_SETTING_COUNT] = {
 };
 
 static const wchar_t *const profile_german[RIG_PROFILE_COUNT] = {
-    L"Eigene Werte", L"Controller", L"Tastatur", L"Lenkrad", L"Lenkrad (Kupplung = Bremse)"};
+    L"Eigene Werte", L"Controller", L"Tastatur", L"Lenkrad", L"Lenkrad (Kupplung = Bremse)", L"Lenkrad einrichten (Pedale, Tasten)"};
 static const wchar_t *const profile_english[RIG_PROFILE_COUNT] = {
-    L"Custom", L"Controller", L"Keyboard", L"Wheel", L"Wheel (Clutch as Brake)"};
+    L"Custom", L"Controller", L"Keyboard", L"Wheel", L"Wheel (Clutch as Brake)", L"Set up wheel (pedals, buttons)"};
 
 static const wchar_t *const density_german[RIG_DENSITY_COUNT] = {
     L"Eigene Werte", L"Original", L"Ruhig", L"Lebhaft", L"Rushhour", L"Chaos"};
@@ -571,6 +573,11 @@ int rig_setting_set(unsigned id, int value) {
     if (id == RIG_WHEEL_PROFILE) {
         /* "Eigene Werte" is only a label: picking it keeps the values as they are */
         if (value == 0 || value == profile_current()) {
+            return 0;
+        }
+        if (value == PROFILE_SETUP) { /* nothing is stored; the spinner shows the current profile again */
+            if (!wheel_bridge_start_setup())
+                notify_show("Wheel setup: no wheel active\nChoose the profile Wheel and restart first");
             return 0;
         }
         int changed = 0;
