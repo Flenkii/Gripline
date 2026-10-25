@@ -56,6 +56,7 @@ COMMON_SOURCES = [
     "features/png_validation.c",
     "features/png_decode.c",
     "features/traffic_tunables.c",
+    "features/traffic_files.c",
     "features/wheel_bridge.c",
     "features/wheel_soft.c",
     "features/ini_edit.c",

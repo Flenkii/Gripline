@@ -2,6 +2,7 @@
 #include "logging.h"
 #include "support.h"
 #include "cockpit.h"
+#include "traffic_files.h"
 
 typedef struct {
     const char *data;
@@ -88,6 +89,12 @@ static void ensure_folders_mounted(void *filesystem) {
         log_append(cockpit ? "FILES: Gripline cockpit folder mounted (steering animation files).\r\n"
                            : "FILES: Gripline cockpit folder could not be mounted.\r\n");
         if (cockpit) cockpit_patch_game();
+    }
+    if (mount_cockpit && traffic_files_wait_ready()) {
+        /* More Traffic (traffic_files.c): raised traffic data, below the cockpit folder */
+        int traffic = mount_folder(filesystem, "game:\\gripline_traffic\\", 0x7ffffffb);
+        log_append(traffic ? "FILES: Gripline traffic folder mounted (more traffic).\r\n"
+                           : "FILES: Gripline traffic folder could not be mounted.\r\n");
     }
     void **methods = *(void ***)filesystem;
     ((SortVolumes)methods[0x1f8 / 8])(filesystem);

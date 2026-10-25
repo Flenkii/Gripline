@@ -10,6 +10,7 @@ Fork of https://github.com/RokkuDayo/ForzaHorizon2_ExtraOptions – modified in 
 - `features/wheel_buttons.c/.h` – assignable wheel buttons
 - `features/rig_settings.c/.h` – in-game "Wheel & Traffic" page, traffic presets, saving to the INIs
 - `features/traffic_tunables.c` – higher traffic limits, rush hour all day (live)
+- `features/traffic_files.c/.h` (V6) – More Traffic for real: raised copies of the game's traffic data (`AI/CarLoadingSettings.xml`, `AI/Densities*.xml` from `media\EntityModel.zip`, rules of `tools/fh2_more_traffic.py`) in `Mount\gripline_traffic`, mounted over `game:\media`; game files unchanged
 - `features/weather.c/.h` – fixed weather through the game's own weather control
 - `features/ini_migrate.c/.h` – takes the German settings files of fork1-fork3 over into the English ones (fork4)
 - `features/ini_edit.c/.h` – edit INI lines without losing comments

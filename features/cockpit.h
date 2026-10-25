@@ -27,4 +27,8 @@ int cockpit_wait_ready(void);
    90 degrees, so the animation turns 1:1 with the real wheel. 1 = patched. */
 int cockpit_patch_game(void);
 
+/* Shared with traffic_files.c: one file out of a game zip (NULL if missing). */
+unsigned char *gripline_zip_extract(const wchar_t *zip_path, const char *entry, uint32_t *size);
+void gripline_zip_free(void *data);
+
 #endif

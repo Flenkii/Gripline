@@ -5,6 +5,7 @@
 #include "features/nitro_link.h"
 #include "features/notify.h"
 #include "features/cockpit.h"
+#include "features/traffic_files.h"
 #include "features/cockpit_view.h"
 #include "features/mod_scan.h"
 #include "features/report.h"
@@ -114,6 +115,7 @@ int runtime_initialize(unsigned char *game_image, const wchar_t *executable_path
                 if (executable_path[n] == L'\\' || executable_path[n] == L'/') cut = n;
             }
             mount_dir[cut] = 0; /* the Mount folder holds forza_durango_release_final.exe */
+            traffic_files_start(mount_dir, options.traffic_level);
             cockpit_start(game_image, mount_dir, options.steering_animation, wheel_bridge_setting(RIG_WHEEL_ROTATION),
                           wheel_bridge_setting(RIG_WHEEL_CURVE));
         }

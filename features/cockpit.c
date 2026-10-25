@@ -441,6 +441,32 @@ static unsigned char *zip_read(Zip *z, const unsigned char *entry, uint32_t *siz
     return out;
 }
 
+/* one entry of a zip (name compared without case, '/' or '\\'); caller frees with gripline_zip_free */
+unsigned char *gripline_zip_extract(const wchar_t *zip_path, const char *entry, uint32_t *size) {
+    Zip z;
+    if (!zip_open(&z, zip_path)) return NULL;
+    size_t wanted = text_length(entry);
+    unsigned char *data = NULL;
+    const unsigned char *e = z.directory;
+    for (uint32_t k = 0; k < z.entries && e + 46 <= z.directory + z.directory_size; ++k) {
+        uint16_t nl = rd16(e + 28);
+        const char *name = (const char *)e + 46;
+        int match = nl == wanted;
+        for (uint16_t c = 0; match && c < nl; ++c) match = lower(name[c]) == lower(entry[c]);
+        if (match) {
+            data = zip_read(&z, e, size);
+            break;
+        }
+        e += 46 + nl + rd16(e + 30) + rd16(e + 32);
+    }
+    zip_close(&z);
+    return data;
+}
+
+void gripline_zip_free(void *data) {
+    mem_free(data);
+}
+
 /* ------------------------------------------------------------------ Oodle1 */
 
 #define ONE 0x4000u
