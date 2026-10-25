@@ -8,7 +8,7 @@
 #include "cockpit.h"
 #include "cockpit_view.h"
 
-#define COCKPIT_VERSION 2
+#define COCKPIT_VERSION 3
 #define COCKPIT_FOLDER L"gripline_cockpit"
 #define HALF_SAMPLES 121
 #define SAMPLES (2 * HALF_SAMPLES)
@@ -1125,18 +1125,18 @@ static int point_curve(Gr2 *g, uint32_t abs, uint32_t dak_section, uint32_t dak_
     Reloc *list = vs == 0 ? relocs0 : g->relocs[vs];
     uint32_t list_count = vs == 0 ? relocs0_count : g->reloc_count[vs];
     int hit = 0;
+    for (uint32_t r = 0; r < list_count; ++r) hit += list[r].src == vo || list[r].src == vo + g->P;
+    if (hit != 2) return 0; /* change nothing unless both pointers are there */
     for (uint32_t r = 0; r < list_count; ++r) {
         if (list[r].src == vo) {
             list[r].ts = dak_section;
             list[r].to = dak_offset;
-            ++hit;
         } else if (list[r].src == vo + g->P) {
             list[r].ts = 0;
             list[r].to = object;
-            ++hit;
         }
     }
-    return hit == 2;
+    return 1;
 }
 
 /* GR2 with the new steering wheel curve, or NULL (why = reason). maxdeg per side. */
@@ -1228,6 +1228,9 @@ static unsigned char *steering_gr2(const unsigned char *src, size_t src_length, 
     /* every other track (the driver) plays in [0, TURN_SPLIT] of the time */
     static uint32_t squeezed[1024];
     uint32_t squeezed_count = 0;
+    /* the driver's top bones: shrunk in the second part too. The driver's curves end at TURN_SPLIT and
+       Granny runs them on past their end there (feet flying up), shrunk the whole body is one point. */
+    uint32_t body[2] = {UINT32_MAX, UINT32_MAX}, body_ss = UINT32_MAX;
     for (uint32_t i = 0; i < tg_count; ++i) {
         uint32_t tg = gr2_p(&g, tg_array + i * P);
         Member ttm;
@@ -1238,6 +1241,12 @@ static unsigned char *steering_gr2(const unsigned char *src, size_t src_length, 
         const char *curves[3] = {"OrientationCurve", "PositionCurve", "ScaleShearCurve"};
         for (uint32_t k = 0; es && k < count; ++k) {
             uint32_t e = array + k * es;
+            const char *track_name = gr2_cstr(&g, gr2_p(&g, e));
+            int top = same_text(track_name, "GrannyRootBone") ? 0 : same_text(track_name, "Hips") ? 1 : -1;
+            if (top >= 0) {
+                body[top] = e;
+                body_ss = gr2_member(&g, ttm.sub, "ScaleShearCurve", NULL);
+            }
             if (e == track && turning) continue;
             for (int c = 0; c < 3; ++c) {
                 uint32_t co = gr2_member(&g, ttm.sub, curves[c], NULL);
@@ -1346,6 +1355,9 @@ static unsigned char *steering_gr2(const unsigned char *src, size_t src_length, 
         (turning && !point_curve(&g, track + track_oc, dak_section, dak_offset, obj, relocs0, relocs0_count)) ||
         !point_curve(&g, track + track_ss, dak_section, dak_offset, sobj, relocs0, relocs0_count))
         goto done;
+    for (int k = 0; k < 2; ++k)
+        if (body[k] != UINT32_MAX && body_ss != UINT32_MAX)
+            point_curve(&g, body[k] + body_ss, dak_section, dak_offset, sobj, relocs0, relocs0_count);
     if (turning) {
         reloc_add(&relocs0, &relocs0_count, &relocs0_capacity, obj + 8, 0, kn);
         reloc_add(&relocs0, &relocs0_count, &relocs0_capacity, obj + 8 + P + 4, 0, cn);
