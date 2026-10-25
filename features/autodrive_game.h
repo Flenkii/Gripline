@@ -21,6 +21,8 @@ typedef struct {
 
 void autodrive_game_bind(unsigned char *image);
 int autodrive_game_get_hud(AutodriveHud *hud);
+/* 1 while the simulation runs (driving, not paused / loading). Safe from any thread. */
+int autodrive_game_simulation_running(void);
 void autodrive_game_release_shared(GameShared *value);
 int autodrive_game_is_freeroam(void);
 int autodrive_game_can_start(void *controller);

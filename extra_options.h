@@ -46,7 +46,8 @@ typedef enum {
     GROUP_CLUBS,
     GROUP_RIVALS,
     GROUP_VEHICLE_CONTROLS,
-    GROUP_AERO_TUNING
+    GROUP_AERO_TUNING,
+    GROUP_UI_RENDER /* UI draw hooks: Autodrive cinematic and creator mode hide the UI */
 } PatchGroup;
 
 typedef struct {

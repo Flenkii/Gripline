@@ -39,7 +39,7 @@ static SRWLOCK lock = SRWLOCK_INIT;
 static Card cards[MAX_CARDS]; /* [0] = newest */
 static unsigned card_count, next_id = 1;
 static volatile LONG cards_changed;
-static volatile LONG enabled = 1, broken;
+static volatile LONG enabled = 1, broken, hidden;
 
 /* ------------------------------------------------------------------ public */
 
@@ -148,6 +148,10 @@ static void show_card(const char *text, ULONGLONG hold, unsigned tag) {
 
 void notify_set_enabled(int on) {
     InterlockedExchange(&enabled, on ? 1 : 0);
+}
+
+void notify_set_hidden(int on) {
+    InterlockedExchange(&hidden, on ? 1 : 0);
 }
 
 int notify_enabled(void) {
@@ -788,7 +792,7 @@ static void before_present(IDXGISwapChain *swapchain) {
         if (!first_present) first_present = now;
         if (now - first_present >= DEFER_MS) flush_pending();
     }
-    if (!enabled || broken || !card_count || swapchain != swapchain_seen) return;
+    if (!enabled || hidden || broken || !card_count || swapchain != swapchain_seen) return;
     __try {
         render(swapchain);
     } __except (EXCEPTION_EXECUTE_HANDLER) {

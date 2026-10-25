@@ -30,4 +30,7 @@ int notify_install(unsigned char *host);
 void notify_set_enabled(int enabled);
 int notify_enabled(void);
 
+/* Creator mode (creator_mode.h): while hidden no card is drawn; new cards wait and show afterwards. */
+void notify_set_hidden(int hidden);
+
 #endif
