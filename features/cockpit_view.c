@@ -32,6 +32,10 @@ void cockpit_view_set_offset(int forward_cm, int up_cm) {
     InterlockedExchange(&up_mm, up_cm * 10);
 }
 
+int cockpit_view_second(void) {
+    return second_view != 0;
+}
+
 static void set_view(LONG on) {
     if (InterlockedExchange(&second_view, on) != on)
         log_append(on ? "COCKPIT VIEW: second view (at the gauges)\r\n" : "COCKPIT VIEW: normal view\r\n");

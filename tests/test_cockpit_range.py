@@ -63,7 +63,7 @@ class GameEmu(Emu):
 def make(copy_game_code=True):
     e = GameEmu(DLL, '/tmp')
     if copy_game_code:
-        for lo, hi in [(0x293000, 0x295000), (0x2a9000, 0x2aa000), (0x2c5c000, 0x2c5d000), (0x2363000, 0x2364000)]:
+        for lo, hi in [(0x293000, 0x295000), (0x2a9000, 0x2aa000), (0x2c5c000, 0x2c5d000), (0x2363000, 0x2364000), (0xf7c000, 0xf7d000)]:
             e.mu.mem_write(GAME + lo, game_bytes[lo:hi])
     return e
 
@@ -100,6 +100,25 @@ check(abs(limit_used(e, GETTER + 0x10) - limit) < 1e-5, 'Animationswert 1 bei 45
 check(abs(e.rf(GAME + 0x2c5c58c) - math.pi / 2) < 1e-6, 'Konstante pi/2 des Spiels selbst unveraendert')
 worst = max(abs(wheel_shown(e, s, 900) - s * 450) for s in (-1, -0.5, -0.1, 0, 0.05, 0.2, 0.5, 0.8, 1))
 check(worst < 0.05, f'Lenkrad im Spiel = echtes Rad (max Abweichung {worst:.3f} Grad)')
+
+print('Zweite Cockpit-Ansicht: Lenkrad-Teil der Animation')
+site = bytes(e.mu.mem_read(GAME + 0xf7c745, 6))
+check(site[0] == 0xe8 and site[5] == 0x90, f'Turn-Aufruf umgeleitet: {site.hex()}')
+stub = GAME + 0xf7c745 + 5 + struct.unpack('<i', site[1:5])[0]
+check(bytes(e.mu.mem_read(stub, 10)) == bytes.fromhex('4883ec28ff9060010000'), 'Stub ruft den Original-Getter')
+def turn(v):
+    from unicorn.x86_const import UC_X86_REG_XMM0
+    e.mu.reg_write(UC_X86_REG_XMM0, struct.unpack('<I', struct.pack('<f', v))[0])
+    e.call('Fh2TestTurnValue')
+    r = struct.unpack('<f', struct.pack('<I', e.mu.reg_read(UC_X86_REG_XMM0) & 0xffffffff))[0]
+    return (r + 0.999) * 0.5  # Turn as the game computes it
+game_turn = lambda v: min(1, max(0, (v + 0.999) * 0.5))
+worst = max(abs(turn(v) - 0.48 * game_turn(v)) for v in (-1, -0.5, 0, 0.3, 1))
+check(worst < 1e-4, f'normal: Lenkrad-Teil 0..0.48 (Abw. {worst:.6f})')
+e.call('Fh2TestCockpitView', 0, 1, 35, -5)
+worst = max(abs(turn(v) - (0.52 + 0.48 * game_turn(v))) for v in (-1, -0.5, 0, 0.3, 1))
+check(worst < 1e-4, f'Cockpit 2: Teil ohne Lenkrad 0.52..1 (Abw. {worst:.6f})')
+e.call('Fh2TestCockpitView', 0, 1, 35, -5)
 
 print('Mit Patch (1080 Grad):')
 e = make()

@@ -12,6 +12,9 @@ void cockpit_view_set_offset(int forward_cm, int up_cm);
 enum { COCKPIT_VIEW_KEYBOARD, COCKPIT_VIEW_WHEEL };
 void cockpit_view_input(unsigned source, int held);
 
+/* 1 while the second view is on (cockpit.c then plays the steering animation part without the wheel). */
+int cockpit_view_second(void);
+
 /* Every frame with the active driver camera (from the FOV hook). */
 void cockpit_view_frame(void *camera);
 

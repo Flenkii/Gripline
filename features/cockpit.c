@@ -6,10 +6,17 @@
 #include "logging.h"
 #include "support.h"
 #include "cockpit.h"
+#include "cockpit_view.h"
 
-#define COCKPIT_VERSION 1
+#define COCKPIT_VERSION 2
 #define COCKPIT_FOLDER L"gripline_cockpit"
-#define SAMPLES 241
+#define HALF_SAMPLES 121
+#define SAMPLES (2 * HALF_SAMPLES)
+/* The animation time holds two copies of the steering: [0, TURN_SPLIT] with the wheel shown, and
+   [1 - TURN_SPLIT, 1] with the wheel shrunk to nothing (second cockpit view). The game's "Turn" value
+   is moved into one of them at runtime (cockpit_patch_game). */
+#define TURN_SPLIT 0.48
+#define HIDDEN_SCALE 0.0001f
 
 /* ------------------------------------------------------------------ memory, math */
 
@@ -1067,6 +1074,71 @@ static void reloc_add(Reloc **list, uint32_t *count, uint32_t *capacity, uint32_
     ++*count;
 }
 
+static void gr2_put(Gr2 *g, uint32_t abs, const void *value, uint32_t size) {
+    uint32_t section, offset;
+    if (!gr2_ok(g, abs, size) || !gr2_sec_of(g, abs, &section, &offset)) return;
+    memory_copy(g->buf + abs, value, size);
+    memory_copy(g->datas[section] + offset, value, size);
+}
+
+/* Moves the knots of a curve (variant: type definition td, object obj) into [0, TURN_SPLIT] of the
+   time. Every keyed Granny curve keeps its knots as Knots (floats) or quantized with
+   OneOverKnotScale / OneOverKnotScaleTrunc; constant curves have none. */
+static void squeeze_curve(Gr2 *g, uint32_t td, uint32_t obj, uint32_t *done, uint32_t *done_count) {
+    if (td == UINT32_MAX || obj == UINT32_MAX) return;
+    for (uint32_t i = 0; i < *done_count; ++i)
+        if (done[i] == obj) return; /* a curve shared by two tracks: only once */
+    if (*done_count < 1024) done[(*done_count)++] = obj;
+    Member m;
+    uint32_t off = gr2_member(g, td, "OneOverKnotScale", &m);
+    if (off != UINT32_MAX && m.type == 10 && gr2_ok(g, obj + off, 4)) {
+        float f = rdf(g->buf + obj + off) / (float)TURN_SPLIT;
+        gr2_put(g, obj + off, &f, 4);
+    }
+    off = gr2_member(g, td, "OneOverKnotScaleTrunc", &m);
+    if (off != UINT32_MAX && gr2_ok(g, obj + off, 2)) {
+        uint16_t trunc;
+        memory_copy(&trunc, g->buf + obj + off, 2);
+        uint32_t bits = (uint32_t)trunc << 16;
+        float f;
+        memory_copy(&f, &bits, 4);
+        f /= (float)TURN_SPLIT;
+        memory_copy(&bits, &f, 4);
+        trunc = (uint16_t)((bits + 0xffffu) >> 16); /* round the scale up: knots stay inside */
+        gr2_put(g, obj + off, &trunc, 2);
+    }
+    off = gr2_member(g, td, "Knots", &m);
+    if (off != UINT32_MAX && m.type == 3 && gr2_ok(g, obj + off, 4 + g->P)) {
+        uint32_t count = gr2_u32(g, obj + off), knots = gr2_p(g, obj + off + 4);
+        for (uint32_t k = 0; knots != UINT32_MAX && k < count && gr2_ok(g, knots + 4 * k, 4); ++k) {
+            float f = rdf(g->buf + knots + 4 * k) * (float)TURN_SPLIT;
+            gr2_put(g, knots + 4 * k, &f, 4);
+        }
+    }
+}
+
+/* points a curve variant (at abs, in the file) at type (dak_section, dak_offset) and the new object */
+static int point_curve(Gr2 *g, uint32_t abs, uint32_t dak_section, uint32_t dak_offset, uint32_t object,
+                       Reloc *relocs0, uint32_t relocs0_count) {
+    uint32_t vs, vo;
+    if (!gr2_sec_of(g, abs, &vs, &vo)) return 0;
+    Reloc *list = vs == 0 ? relocs0 : g->relocs[vs];
+    uint32_t list_count = vs == 0 ? relocs0_count : g->reloc_count[vs];
+    int hit = 0;
+    for (uint32_t r = 0; r < list_count; ++r) {
+        if (list[r].src == vo) {
+            list[r].ts = dak_section;
+            list[r].to = dak_offset;
+            ++hit;
+        } else if (list[r].src == vo + g->P) {
+            list[r].ts = 0;
+            list[r].to = object;
+            ++hit;
+        }
+    }
+    return hit == 2;
+}
+
 /* GR2 with the new steering wheel curve, or NULL (why = reason). maxdeg per side. */
 static unsigned char *steering_gr2(const unsigned char *src, size_t src_length, double maxdeg, double curve,
                                    size_t *out_length, const char **why) {
@@ -1088,7 +1160,7 @@ static unsigned char *steering_gr2(const unsigned char *src, size_t src_length, 
     *why = "no track groups";
     if (o == UINT32_MAX) goto done;
     uint32_t tg_count = gr2_u32(&g, rob + o), tg_array = gr2_p(&g, rob + o + 4);
-    uint32_t track = UINT32_MAX, track_oc = 0, dak_td = UINT32_MAX, hdr_td = UINT32_MAX;
+    uint32_t track = UINT32_MAX, track_oc = 0, track_ss = UINT32_MAX, dak_td = UINT32_MAX, hdr_td = UINT32_MAX;
     for (uint32_t i = 0; i < tg_count; ++i) {
         uint32_t tg = gr2_p(&g, tg_array + i * P);
         Member ttm;
@@ -1107,6 +1179,7 @@ static unsigned char *steering_gr2(const unsigned char *src, size_t src_length, 
             if (same_text(gr2_cstr(&g, gr2_p(&g, e)), bone)) {
                 track = e;
                 track_oc = oc;
+                track_ss = gr2_member(&g, ttm.sub, "ScaleShearCurve", NULL);
             }
         }
     }
@@ -1143,6 +1216,28 @@ static unsigned char *steering_gr2(const unsigned char *src, size_t src_length, 
     uint32_t dur_off = gr2_member(&g, am.sub, "Duration", NULL);
     if (anim == UINT32_MAX || dur_off == UINT32_MAX || !gr2_ok(&g, anim + dur_off, 4)) goto done;
     double dur = rdf(g.buf + anim + dur_off);
+    *why = "no scale curve";
+    if (track_ss == UINT32_MAX) goto done;
+    /* every other track (the driver) plays in [0, TURN_SPLIT] of the time */
+    static uint32_t squeezed[1024];
+    uint32_t squeezed_count = 0;
+    for (uint32_t i = 0; i < tg_count; ++i) {
+        uint32_t tg = gr2_p(&g, tg_array + i * P);
+        Member ttm;
+        uint32_t o2 = gr2_member(&g, tgm.sub, "TransformTracks", &ttm);
+        if (tg == UINT32_MAX || o2 == UINT32_MAX) continue;
+        uint32_t count = gr2_u32(&g, tg + o2), array = gr2_p(&g, tg + o2 + 4);
+        uint32_t es = gr2_size_of(&g, ttm.sub, 0);
+        const char *curves[3] = {"OrientationCurve", "PositionCurve", "ScaleShearCurve"};
+        for (uint32_t k = 0; es && k < count; ++k) {
+            uint32_t e = array + k * es;
+            if (e == track) continue;
+            for (int c = 0; c < 3; ++c) {
+                uint32_t co = gr2_member(&g, ttm.sub, curves[c], NULL);
+                if (co != UINT32_MAX) squeeze_curve(&g, gr2_p(&g, e + co), gr2_p(&g, e + co + P), squeezed, &squeezed_count);
+            }
+        }
+    }
     *why = "out of memory";
     bytes_put(&sec0, g.datas[0], g.data_length[0]);
     for (uint32_t r = 0; r < g.reloc_count[0]; ++r)
@@ -1197,14 +1292,14 @@ static unsigned char *steering_gr2(const unsigned char *src, size_t src_length, 
     bytes_align(&sec0, 8);
     uint32_t kn = (uint32_t)sec0.length;
     for (int i = 0; i < SAMPLES; ++i) {
-        float k = (float)(dur * i / (SAMPLES - 1));
+        double part = (double)(i % HALF_SAMPLES) / (HALF_SAMPLES - 1);
+        float k = (float)(dur * ((i < HALF_SAMPLES ? 0.0 : 1.0 - TURN_SPLIT) + TURN_SPLIT * part));
         bytes_put(&sec0, &k, 4);
     }
     bytes_align(&sec0, 8);
     uint32_t cn = (uint32_t)sec0.length;
     for (int i = 0; i < SAMPLES; ++i) {
-        double tk = dur * i / (SAMPLES - 1);
-        double u = 1 - 2 * tk / dur;
+        double u = 1 - 2 * (double)(i % HALF_SAMPLES) / (HALF_SAMPLES - 1);
         if (curve > 1.0) {
             double a = u < 0 ? -u : u;
             double m = 1 - dpow(1 - (a < 1.0 ? a : 1.0), 1.0 / curve);
@@ -1218,26 +1313,32 @@ static unsigned char *steering_gr2(const unsigned char *src, size_t src_length, 
             bytes_put(&sec0, &f, 4);
         }
     }
-    uint32_t vs, vo;
-    *why = "pointer not found";
-    if (sec0.failed || !gr2_sec_of(&g, track + track_oc, &vs, &vo)) goto done;
-    Reloc *list = vs == 0 ? relocs0 : g.relocs[vs];
-    uint32_t list_count = vs == 0 ? relocs0_count : g.reloc_count[vs];
-    int hit = 0;
-    for (uint32_t r = 0; r < list_count; ++r) {
-        if (list[r].src == vo) {
-            list[r].ts = dak_section;
-            list[r].to = dak_offset;
-            ++hit;
-        } else if (list[r].src == vo + P) {
-            list[r].ts = 0;
-            list[r].to = obj;
-            ++hit;
-        }
+    /* scale of the wheel: 1 in the first part, almost 0 in the second (3x3 matrix per knot) */
+    bytes_align(&sec0, 8);
+    uint32_t sobj = (uint32_t)sec0.length;
+    bytes_put(&sec0, head, 4);
+    bytes_u32(&sec0, 4);
+    bytes_put(&sec0, NULL, P);
+    bytes_u32(&sec0, 4 * 9);
+    bytes_put(&sec0, NULL, P);
+    bytes_align(&sec0, 8);
+    uint32_t skn = (uint32_t)sec0.length;
+    float scale_knots[4] = {0.0f, (float)(dur * TURN_SPLIT), (float)(dur * (1.0 - TURN_SPLIT)), (float)dur};
+    bytes_put(&sec0, scale_knots, sizeof(scale_knots));
+    bytes_align(&sec0, 8);
+    uint32_t scn = (uint32_t)sec0.length;
+    for (int k = 0; k < 4; ++k) {
+        float v = k < 2 ? 1.0f : HIDDEN_SCALE, zero = 0.0f;
+        for (int cell = 0; cell < 9; ++cell) bytes_put(&sec0, cell % 4 == 0 ? &v : &zero, 4);
     }
-    if (hit != 2) goto done;
+    *why = "pointer not found";
+    if (sec0.failed || !point_curve(&g, track + track_oc, dak_section, dak_offset, obj, relocs0, relocs0_count) ||
+        !point_curve(&g, track + track_ss, dak_section, dak_offset, sobj, relocs0, relocs0_count))
+        goto done;
     reloc_add(&relocs0, &relocs0_count, &relocs0_capacity, obj + 8, 0, kn);
     reloc_add(&relocs0, &relocs0_count, &relocs0_capacity, obj + 8 + P + 4, 0, cn);
+    reloc_add(&relocs0, &relocs0_count, &relocs0_capacity, sobj + 8, 0, skn);
+    reloc_add(&relocs0, &relocs0_count, &relocs0_capacity, sobj + 8 + P + 4, 0, scn);
     /* write: header, sections uncompressed, relocations, marshalling */
     *why = "out of memory";
     bytes_put(&out, g.d, g.hsize);
@@ -1632,6 +1733,40 @@ int cockpit_wait_ready(void) {
 #define RVA_STEER_CLAMP 0x2a989du  /* vmovss xmm7, [pi/2]       presentation steering filter */
 #define RVA_STEER_NORMAL 0x293ff0u /* vdivss xmm0, xmm1, [pi/2] driver animation value */
 #define RVA_HALF_PI 0x2c5c58cu
+/* car presentation update: Turn = (car->vtable[0x160]() + 0.999) * 0.5, then set as GameScalars:Turn */
+#define RVA_TURN_CALL 0xf7c745u
+
+/* the game's steering value -> the part of the animation to play (see TURN_SPLIT) */
+static float turn_value(float value) {
+    float turn = (value + 0.999f) * 0.5f;
+    if (!(turn >= 0.0f)) turn = 0.0f;
+    if (turn > 1.0f) turn = 1.0f;
+    turn = cockpit_view_second() ? (float)(1.0 - TURN_SPLIT) + (float)TURN_SPLIT * turn : (float)TURN_SPLIT * turn;
+    return turn * 2.0f - 0.999f;
+}
+
+/* call [rax+0x160] -> call stub: the original call, then turn_value */
+static int hook_turn(unsigned char *page) {
+    /* call [rax+0x160]; vaddss xmm1, xmm0, xmm9 */
+    static const unsigned char original[10] = {0xff, 0x90, 0x60, 0x01, 0x00, 0x00, 0xc4, 0xc1, 0x7a, 0x58};
+    unsigned char *site = game + RVA_TURN_CALL;
+    if (!memory_equal(site, original, sizeof(original))) return 0;
+    unsigned char stub[32] = {0x48, 0x83, 0xec, 0x28, 0xff, 0x90, 0x60, 0x01, 0x00, 0x00, 0x48, 0xb8};
+    uint64_t function = (uint64_t)(uintptr_t)turn_value;
+    memory_copy(stub + 12, &function, 8);
+    static const unsigned char tail[] = {0xff, 0xd0, 0x48, 0x83, 0xc4, 0x28, 0xc3};
+    memory_copy(stub + 20, tail, sizeof(tail));
+    memory_copy(page, stub, sizeof(stub));
+    unsigned char call[6] = {0xe8, 0, 0, 0, 0, 0x90};
+    int32_t rel = (int32_t)(page - (site + 5));
+    memory_copy(call + 1, &rel, 4);
+    DWORD old;
+    if (!VirtualProtect(site, 6, PAGE_EXECUTE_READWRITE, &old)) return 0;
+    memory_copy(site, call, 6);
+    VirtualProtect(site, 6, old, &old);
+    FlushInstructionCache(GetCurrentProcess(), site, 6);
+    return 1;
+}
 
 int cockpit_patch_game(void) {
     static const struct {
@@ -1655,8 +1790,12 @@ int cockpit_patch_game(void) {
     }
     float limit = (float)(want_rotation / 2.0 * PI / 180.0);
     memory_copy(page, &limit, sizeof(limit));
+    int turn_hooked = hook_turn(page + 0x40);
     DWORD old;
-    VirtualProtect(page, 0x1000, PAGE_READONLY, &old);
+    VirtualProtect(page, 0x1000, PAGE_EXECUTE_READ, &old);
+    FlushInstructionCache(GetCurrentProcess(), page, 0x1000);
+    log_append(turn_hooked ? "COCKPIT: second cockpit view hides the steering wheel.\r\n"
+                           : "COCKPIT: game code differs - the second cockpit view keeps the steering wheel.\r\n");
     for (int i = 0; i < 2; ++i) {
         unsigned char *at = game + sites[i].rva + 4;
         int32_t disp = (int32_t)(page - (at + 4));
@@ -1670,6 +1809,10 @@ int cockpit_patch_game(void) {
 }
 
 #ifdef FH2_TWEAKS_TEST
+__declspec(dllexport) float Fh2TestTurnValue(float value) {
+    return turn_value(value);
+}
+
 __declspec(dllexport) int Fh2TestCockpitPatch(unsigned char *game_image, int rotation) {
     game = game_image;
     want_rotation = rotation;
