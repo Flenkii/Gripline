@@ -100,7 +100,7 @@ try:
     check(True, 'resources + content are well-formed XML')
 except Exception as ex:
     check(False, f'well-formed XML: {ex}')
-for prop in ('EoRigWheelEnabled', 'EoRigButton1', 'EoKeyEnabled', 'EoRigWeather', 'EoGripSteering', 'EoGripNotify'):
+for prop in ('EoRigWheelEnabled', 'EoRigButton1', 'EoKeyEnabled', 'EoRigWeather', 'EoRigTimeOfDay', 'EoGripSteering', 'EoGripNotify'):
     check('{Binding %s}' % prop in content and 'x:Key="EO_%s"' % prop in res, f'row + description for {prop}')
 check('Cockpit: Full Steering Animation' in res and 'Gripline: Notifications' in res, 'English texts before the game runs')
 
