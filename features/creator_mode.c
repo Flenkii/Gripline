@@ -1,11 +1,11 @@
 /* Creator mode. Gripline's cards (notify.c) are simply not drawn while it is on; the game's HUD
-   is hidden through the game's own HUD switch (see hud_set_hidden). */
+   is hidden in the UI draw hooks (see hud_set_hidden). */
 #include "creator_mode.h"
 #include "notify.h"
+#include "autodrive_ui.h"
 #include "logging.h"
 #include "support.h"
 
-static unsigned char *image;
 static volatile LONG active;
 static volatile LONG held_by[2];
 
@@ -13,9 +13,10 @@ int creator_mode_active(void) {
     return active != 0;
 }
 
+/* The game's whole UI (HUD, minimap, prompts) is not drawn while driving, through the same
+   draw hooks as the Autodrive cinematic camera; menus and loading screens stay. */
 static void hud_set_hidden(int hidden) {
-    (void)hidden;
-    (void)image;
+    autodrive_ui_set_creator(hidden);
 }
 
 static void set_active(LONG on) {
@@ -31,6 +32,12 @@ void creator_mode_input(unsigned source, int held) {
     if (held && !before) set_active(!active);
 }
 
-void creator_mode_start(unsigned char *game_image) {
-    image = game_image;
+#ifdef FH2_TWEAKS_TEST
+#include "autodrive_game.h"
+/* Binds a fake game image (player manager -> simulation -> paused) and gives one input. */
+__declspec(dllexport) int Fh2TestCreatorMode(unsigned char *game_image, unsigned source, int held) {
+    autodrive_game_bind(game_image);
+    creator_mode_input(source, held);
+    return creator_mode_active();
 }
+#endif

@@ -94,6 +94,12 @@ int autodrive_game_driving_input(void *controller) {
     return triggers[0] || triggers[1] || steering < -0.05f || steering > 0.05f;
 }
 
+static int simulation_is_running(void);
+
+int autodrive_game_simulation_running(void) {
+    return simulation_is_running();
+}
+
 static int simulation_is_running(void) {
     void *game, *simulation;
     unsigned char paused;

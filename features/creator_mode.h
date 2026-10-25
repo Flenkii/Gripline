@@ -11,7 +11,4 @@ void creator_mode_input(unsigned source, int held);
 /* 1 while creator mode is on. */
 int creator_mode_active(void);
 
-/* Game start. */
-void creator_mode_start(unsigned char *game_image);
-
 #endif

@@ -240,7 +240,7 @@ void autodrive_prepare_hooks(unsigned char *image, const ModOptions *options) {
         autodrive_hook_patches[i] = (PatchDefinition){slots[i],
                                                       0,
                                                       8,
-                                                      GROUP_AUTODRIVE,
+                                                      i < 6 ? GROUP_AUTODRIVE : GROUP_UI_RENDER,
                                                       names[i],
                                                       original_pointers[i],
                                                       hook_pointers[i],

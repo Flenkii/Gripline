@@ -116,6 +116,8 @@ static int patch_group_enabled(PatchGroup group, const ModOptions *options) {
         case GROUP_AERO_TUNING:
         case GROUP_VEHICLE_CONTROLS:
             return 1;
+        case GROUP_UI_RENDER:
+            return 1;
         case GROUP_AUTODRIVE:
             return options->autodrive;
         case GROUP_TREASURE_MAP:

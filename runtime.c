@@ -6,7 +6,6 @@
 #include "features/notify.h"
 #include "features/cockpit.h"
 #include "features/cockpit_view.h"
-#include "features/creator_mode.h"
 #include "features/mod_scan.h"
 #include "features/report.h"
 #include "features/rig_settings.h"
@@ -104,7 +103,6 @@ int runtime_initialize(unsigned char *game_image, const wchar_t *executable_path
         keyboard_pad_game_start(game_image, settings_directory);
         nitro_link_start(game_image);
         cockpit_view_start(game_image);
-        creator_mode_start(game_image);
         {
             /* always: the second cockpit view hides the wheel with these files; the full steering
                animation (1:1, hands hidden) only when it is on */
