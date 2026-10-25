@@ -113,11 +113,11 @@ def turn(v):
     r = struct.unpack('<f', struct.pack('<I', e.mu.reg_read(UC_X86_REG_XMM0) & 0xffffffff))[0]
     return (r + 0.999) * 0.5  # Turn as the game computes it
 game_turn = lambda v: min(1, max(0, (v + 0.999) * 0.5))
-worst = max(abs(turn(v) - 0.48 * game_turn(v)) for v in (-1, -0.5, 0, 0.3, 1))
-check(worst < 1e-4, f'normal: Lenkrad-Teil 0..0.48 (Abw. {worst:.6f})')
+worst = max(abs(turn(v) - 0.40 * game_turn(v)) for v in (-1, -0.5, 0, 0.3, 1))
+check(worst < 1e-4, f'normal: Lenkrad-Teil 0..0.40 (Abw. {worst:.6f})')
 e.call('Fh2TestCockpitView', 0, 1, 35, -5)
-worst = max(abs(turn(v) - (0.52 + 0.48 * game_turn(v))) for v in (-1, -0.5, 0, 0.3, 1))
-check(worst < 1e-4, f'Cockpit 2: Teil ohne Lenkrad 0.52..1 (Abw. {worst:.6f})')
+worst = max(abs(turn(v) - (0.60 + 0.40 * game_turn(v))) for v in (-1, -0.5, 0, 0.3, 1))
+check(worst < 1e-4, f'Cockpit 2: Teil ohne Lenkrad 0.60..1 (Abw. {worst:.6f})')
 e.call('Fh2TestCockpitView', 0, 1, 35, -5)
 
 print('Mit Patch (1080 Grad):')

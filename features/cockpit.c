@@ -8,14 +8,17 @@
 #include "cockpit.h"
 #include "cockpit_view.h"
 
-#define COCKPIT_VERSION 3
+#define COCKPIT_VERSION 4
 #define COCKPIT_FOLDER L"gripline_cockpit"
 #define HALF_SAMPLES 121
-#define SAMPLES (2 * HALF_SAMPLES)
-/* The animation time holds two copies of the steering: [0, TURN_SPLIT] with the wheel shown, and
-   [1 - TURN_SPLIT, 1] with the wheel shrunk to nothing (second cockpit view). The game's "Turn" value
-   is moved into one of them at runtime (cockpit_patch_game). */
-#define TURN_SPLIT 0.48
+#define SAMPLES (2 * HALF_SAMPLES + 2) /* + the held ends at TURN_SPLIT */
+/* The animation time holds two copies of the steering: [0, TURN_PART] with the wheel shown, and
+   [1 - TURN_PART, 1] with the wheel shrunk to nothing (second cockpit view). The game's "Turn" value
+   is moved into one of them at runtime (cockpit_patch_game). The wheel shrinks between TURN_SPLIT and
+   1 - TURN_SPLIT; the wheel holds its full lock until there. The gap is for the game running the time
+   a little past full lock (the wheel tilted and grew there). */
+#define TURN_PART 0.40
+#define TURN_SPLIT 0.47
 #define HIDDEN_SCALE 0.0001f
 
 /* ------------------------------------------------------------------ memory, math */
@@ -1081,7 +1084,7 @@ static void gr2_put(Gr2 *g, uint32_t abs, const void *value, uint32_t size) {
     memory_copy(g->datas[section] + offset, value, size);
 }
 
-/* Moves the knots of a curve (variant: type definition td, object obj) into [0, TURN_SPLIT] of the
+/* Moves the knots of a curve (variant: type definition td, object obj) into [0, TURN_PART] of the
    time. Every keyed Granny curve keeps its knots as Knots (floats) or quantized with
    OneOverKnotScale / OneOverKnotScaleTrunc; constant curves have none. */
 static void squeeze_curve(Gr2 *g, uint32_t td, uint32_t obj, uint32_t *done, uint32_t *done_count) {
@@ -1092,7 +1095,7 @@ static void squeeze_curve(Gr2 *g, uint32_t td, uint32_t obj, uint32_t *done, uin
     Member m;
     uint32_t off = gr2_member(g, td, "OneOverKnotScale", &m);
     if (off != UINT32_MAX && m.type == 10 && gr2_ok(g, obj + off, 4)) {
-        float f = rdf(g->buf + obj + off) / (float)TURN_SPLIT;
+        float f = rdf(g->buf + obj + off) / (float)TURN_PART;
         gr2_put(g, obj + off, &f, 4);
     }
     off = gr2_member(g, td, "OneOverKnotScaleTrunc", &m);
@@ -1102,7 +1105,7 @@ static void squeeze_curve(Gr2 *g, uint32_t td, uint32_t obj, uint32_t *done, uin
         uint32_t bits = (uint32_t)trunc << 16;
         float f;
         memory_copy(&f, &bits, 4);
-        f /= (float)TURN_SPLIT;
+        f /= (float)TURN_PART;
         memory_copy(&bits, &f, 4);
         trunc = (uint16_t)((bits + 0xffffu) >> 16); /* round the scale up: knots stay inside */
         gr2_put(g, obj + off, &trunc, 2);
@@ -1111,7 +1114,7 @@ static void squeeze_curve(Gr2 *g, uint32_t td, uint32_t obj, uint32_t *done, uin
     if (off != UINT32_MAX && m.type == 3 && gr2_ok(g, obj + off, 4 + g->P)) {
         uint32_t count = gr2_u32(g, obj + off), knots = gr2_p(g, obj + off + 4);
         for (uint32_t k = 0; knots != UINT32_MAX && k < count && gr2_ok(g, knots + 4 * k, 4); ++k) {
-            float f = rdf(g->buf + knots + 4 * k) * (float)TURN_SPLIT;
+            float f = rdf(g->buf + knots + 4 * k) * (float)TURN_PART;
             gr2_put(g, knots + 4 * k, &f, 4);
         }
     }
@@ -1225,10 +1228,10 @@ static unsigned char *steering_gr2(const unsigned char *src, size_t src_length, 
     double dur = rdf(g.buf + anim + dur_off);
     *why = "no scale curve";
     if (track_ss == UINT32_MAX) goto done;
-    /* every other track (the driver) plays in [0, TURN_SPLIT] of the time */
+    /* every other track (the driver) plays in [0, TURN_PART] of the time */
     static uint32_t squeezed[1024];
     uint32_t squeezed_count = 0;
-    /* the driver's top bones: shrunk in the second part too. The driver's curves end at TURN_SPLIT and
+    /* the driver's top bones: shrunk in the second part too. The driver's curves end at TURN_PART and
        Granny runs them on past their end there (feet flying up), shrunk the whole body is one point. */
     uint32_t body[2] = {UINT32_MAX, UINT32_MAX}, body_ss = UINT32_MAX;
     for (uint32_t i = 0; i < tg_count; ++i) {
@@ -1309,14 +1312,18 @@ static unsigned char *steering_gr2(const unsigned char *src, size_t src_length, 
         bytes_put(&sec0, NULL, P);
         bytes_align(&sec0, 8);
         kn = (uint32_t)sec0.length;
-        for (int i = 0; i < SAMPLES; ++i) {
+        for (int j = 0; j < SAMPLES; ++j) {
+            int i = j < HALF_SAMPLES ? j : j - 2;
             double part = (double)(i % HALF_SAMPLES) / (HALF_SAMPLES - 1);
-            float k = (float)(dur * ((i < HALF_SAMPLES ? 0.0 : 1.0 - TURN_SPLIT) + TURN_SPLIT * part));
+            float k = (float)(dur * ((i < HALF_SAMPLES ? 0.0 : 1.0 - TURN_PART) + TURN_PART * part));
+            if (j == HALF_SAMPLES) k = (float)(dur * TURN_SPLIT);
+            if (j == HALF_SAMPLES + 1) k = (float)(dur * (1.0 - TURN_SPLIT));
             bytes_put(&sec0, &k, 4);
         }
         bytes_align(&sec0, 8);
         cn = (uint32_t)sec0.length;
-        for (int i = 0; i < SAMPLES; ++i) {
+        for (int j = 0; j < SAMPLES; ++j) {
+            int i = j < HALF_SAMPLES ? j : (j == HALF_SAMPLES ? HALF_SAMPLES - 1 : (j == HALF_SAMPLES + 1 ? HALF_SAMPLES : j - 2));
             double u = 1 - 2 * (double)(i % HALF_SAMPLES) / (HALF_SAMPLES - 1);
             if (curve > 1.0) {
                 double a = u < 0 ? -u : u;
@@ -1612,6 +1619,16 @@ static int make_files(void) {
     int cars = 0, hands = 0, skipped = 0;
     /* driver models */
     static const char *const drivers[] = {"default", "defaultRace", "suited", "unsuited", "stig"};
+    /* the hands of an earlier full animation go: made again below only when it is on */
+    for (unsigned i = 0; i < ARRAY_COUNT(drivers); ++i) {
+        static char old_rel[96];
+        size_t n = 0;
+        for (const char *s = "drivers\\"; *s; ++s) old_rel[n++] = *s;
+        for (const char *s = drivers[i]; *s; ++s) old_rel[n++] = *s;
+        for (const char *s = "\\driver.modelbin"; *s; ++s) old_rel[n++] = *s;
+        old_rel[n] = 0;
+        if (wjoin_ascii(path, root, old_rel)) DeleteFileW(path);
+    }
     for (unsigned i = 0; want_rotation && i < ARRAY_COUNT(drivers); ++i) {
         static char rel[96];
         size_t n = 0;
@@ -1771,12 +1788,12 @@ int cockpit_wait_ready(void) {
 /* car presentation update: Turn = (car->vtable[0x160]() + 0.999) * 0.5, then set as GameScalars:Turn */
 #define RVA_TURN_CALL 0xf7c745u
 
-/* the game's steering value -> the part of the animation to play (see TURN_SPLIT) */
+/* the game's steering value -> the part of the animation to play (see TURN_PART) */
 static float turn_value(float value) {
     float turn = (value + 0.999f) * 0.5f;
     if (!(turn >= 0.0f)) turn = 0.0f;
     if (turn > 1.0f) turn = 1.0f;
-    turn = cockpit_view_second() ? (float)(1.0 - TURN_SPLIT) + (float)TURN_SPLIT * turn : (float)TURN_SPLIT * turn;
+    turn = cockpit_view_second() ? (float)(1.0 - TURN_PART) + (float)TURN_PART * turn : (float)TURN_PART * turn;
     return turn * 2.0f - 0.999f;
 }
 

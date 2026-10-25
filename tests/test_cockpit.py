@@ -49,8 +49,8 @@ def spindle_curves(data):
 
 
 def check_two_parts(got, ref, label):
-    """the new file: [0, 0.48] the script's curve (every second sample), [0.52, 1] the same with the wheel
-    scaled to almost 0; the driver tracks squeezed into [0, 0.48]"""
+    """the new file: [0, 0.40] the script's curve (every second sample), held to 0.47, [0.53, 0.60] held,
+    [0.60, 1] the same with the wheel scaled to almost 0 (from 0.47 to 0.53); the driver squeezed into [0, 0.40]"""
     if not got:
         check(False, label + ': keine Datei')
         return
@@ -59,12 +59,15 @@ def check_two_parts(got, ref, label):
     _, knots, q = ours[key]
     _, rknots, rq = script[key]
     dur = rknots[-1]
-    half = len(knots) // 2
+    half = (len(knots) - 2) // 2
     worst = max(abs(q[4 * j + c] - rq[8 * j + c]) for j in range(half) for c in range(4))
-    same = all(abs(q[4 * (half + j) + c] - q[4 * j + c]) < 1e-6 for j in range(half) for c in range(4))
-    check(len(knots) == 242 and abs(knots[half - 1] - 0.48 * dur) < 1e-4 and abs(knots[half] - 0.52 * dur) < 1e-4,
-          f'{label}: Lenkrad-Kurve in zwei Teilen (0..0.48, 0.52..1)')
-    check(worst < 1e-5 and same, f'{label}: beide Teile drehen wie das Skript (Abw. {worst:.2e})')
+    same = all(abs(q[4 * (half + 2 + j) + c] - q[4 * j + c]) < 1e-6 for j in range(half) for c in range(4))
+    held = all(abs(q[4 * half + c] - q[4 * (half - 1) + c]) < 1e-6 and
+               abs(q[4 * (half + 1) + c] - q[4 * (half + 2) + c]) < 1e-6 for c in range(4))
+    want = [0.40 * dur, 0.47 * dur, 0.53 * dur, 0.60 * dur]
+    check(len(knots) == 244 and all(abs(a - b) < 1e-4 for a, b in zip(knots[half - 1:half + 3], want)),
+          f'{label}: Lenkrad-Kurve in zwei Teilen (0..0.40, 0.60..1, dazwischen Puffer)')
+    check(worst < 1e-5 and same and held, f'{label}: beide Teile drehen wie das Skript, Vollausschlag gehalten (Abw. {worst:.2e})')
     kind, sk, sc = ours[('boneSteeringWheelSpindle', 'ScaleShearCurve')]
     check(kind == 'CurveDataHeader_DaK32fC32f' and sc[0::9][:2] == (1.0, 1.0) and max(sc[0::9][2:]) < 0.001,
           f'{label}: Lenkrad-Größe 1 im ersten Teil, ~0 im zweiten')
@@ -192,12 +195,11 @@ if DATA:
           os.path.getmtime(os.path.join(out, 'drivers/unsuited/driver.modelbin')) == t0, 'zweiter Start: nichts neu erzeugt')
     check(c.call('Fh2TestCockpitMake', c.put_wstr('C:\\test\\Mount'), 540, 10) == 1 and
           'Rotation=540' in open(os.path.join(out, 'gripline_cockpit.txt')).read(), 'anderer Drehwinkel: neu erzeugt')
-    shutil.rmtree(out)
     check(c.call('Fh2TestCockpitMake', c.put_wstr('C:\\test\\Mount'), 0, 10) == 1 and
           'Rotation=0' in open(os.path.join(out, 'gripline_cockpit.txt')).read() and
-          not os.path.exists(os.path.join(out, 'drivers')) and
+          not os.path.exists(os.path.join(out, 'drivers/unsuited/driver.modelbin')) and
           os.path.exists(os.path.join(out, 'cars/MER_SLR_05/scene/Drivers/default/leftRightTurn.gr2')),
-          'ohne volle Lenkrad-Animation: Lenkrad-Dateien trotzdem, Hände bleiben')
+          'ohne volle Lenkrad-Animation: Lenkrad-Dateien trotzdem, alte Fahrer ohne Hände gelöscht')
 
 print('%d checks, %d failed' % (checks[0], len(fails)))
 sys.exit(1 if fails else 0)
