@@ -227,7 +227,7 @@ static const char default_ini[] =
     "; Menus: Enter = A, Backspace = B, Esc = Menu.\r\n"
     "; Arrow keys: in menus = left stick, while driving = camera (right stick).\r\n"
     "; Nitro: only with the NitroSystem mod (presses its NitroButton).\r\n"
-    "; CockpitView: second cockpit view on/off (further back, set in GRIPLINE).\r\n";
+    "; CockpitView: second cockpit view on/off (close to the dashboard, set in GRIPLINE).\r\n";
 
 /* Default file text including the key bindings (also used by ini_migrate.c). Returns the
    length, 0 if it does not fit. */

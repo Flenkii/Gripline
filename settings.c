@@ -30,7 +30,7 @@ const SettingDefinition setting_definitions[] = {
     SETTING("Traffic", "Weather", weather, SETTING_WEATHER),
     SETTING("Gripline", "Notifications", notifications, SETTING_BOOLEAN),
     SETTING("Gripline", "SteeringAnimation", steering_animation, SETTING_BOOLEAN),
-    SETTING("Gripline", "CockpitViewBack", cockpit_view_back, SETTING_CENTIMETERS),
+    SETTING("Gripline", "CockpitViewForward", cockpit_view_forward, SETTING_CENTIMETERS),
     SETTING("Gripline", "CockpitViewUp", cockpit_view_up, SETTING_CENTIMETERS),
 };
 
@@ -89,8 +89,8 @@ void settings_defaults(ModOptions *options) {
         .traffic_level = 4,
         .traffic_all_day = 1,
         .notifications = 1,
-        .cockpit_view_back = 20,
-        .cockpit_view_up = 5,
+        .cockpit_view_forward = 35,
+        .cockpit_view_up = -5,
     };
 }
 

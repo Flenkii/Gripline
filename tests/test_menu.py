@@ -13,7 +13,7 @@ ENABLED = 0
 FFB_MODE, CLUTCH_BRAKE, LEVEL, ALLDAY, WEATHER = 17, 18, 19, 20, 21
 KEY_ENABLED, KEY_STEER, KEY_RETURN, KEY_PEDAL = 22, 23, 24, 25
 PROFILE, PRESET = 30, 31
-VIEW_BACK, VIEW_UP = 28, 29
+VIEW_FORWARD, VIEW_UP = 28, 29
 GRIP_NOTIFY, GRIP_STEERING = 26, 27
 
 def check(cond, text):
@@ -120,7 +120,7 @@ open(os.path.join(tempfile.gettempdir(), 'hud_de.xaml'), 'wb').write(hud)
 props = ['EoRigProfile', 'EoRigWheelEnabled', 'EoRigForceFeedback', 'EoRigStrength', 'EoRigRumble', 'EoRigRotation',
          'EoRigClutchBrake', 'EoRigButton1', 'EoRigButton2', 'EoRigButton3', 'EoKeyEnabled', 'EoKeySteer',
          'EoKeyReturn', 'EoKeyPedal', 'EoRigDensity',
-         'EoRigTrafficLevel', 'EoRigRushHour', 'EoRigWeather', 'EoGripSteering', 'EoGripViewBack', 'EoGripViewUp', 'EoGripNotify', 'EoGripReport']
+         'EoRigTrafficLevel', 'EoRigRushHour', 'EoRigWeather', 'EoGripSteering', 'EoGripViewForward', 'EoGripViewUp', 'EoGripNotify', 'EoGripReport']
 hidden = ['EoRigFfbMode', 'EoRigDamping', 'EoRigFriction', 'EoRigSmoothing', 'EoRigMinimumForce',
           'EoRigOutward', 'EoRigCentering', 'EoRigLock', 'EoRigCurve', 'EoRigShifter']
 if dom:
