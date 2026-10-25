@@ -41,6 +41,7 @@ enum {
     RIG_GRIP_END,
     RIG_WHEEL_PROFILE = RIG_GRIP_END,     /* input profile: not stored, derived from wheel / keyboard / clutch-as-brake */
     RIG_TRAFFIC_PRESET,                  /* traffic preset: not stored, derived from level + rush hour */
+    RIG_GRIP_REPORT,                     /* problem report: an action (On = write Gripline_Report.zip), not stored */
     RIG_SETTING_COUNT
 };
 

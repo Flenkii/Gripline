@@ -123,6 +123,10 @@ static int mod_scan_mods_text(char *out, unsigned size) {
     return list.count > 0;
 }
 
+int mod_scan_mods_list(char *out, unsigned size) {
+    return mod_scan_mods_text(out, size);
+}
+
 void mod_scan_start(const wchar_t *settings_directory) {
     if (settings_directory && path_join(mods_file, settings_directory, L"fh2-mods\\platform-mods.txt"))
         notify_show_deferred_call(mod_scan_mods_text);

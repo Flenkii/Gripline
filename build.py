@@ -66,6 +66,7 @@ COMMON_SOURCES = [
     "features/ffb_vm.c",
     "features/keyboard_pad.c",
     "features/mod_scan.c",
+    "features/report.c",
     "features/nitro_link.c",
     "features/notify.c",
     "features/platform_link.c",

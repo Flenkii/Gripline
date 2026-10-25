@@ -119,7 +119,7 @@ open(os.path.join(tempfile.gettempdir(), 'hud_de.xaml'), 'wb').write(hud)
 props = ['EoRigProfile', 'EoRigWheelEnabled', 'EoRigForceFeedback', 'EoRigStrength', 'EoRigRumble', 'EoRigRotation',
          'EoRigClutchBrake', 'EoRigButton1', 'EoRigButton2', 'EoRigButton3', 'EoKeyEnabled', 'EoKeySteer',
          'EoKeyReturn', 'EoKeyPedal', 'EoRigDensity',
-         'EoRigTrafficLevel', 'EoRigRushHour', 'EoRigWeather', 'EoGripSteering', 'EoGripNotify']
+         'EoRigTrafficLevel', 'EoRigRushHour', 'EoRigWeather', 'EoGripSteering', 'EoGripNotify', 'EoGripReport']
 hidden = ['EoRigFfbMode', 'EoRigDamping', 'EoRigFriction', 'EoRigSmoothing', 'EoRigMinimumForce',
           'EoRigOutward', 'EoRigCentering', 'EoRigLock', 'EoRigCurve', 'EoRigShifter']
 if dom:

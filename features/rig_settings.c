@@ -11,6 +11,7 @@
 #include "weather.h"
 #include "rig_settings.h"
 #include "ini_edit.h"
+#include "report.h"
 #include "ini_migrate.h"
 #include "logging.h"
 #include "support.h"
@@ -77,6 +78,7 @@ static const RigSettingInfo infos[RIG_SETTING_COUNT] = {
     [RIG_KEY_PEDAL] = {"EoKeyPedal", "PedalTime", 0, 1000, RIG_KIND_NUMBER, 0, 1, "EO_KeyTime"},
     [RIG_GRIP_NOTIFICATIONS] = {"EoGripNotify", "Notifications", 0, 1, RIG_KIND_TOGGLE, 0, 1, NULL},
     [RIG_GRIP_STEERING] = {"EoGripSteering", "SteeringAnimation", 0, 1, RIG_KIND_TOGGLE, 0, 1, NULL},
+    [RIG_GRIP_REPORT] = {"EoGripReport", "", 0, 1, RIG_KIND_TOGGLE, 0, 1, NULL},
 };
 
 /* Rows of the menu. The force feedback is the game's own (its wheel programs), so the old
@@ -91,7 +93,7 @@ static const unsigned char order[] = {
     RIG_WHEEL_ROTATION,  RIG_WHEEL_CLUTCH_BRAKE, RIG_WHEEL_BUTTON1, RIG_WHEEL_BUTTON2,  RIG_WHEEL_BUTTON3,
     RIG_KEY_ENABLED,     RIG_KEY_STEER,     RIG_KEY_RETURN,     RIG_KEY_PEDAL,
     RIG_TRAFFIC_PRESET,  RIG_TRAFFIC_LEVEL, RIG_TRAFFIC_ALL_DAY, RIG_WEATHER,
-    RIG_GRIP_STEERING,   RIG_GRIP_NOTIFICATIONS,
+    RIG_GRIP_STEERING,   RIG_GRIP_NOTIFICATIONS, RIG_GRIP_REPORT,
 };
 _Static_assert(sizeof(order) <= RIG_SETTING_COUNT, "menu rows");
 
@@ -255,7 +257,9 @@ static const RigText german[RIG_SETTING_COUNT] = {
                            "Stellt Lenkrad im Spiel, Tastatur und Kupplung als Bremse mit einem "
                            "Klick ein: Controller, Tastatur, Lenkrad oder Lenkrad mit Kupplung als "
                            "Bremse. Änderst du danach einen der Schalter, steht hier Eigene Werte. "
-                           "Lenkrad und Tastatur wirken erst nach einem Neustart des Spiels."},
+                           "Lenkrad und Tastatur wirken erst nach einem Neustart des Spiels. "
+                           "Lenkrad einrichten: Karten fragen Lenkung, Pedale und Tasten ab - für "
+                           "jedes Lenkrad."},
     [RIG_WHEEL_FFB_MODE] = {"Lenkrad: FFB-Art",
                             "Spiel = die originalen Lenkrad-Programme von FH2, genau wie auf der "
                             "Xbox: Rückstellkraft, Lenkgewicht, Dämpfung, Vibration und die "
@@ -288,6 +292,10 @@ static const RigText german[RIG_SETTING_COUNT] = {
                                 "Kleine Gripline-Karten oben rechts im Bild, z. B. wenn etwas "
                                 "gespeichert wurde oder Nitro online aus ist. Auch im Vollbild. "
                                 "Wirkt sofort."},
+    [RIG_GRIP_REPORT] = {"Gripline: Fehlerbericht erstellen",
+                         "Auf An stellen: packt Logs und Einstellungen in Gripline_Report.zip "
+                         "neben azimuth.exe. Die Datei bei einem Problem auf GitHub unter Issues "
+                         "anhängen. Es wird nichts verschickt."},
 };
 
 static const RigText english[RIG_SETTING_COUNT] = {
@@ -365,7 +373,8 @@ static const RigText english[RIG_SETTING_COUNT] = {
                            "Sets wheel in game, keyboard and clutch pedal as brake in one go: "
                            "Controller, Keyboard, Wheel or Wheel with the clutch pedal as brake. "
                            "Changing one of the switches afterwards shows Custom. Wheel and "
-                           "keyboard only apply after restarting the game."},
+                           "keyboard only apply after restarting the game. Set up wheel: cards "
+                           "ask for steering, pedals and buttons - for any wheel."},
     [RIG_WHEEL_FFB_MODE] = {"Wheel: Force Feedback Type",
                             "Game = FH2's original wheel programs, exactly like on the Xbox: "
                             "aligning torque, steering weight, damping, rumble and the centring in "
@@ -397,6 +406,10 @@ static const RigText english[RIG_SETTING_COUNT] = {
                                 "Small Gripline cards at the top right of the picture, e.g. when "
                                 "something was saved or nitro is off online. Also in fullscreen. "
                                 "Applies immediately."},
+    [RIG_GRIP_REPORT] = {"Gripline: Create Problem Report",
+                         "Set to On: packs logs and settings into Gripline_Report.zip next to "
+                         "azimuth.exe. Attach that file to a GitHub issue when something goes "
+                         "wrong. Nothing is sent anywhere."},
 };
 
 static const wchar_t *const profile_german[RIG_PROFILE_COUNT] = {
@@ -532,6 +545,9 @@ int rig_setting_get(unsigned id) {
     if (id == RIG_TRAFFIC_PRESET) {
         return density_current();
     }
+    if (id == RIG_GRIP_REPORT) {
+        return 0;
+    }
     int value = stored_value(id);
     /* the INI may hold values outside the menu range; show them clamped */
     if (value < infos[id].minimum) {
@@ -589,6 +605,10 @@ int rig_setting_set(unsigned id, int value) {
                     : value == 3 ? "Profile: Wheel\nApplies after a restart"
                                  : "Profile: Wheel, clutch as brake\nApplies after a restart");
         return changed;
+    }
+    if (id == RIG_GRIP_REPORT) { /* an action, not a setting: the row goes back to Off */
+        if (value == 1) report_create();
+        return 0;
     }
     if (id == RIG_TRAFFIC_PRESET) {
         if (value == 0 || value == density_current()) {

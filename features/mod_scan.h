@@ -14,4 +14,7 @@ void mod_scan_announce_mapper(void);
    seconds after the first picture, when the FH2 Mod Platform has written its mod list). */
 void mod_scan_start(const wchar_t *settings_directory);
 
+/* The "mods found" card text ("Gripline V6 - mods found\n<names>"); 0 = none found. */
+int mod_scan_mods_list(char *out, unsigned size);
+
 #endif

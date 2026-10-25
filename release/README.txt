@@ -73,6 +73,10 @@ Old layout (Gripline in fh2extra\): not needed any more, the FH2MP launcher move
   - Azimuth Mapper: while it runs, Gripline keyboard and wheel stay off (the Mapper's
     controller is used). A card says so at the start.
   - Start card: lists the mods Gripline found.
+  - Other wheels (not G920/G29/G923): Input: Profile > "Set up wheel" - cards ask for
+    steering, pedals, paddles and A/B and save them (tested with a G920 only so far).
+  - Problem report: "Gripline: Create Problem Report" in the menu writes
+    Gripline_Report.zip next to azimuth.exe - attach it to a GitHub issue.
 
 
 3. OPTIONAL: READY-MADE PROFILES  (folder Optional\Profiles)
@@ -119,6 +123,7 @@ Neu in V5: Gripline-Kachel, Benachrichtigungen im Bild, Nitro auf N bzw. Lenkrad
 wirkt nach Neustart; der erste Start danach dauert etwas länger), passt zu fh2wheels.
 Neu in V6: Lenkrad im Cockpit dreht 1:1 mit, Azimuth Mapper wird erkannt (Gripline-
 Tastatur und -Lenkrad dann aus), Start-Karte mit gefundenen Mods, Eingabe-Profil im Spiel
-umschaltbar, fh2wheels getestet.
+umschaltbar, fh2wheels getestet, Einrichtungs-Assistent für andere Lenkräder,
+Fehlerbericht per Menü (Gripline_Report.zip).
 Probleme bitte auf GitHub unter "Issues" melden und FH2_ExtraOptions.log, FH2_Wheel.log,
 FH2_Wheel.ini, FH2_Keyboard.ini und fh2-mods\platform.log anhängen.
