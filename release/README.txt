@@ -51,8 +51,32 @@ automatically (a card tells you) and comes back offline.
 Old layout (Gripline in fh2extra\): not needed any more, the FH2MP launcher moves it.
 
 
-2. NEW IN V5
+2. NEW IN V6
 ------------
+  - The steering wheel in the cockpit now turns 1:1 with your real wheel.
+  - Cockpit view 2 like in FH5: the camera button (Tab) goes cockpit > cockpit 2 > next,
+    or press V (wheel function 15). Distance in the GRIPLINE tile.
+  - Creator mode: H (wheel function 16) hides HUD, minimap and Gripline cards, again = back.
+  - Key list: F5 shows all your key bindings at the right, F5 again = off.
+  - Time of day (Gripline menu): Morning, Midday, Sunset, Night or Slow Day - offline,
+    free roam only.
+  - More Traffic now raises the game's own traffic data (Mount\gripline_traffic, game
+    files unchanged) - really more cars. Applies after a restart.
+  - Input profiles switchable in the game (Input: Profile).
+  - Works with fh2wheels by conner-mcvay (rims, tire widths, ride height, camber), tested:
+    https://github.com/conner-mcvay/fh2-mods – its installer finds Gripline as
+    "Extra Options". If it asks about Mount\mediaoverride, answer Y.
+  - Azimuth Mapper: while it runs, Gripline keyboard and wheel stay off (the Mapper's
+    controller is used). A card says so at the start.
+  - Start card: lists the mods Gripline found.
+  - Other wheels (not G920/G29/G923): Input: Profile > "Set up wheel" - cards ask for
+    steering, pedals, paddles and A/B and save them (tested with a G920 only so far).
+  - Problem report: "Gripline: Create Problem Report" in the menu writes
+    Gripline_Report.zip next to azimuth.exe - attach it to a GitHub issue.
+
+
+   NEW IN V5
+   ---------
   - GRIPLINE tile in the pause menu (needs the FH2 Mod Platform; fh2-mods\Gripline.dll).
   - Gripline notification cards with the logo, drawn into the game picture.
   - Nitro on the keyboard (N) and on a wheel button (function 14 "Nitro") for the mod
@@ -67,17 +91,6 @@ Old layout (Gripline in fh2extra\): not needed any more, the FH2MP launcher move
     switching it on (or changing the rotation) takes a little longer: Gripline makes the
     files once into Mount\gripline_cockpit (game files are never changed; delete that
     folder any time).
-  - Works with fh2wheels by conner-mcvay (rims, tire widths, ride height, camber), tested:
-    https://github.com/conner-mcvay/fh2-mods – its installer finds Gripline as
-    "Extra Options". If it asks about Mount\mediaoverride, answer Y.
-  - Azimuth Mapper: while it runs, Gripline keyboard and wheel stay off (the Mapper's
-    controller is used). A card says so at the start.
-  - Start card: lists the mods Gripline found.
-  - Other wheels (not G920/G29/G923): Input: Profile > "Set up wheel" - cards ask for
-    steering, pedals, paddles and A/B and save them (tested with a G920 only so far).
-  - Problem report: "Gripline: Create Problem Report" in the menu writes
-    Gripline_Report.zip next to azimuth.exe - attach it to a GitHub issue.
-
 
 3. OPTIONAL: READY-MADE PROFILES  (folder Optional\Profiles)
 -----------------------------------------------------------
@@ -125,6 +138,8 @@ Neu in V6: Lenkrad im Cockpit dreht 1:1 mit, Azimuth Mapper wird erkannt (Gripli
 Tastatur und -Lenkrad dann aus), Start-Karte mit gefundenen Mods, Eingabe-Profil im Spiel
 umschaltbar, fh2wheels getestet, Einrichtungs-Assistent für andere Lenkräder,
 Fehlerbericht per Menü (Gripline_Report.zip), zweite Cockpit-Ansicht
-wie in FH5 (Taste V, Abstand im GRIPLINE-Menü).
+wie in FH5 (Taste V, Abstand im GRIPLINE-Menü), Creator-Modus (Taste H blendet HUD,
+Minimap und Gripline-Karten aus), Tastenliste (F5), Tageszeit im Gripline-Menü (nur
+offline), More Traffic hebt jetzt die echten Verkehrsdaten an (wirkt nach Neustart).
 Probleme bitte auf GitHub unter "Issues" melden und FH2_ExtraOptions.log, FH2_Wheel.log,
 FH2_Wheel.ini, FH2_Keyboard.ini und fh2-mods\platform.log anhängen.

@@ -1,4 +1,4 @@
-Gripline V5 – Keyboard bindings / Tastenbelegung
+Gripline V6 – Keyboard bindings / Tastenbelegung
 ========================================================================
 Default bindings. Change them in FH2_Keyboard.ini next to azimuth.exe (several keys with a
 comma, e.g. Throttle=W,Up; the key names are listed at the top of the file).
@@ -14,10 +14,11 @@ FAHREN / DRIVING
 
 KAMERA & BLICK / CAMERA & LOOK
   Pfeiltasten        Kamera bewegen (beim Fahren) Arrow keys: camera (while driving)
-  Tab                Kamera wechseln              Change camera
+  Tab                Kamera wechseln (+Cockpit 2) Change camera (incl. cockpit 2)
   C oder Num2        Blick zurück                 Look back
   Num4 / Num6        Blick links / rechts         Look left / right
   N                  Nitro (nur mit NitroSystem)  Nitro (only with NitroSystem)
+  V                  Cockpit-Ansicht 2 ein/aus    Cockpit view 2 on/off
 
 FUNKTIONEN / FUNCTIONS
   R                  Zurückspulen                 Rewind
@@ -26,6 +27,11 @@ FUNKTIONEN / FUNCTIONS
   L                  Licht                        Headlights
   M                  Karte                        Map
   Minus / Plus       Radio zurück / weiter        Radio previous / next
+
+GRIPLINE
+  H                  Creator-Modus (HUD aus)      Creator mode (hide HUD)
+  F5                 Tastenliste ein/aus          Key list on/off
+  F2                 Autodrive                    Autodrive
 
 MENÜS / MENUS
   Pfeiltasten        Blättern                     Arrow keys: navigate

@@ -25,8 +25,11 @@ all features of Extra Options are included unchanged – see [README_ORIGINAL.md
 | **Wheel setup assistant** *(V6)* | For wheels other than the G920/G29/G923: *Input: Profile* › *Set up wheel* – cards ask you to turn the wheel, press each pedal, the paddles and A/B; Gripline finds the axes and buttons itself and saves them to `FH2_Wheel.ini`. Only tested with a G920 so far – reports from other wheels welcome. |
 | **Problem report** *(V6)* | *Gripline: Create Problem Report* in the menu packs logs and settings into `Gripline_Report.zip` next to `azimuth.exe` – attach it to an issue. Nothing is sent anywhere. |
 | **Cockpit view 2** *(V6)* | A second interior camera like in FH5: the camera button now goes cockpit → cockpit 2 → next camera (also **V** or a wheel button set to *Cockpit View 2*); the driver view moves forward to the gauges and the steering wheel disappears, live and without a restart. Distance in the *GRIPLINE* tile (*Cockpit View 2: Forward / Up*, cm). |
+| **Creator mode** *(V6)* | Press **H** (or a wheel button set to function 16) to hide the HUD, minimap, prompts and Gripline cards while driving – for clean recordings. Press again to bring them back. Menus and loading screens stay visible. |
+| **Key list** *(V6)* | Press **F5** to show all your key bindings at the right of the picture; it stays until you press F5 again and blocks nothing. Key names follow the game's language and your keyboard layout. |
+| **Time of day** *(V6)* | *Time of Day* in the Gripline menu: Morning, Midday, Sunset, Night or Slow Day (clock 4x slower). Only offline in free roam – races and FH2MP keep their own time. |
 | **In-game settings page** | Options › HUD › bottom (or the GRIPLINE tile). All values are saved instantly. Wheel values apply instantly (except "Use Wheel In Game", which needs a restart), weather applies after closing the menu, traffic only after restarting Azimuth (see Known issues). |
-| **More traffic** | Traffic limits up to 100 cars, rush hour all day, presets Original/Calm/Busy/Rush Hour/Chaos. |
+| **More traffic** | Traffic limits up to 100 cars, rush hour all day, presets Original/Calm/Busy/Rush Hour/Chaos. Since V6 Gripline also raises the game's own traffic data (copies in `Mount\gripline_traffic`, game files unchanged), so there really are more cars. Applies after a restart. |
 | **Fixed weather** | Sunny, Cloudy, Storm Clouds, Rain or Fog (fog only on Storm Island, sunny elsewhere) – through the game's own weather control, no game files changed. |
 | **Tools** (`tools/`) | Python scripts (the V1 cockpit-wheel script, now built in), More Traffic files and "traffic variety" (20 extra traffic car models). Not part of the release download. |
 
@@ -141,7 +144,7 @@ The same four profiles can be switched **in the game** (V6): *Input: Profile* at
 New INI keys of this fork in `FH2_ExtraOptions.ini`, section `[Traffic]`:
 `TrafficLevel` (0–5), `RushHourAllDay` (0/1), `Weather` (0 original, 1 sunny, 2 cloudy, 3 storm clouds, 4 rain, 5 fog;
 the old name `Wetter` is still understood); section `[Gripline]` (V5): `Notifications` (0/1, default 1),
-`SteeringAnimation` (0/1, default 0). `FH2_Keyboard.ini`: `Nitro=N`. `FH2_Wheel.ini`: `ExtraFunction1-3=14` = nitro.
+`SteeringAnimation` (0/1, default 0); V6: `[Traffic]` `TimeOfDay` (0 original, 1 morning, 2 midday, 3 sunset, 4 night, 5 slow day). `FH2_Keyboard.ini`: `Nitro=N`, V6: `CockpitView=V`, `CreatorMode=H`, `Keybinds=F5`. `FH2_Wheel.ini`: `ExtraFunction1-3=14` = nitro.
 The wheel INI (`FH2_Wheel.ini`) and the keyboard INI (`FH2_Keyboard.ini`) are in English (since fork4). The German files
 of fork1-fork3 (`FH2_Lenkrad.ini`, `FH2_Tastatur.ini`) are taken over automatically on the first start; the old files
 are moved into `FH2_Settings_Backup`. Clutch pedal as brake: in the game (Options › HUD › "Wheel: Clutch Pedal as Brake") or `ClutchAsBrake=1` in

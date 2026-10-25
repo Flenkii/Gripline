@@ -20,6 +20,9 @@ Fork of https://github.com/RokkuDayo/ForzaHorizon2_ExtraOptions – modified in 
 - `features/platform_link.c/.h`, `platform/gripline_mod.c` (V5) – FH2 Mod Platform module (`fh2-mods\Gripline.dll`) and the GRIPLINE tile page
 - `features/cockpit.c/.h` (V5) – full steering animation built in (own Deflate, Oodle1 and GR2 code; port of `tools/fh2_lenkrad.py`); V6: the game's ±90° clamp and divisor patched so the wheel turns 1:1
 - `features/mod_scan.c/.h` (V6) – start card with the mods found, Azimuth Mapper detection (its named event `AzimuthMapper.ShowWindow`, no process list)
+- `features/cockpit_view.c/.h` (V6) – cockpit view 2: camera moved to the gauges, wheel and driver hidden live
+- `features/creator_mode.c/.h` (V6) – creator mode: HUD, minimap, prompts and Gripline cards hidden (key H / wheel function 16)
+- `features/time_of_day.c/.h` (V6) – fixed time of day or slow day in free roam, offline only, through the game's own clock
 - `features/report.c/.h` (V6) – problem report: logs and INIs into `Gripline_Report.zip` (stored ZIP)
 - `third_party/fh2mod/` (V5) – the FH2 Mod Platform's API header (MIT, Trinculo54)
 - `assets/` (V5) – Gripline logo
