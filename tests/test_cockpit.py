@@ -48,6 +48,56 @@ def spindle_curves(data):
     return result
 
 
+def curve_ends(data):
+    """(track, curve) -> time of the last knot, for every keyed curve of a GR2"""
+    g = L.GR2(data)
+    P = g.P
+    rtd = g.base[g.root_type[0]] + g.root_type[1]
+    rob = g.base[g.root_obj[0]] + g.root_obj[1]
+    o, _, tg_td = g.member(rtd, 'TrackGroups')
+    tg = g.p(g.p(rob + o + 4))
+    oo, _, ss = g.member(tg_td, 'TransformTracks')
+    count, array, es = struct.unpack_from('<I', g.buf, tg + oo)[0], g.p(tg + oo + 4), g.size_of(ss)
+    result = {}
+    for k in range(count):
+        at = array + k * es
+        name = g.cstr(g.p(at))
+        for curve in ('OrientationCurve', 'PositionCurve', 'ScaleShearCurve'):
+            co, _, _ = g.member(ss, curve)
+            vt, obj = g.p(at + co), g.p(at + co + P)
+            if vt is None or obj is None:
+                continue
+            kind = g.typedef(vt)[0][1]
+            names = [m[1] for m in g.typedef(vt)]
+            if 'Knots' in names:
+                ko, _, _ = g.member(vt, 'Knots')
+                n = struct.unpack_from('<I', g.buf, obj + ko)[0]
+                if n:
+                    result[(name, curve)] = struct.unpack_from('<f', g.buf, g.p(obj + ko + 4) + 4 * (n - 1))[0]
+            elif 'KnotsControls' in names and 'OneOverKnotScaleTrunc' in names:
+                so, _, _ = g.member(vt, 'OneOverKnotScaleTrunc')
+                scale = struct.unpack('<f', struct.pack('<I', struct.unpack_from('<H', g.buf, obj + so)[0] << 16))[0]
+                ko, _, _ = g.member(vt, 'KnotsControls')
+                n = struct.unpack_from('<I', g.buf, obj + ko)[0]
+                wide = 'K16u' in kind
+                per = 2 if 'I1' in kind else 4
+                fmt, size = ('<H', 2) if wide else ('<B', 1)
+                knots = [struct.unpack_from(fmt, g.buf, g.p(obj + ko + 4) + size * i)[0] for i in range(n // per)]
+                if knots and scale:
+                    result[(name, curve)] = max(knots) / scale
+    return result
+
+
+def check_driver_reach(got, src, label):
+    """the driver's curves reach full lock (Turn 0.9995 -> 0.40 * 0.9995): past their end Granny runs on
+    and the hands vanished"""
+    old, new = curve_ends(src), curve_ends(got)
+    worst = min((new[key] / old[key], key) for key in old if key in new and old[key] > 0 and
+                key[0] not in ('boneSteeringWheelSpindle',))
+    check(0.40 * 0.9995 <= worst[0] <= 0.47 and len(new) > 10,
+          f'{label}: Fahrer-Kurven reichen bis Vollausschlag ({worst[0]:.4f}, {len(new)} Kurven)')
+
+
 def check_two_parts(got, ref, label):
     """the new file: [0, 0.40] the script's curve (every second sample), held to 0.47, [0.53, 0.60] held,
     [0.60, 1] the same with the wheel scaled to almost 0 (from 0.47 to 0.53); the driver squeezed into [0, 0.40]"""
@@ -131,6 +181,7 @@ else:
         n = e.call('Fh2TestCockpitGr2', put(src), len(src), deg, int(curve * 10), out, len(ref) * 3)
         got = bytes(e.mu.mem_read(out, n)) if n else b''
         check_two_parts(got, ref, f'{deg or "Original"} Grad, Kurve {curve}')
+        check_driver_reach(got, src, f'{deg or "Original"} Grad')
     print('Hände ausblenden:')
     for dm in ('default', 'unsuited'):
         m = zipfile.ZipFile(os.path.join(DATA, f'media/drivers/{dm}.zip')).read('driver.modelbin')

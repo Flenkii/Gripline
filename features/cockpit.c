@@ -8,7 +8,7 @@
 #include "cockpit.h"
 #include "cockpit_view.h"
 
-#define COCKPIT_VERSION 4
+#define COCKPIT_VERSION 5
 #define COCKPIT_FOLDER L"gripline_cockpit"
 #define HALF_SAMPLES 121
 #define SAMPLES (2 * HALF_SAMPLES + 2) /* + the held ends at TURN_SPLIT */
@@ -1107,7 +1107,9 @@ static void squeeze_curve(Gr2 *g, uint32_t td, uint32_t obj, uint32_t *done, uin
         memory_copy(&f, &bits, 4);
         f /= (float)TURN_PART;
         memory_copy(&bits, &f, 4);
-        trunc = (uint16_t)((bits + 0xffffu) >> 16); /* round the scale up: knots stay inside */
+        /* round the scale down: the knots reach a little past TURN_PART (the gap is free). Rounded up
+           they ended up to 0.8 % early and full lock ran past the driver's end (hands gone). */
+        trunc = (uint16_t)(bits >> 16);
         gr2_put(g, obj + off, &trunc, 2);
     }
     off = gr2_member(g, td, "Knots", &m);
