@@ -191,7 +191,7 @@ static int parse_value(const SettingDefinition *definition, const char *text, in
         return 1;
     }
     if (definition->type == SETTING_TRAFFIC_LEVEL) {
-        if (text[0] >= '0' && text[0] <= '5' && !text[1]) {
+        if (text[0] >= '0' && text[0] <= '6' && !text[1]) {
             *value = text[0] - '0';
             return 1;
         }

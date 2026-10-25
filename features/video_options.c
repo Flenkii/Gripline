@@ -111,7 +111,7 @@ static PropertyChanged property_changed;
 static NativeProperty properties[PROPERTY_COUNT];
 static NativePropertyLink links[2][PROPERTY_COUNT];
 static void *choices[CHOICE_COLLECTION_COUNT];
-static const unsigned choice_counts[] = {3, 2, 6, 2, 3, 2, 3, 2, 2, 2, 6, RIG_PROFILE_COUNT,
+static const unsigned choice_counts[] = {3, 2, 6, 2, 3, 2, 3, 2, 2, 2, RIG_TRAFFIC_COUNT, RIG_PROFILE_COUNT,
                                         WHEEL_FUNCTION_COUNT, RIG_DENSITY_COUNT,
                                         RIG_WEATHER_COUNT, RIG_FFB_MODE_COUNT, RIG_TIME_COUNT};
 _Static_assert(ARRAY_COUNT(choice_counts) == CHOICE_COLLECTION_COUNT, "choice counts");

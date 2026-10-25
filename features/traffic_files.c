@@ -19,19 +19,20 @@
 #define TRAFFIC_FOLDER L"gripline_traffic"
 
 typedef struct {
-    int max_active, types, type_mult, fill;
+    int max_active, types, type_mult, fill, empty;
     double traffic, festival, cap, distance;
 } Level;
 
 /* TrafficLevel 0..5; MaxActiveTraffic follows the menu ("24 cars" .. "150 cars"). Higher levels also spawn
    farther away, so a larger area is filled evenly instead of a convoy right in front of the player. */
-static const Level levels[6] = {
-    {18, 8, 1, 0, 1.0, 1.0, 1.0, 1.0},   /* original */
-    {24, 8, 1, 0, 1.5, 1.5, 1.0, 1.0},   /* light */
-    {36, 10, 1, 1, 2.0, 2.0, 1.0, 1.25}, /* busy */
-    {48, 10, 2, 1, 3.0, 2.5, 1.5, 1.25}, /* strong */
-    {64, 12, 2, 1, 4.0, 3.0, 1.5, 2.0},  /* rush hour */
-    {150, 16, 4, 1, 8.0, 5.0, 3.0, 2.5}, /* chaos */
+static const Level levels[7] = {
+    {18, 8, 1, 0, 0, 1.0, 1.0, 1.0, 1.0},   /* original */
+    {24, 8, 1, 0, 0, 1.5, 1.5, 1.0, 1.0},   /* light */
+    {36, 10, 1, 1, 0, 2.0, 2.0, 1.0, 1.25}, /* busy */
+    {48, 10, 2, 1, 0, 3.0, 2.5, 1.5, 1.25}, /* strong */
+    {64, 12, 2, 1, 0, 4.0, 3.0, 1.5, 2.0},  /* rush hour */
+    {150, 16, 4, 1, 0, 8.0, 5.0, 3.0, 2.5}, /* chaos */
+    {18, 8, 1, 0, 1, 1.0, 1.0, 1.0, 1.0},   /* no traffic: density 0 for traffic and festival cars */
 };
 
 static const char *const density_files[] = {
@@ -247,6 +248,12 @@ static double rule_fill(double v, const Level *l) {
     return clamp_to(v * (l->traffic > 1.0 ? l->traffic : 1.0), l->cap);
 }
 
+static double rule_zero(double v, const Level *l) {
+    (void)v;
+    (void)l;
+    return 0;
+}
+
 static double rule_distance(double v, const Level *l) {
     return (double)(long long)(v * l->distance + 0.5);
 }
@@ -319,6 +326,11 @@ static void patch_densities(const char *in, size_t size, Text *out, const Level 
                     tag_set(&copy, "max", rule_fill, l);
                     ++changes;
                     tag = copy;
+                }
+            } else if (l->empty) {
+                if (traffic || festival) {
+                    tag_set(&tag, "min", rule_zero, l);
+                    tag_set(&tag, "max", rule_zero, l);
                 }
             } else {
                 if (traffic && l->traffic != 1.0) {
@@ -444,12 +456,12 @@ static int make_files(const wchar_t *mount_dir, const Level *l) {
     log_append_value("TRAFFIC: traffic files written to Mount\\gripline_traffic: ", written);
     log_append_value("TRAFFIC: car loading values changed: ", car_loading_changes);
     log_append_value("TRAFFIC: density values changed: ", changes - car_loading_changes);
-    return written > 0 && car_loading_changes > 0;
+    return written > 0 && (car_loading_changes > 0 || l->empty);
 }
 
 void traffic_files_start(const wchar_t *mount_dir, int traffic_level) {
     if (state != 0) return;
-    if (!mount_dir || traffic_level <= 0 || traffic_level > 5) {
+    if (!mount_dir || traffic_level <= 0 || traffic_level > 6) {
         InterlockedExchange(&state, 3);
         return;
     }
@@ -459,7 +471,9 @@ void traffic_files_start(const wchar_t *mount_dir, int traffic_level) {
     } __except (EXCEPTION_EXECUTE_HANDLER) {
         ok = 0;
     }
-    if (ok) {
+    if (ok && traffic_level == 6) {
+        log_append("TRAFFIC: no traffic - traffic and festival density 0.\r\n");
+    } else if (ok) {
         log_append_value("TRAFFIC: game traffic data raised (more cars on the roads), TrafficLevel=", traffic_level);
     } else {
         log_append("TRAFFIC: could not make the traffic files; only the density caps are raised.\r\n");
@@ -482,7 +496,7 @@ int traffic_files_wait_ready(void) {
 /* tests: runs the rules on one file in memory (kind 0 = CarLoadingSettings, 1 = Densities) */
 __declspec(dllexport) size_t Fh2TestTrafficPatch(int kind, int level, const char *in, size_t size, char *out,
                                                 size_t capacity) {
-    if (level < 0 || level > 5) return 0;
+    if (level < 0 || level > 6) return 0;
     Text text = {0};
     changes = 0;
     if (kind == 0) {

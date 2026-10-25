@@ -60,7 +60,7 @@ static const RigSettingInfo infos[RIG_SETTING_COUNT] = {
                            RIG_KIND_FUNCTION, 0, 1, NULL},
     [RIG_WHEEL_BUTTON3] = {"EoRigButton3", "ExtraFunction3", 0, WHEEL_FUNCTION_COUNT - 1,
                            RIG_KIND_FUNCTION, 0, 1, NULL},
-    [RIG_TRAFFIC_LEVEL] = {"EoRigTrafficLevel", "TrafficLevel", 0, 5, RIG_KIND_TRAFFIC, 0, 1,
+    [RIG_TRAFFIC_LEVEL] = {"EoRigTrafficLevel", "TrafficLevel", 0, RIG_TRAFFIC_COUNT - 1, RIG_KIND_TRAFFIC, 0, 1,
                            NULL},
     [RIG_TRAFFIC_ALL_DAY] = {"EoRigRushHour", "RushHourAllDay", 0, 1, RIG_KIND_TOGGLE, 0, 1,
                              NULL},
@@ -155,6 +155,7 @@ static const unsigned char density_presets[RIG_DENSITY_COUNT][2] = {
     {3, 0}, /* 3 = Lebhaft */
     {4, 1}, /* 4 = Rushhour */
     {5, 1}, /* 5 = Chaos */
+    {6, 0}, /* 6 = Kein Verkehr */
 };
 
 static int density_current(void) {
@@ -244,7 +245,7 @@ static const RigText german[RIG_SETTING_COUNT] = {
                            "ExtraButton3). Achtung: Windows kann damit die Xbox Game Bar öffnen. "
                            "Wirkt sofort."},
     [RIG_TRAFFIC_LEVEL] = {"Verkehr: Menge",
-                           "Höchstzahl der Verkehrsautos. Wird sofort gespeichert, wirkt aber erst "
+                           "Höchstzahl der Verkehrsautos (Kein Verkehr = offline fährt niemand). Wird sofort gespeichert, wirkt aber erst "
                            "nach einem Neustart von Azimuth (Spiel ganz schließen und neu starten)."},
     [RIG_TRAFFIC_ALL_DAY] = {"Verkehr: Rushhour rund um die Uhr",
                              "Volle Verkehrsdichte zu jeder Uhrzeit statt nur von 7 bis 19 Uhr. "
@@ -262,8 +263,8 @@ static const RigText german[RIG_SETTING_COUNT] = {
                          "kommt die Zeit aus der Session. Wirkt nach dem Schließen des Menüs."},
     [RIG_TRAFFIC_PRESET] = {"Verkehr: Voreinstellung",
                             "Stellt Menge und Rushhour mit einem Klick ein: Original, Ruhig (24), "
-                            "Lebhaft (48), Rushhour (64, rund um die Uhr) oder Chaos (100, rund "
-                            "um die Uhr). Änderst du danach Menge oder Rushhour, steht hier Eigene "
+                            "Lebhaft (48), Rushhour (64, rund um die Uhr), Chaos (150, rund "
+                            "um die Uhr) oder Kein Verkehr. Änderst du danach Menge oder Rushhour, steht hier Eigene "
                             "Werte. Wird sofort gespeichert, die Menge wirkt aber erst nach einem "
                             "Neustart von Azimuth."},
     [RIG_WHEEL_PROFILE] = {"Eingabe: Profil",
@@ -375,7 +376,7 @@ static const RigText english[RIG_SETTING_COUNT] = {
                            "FH2_Wheel.ini). Windows may open the Xbox Game Bar with it. "
                            "Applies immediately."},
     [RIG_TRAFFIC_LEVEL] = {"Traffic: Amount",
-                           "Maximum number of traffic cars. Saved immediately, but only applies after "
+                           "Maximum number of traffic cars (No Traffic = nobody drives, offline). Saved immediately, but only applies after "
                            "restarting Azimuth (close the game completely and start it again)."},
     [RIG_TRAFFIC_ALL_DAY] = {"Traffic: Rush Hour All Day",
                              "Full traffic density at any time of day instead of 7:00-19:00 only. "
@@ -393,7 +394,7 @@ static const RigText english[RIG_SETTING_COUNT] = {
                          "session. Applies after closing the menu."},
     [RIG_TRAFFIC_PRESET] = {"Traffic: Preset",
                             "Sets amount and rush hour in one go: Original, Calm (24), Busy (48), "
-                            "Rush Hour (64, all day) or Chaos (100, all day). Changing amount or "
+                            "Rush Hour (64, all day), Chaos (150, all day) or No Traffic. Changing amount or "
                             "rush hour afterwards shows Custom. Saved immediately, the amount only "
                             "applies after restarting Azimuth."},
     [RIG_WHEEL_PROFILE] = {"Input: Profile",
@@ -453,9 +454,9 @@ static const wchar_t *const profile_english[RIG_PROFILE_COUNT] = {
     L"Custom", L"Controller", L"Keyboard", L"Wheel", L"Wheel (Clutch as Brake)", L"Set up wheel (pedals, buttons)"};
 
 static const wchar_t *const density_german[RIG_DENSITY_COUNT] = {
-    L"Eigene Werte", L"Original", L"Ruhig", L"Lebhaft", L"Rushhour", L"Chaos"};
+    L"Eigene Werte", L"Original", L"Ruhig", L"Lebhaft", L"Rushhour", L"Chaos", L"Kein Verkehr"};
 static const wchar_t *const density_english[RIG_DENSITY_COUNT] = {
-    L"Custom", L"Original", L"Calm", L"Busy", L"Rush Hour", L"Chaos"};
+    L"Custom", L"Original", L"Calm", L"Busy", L"Rush Hour", L"Chaos", L"No Traffic"};
 
 static const wchar_t *const weather_german[RIG_WEATHER_COUNT] = {
     L"Original", L"Sonnig", L"Bewölkt", L"Gewitterwolken", L"Regen", L"Nebel"};
@@ -512,10 +513,10 @@ const wchar_t *rig_function_choice(unsigned char *game_image, unsigned index) {
     return wheel_function_name(game_image, index);
 }
 
-static const wchar_t *const traffic_german[6] = {L"Original (~14)", L"24 Autos", L"36 Autos",
-                                                  L"48 Autos",       L"64 Autos", L"150 Autos"};
-static const wchar_t *const traffic_english[6] = {L"Original (~14)", L"24 Cars", L"36 Cars",
-                                                   L"48 Cars",        L"64 Cars", L"150 Cars"};
+static const wchar_t *const traffic_german[RIG_TRAFFIC_COUNT] = {L"Original (~14)", L"24 Autos", L"36 Autos",
+                                                  L"48 Autos",       L"64 Autos", L"150 Autos", L"Kein Verkehr"};
+static const wchar_t *const traffic_english[RIG_TRAFFIC_COUNT] = {L"Original (~14)", L"24 Cars", L"36 Cars",
+                                                   L"48 Cars",        L"64 Cars", L"150 Cars", L"No Traffic"};
 
 static const RigText *texts(unsigned char *game_image) {
     return video_options_text_is_german(game_image) ? german : english;
@@ -530,7 +531,7 @@ const char *rig_setting_description(unsigned char *game_image, unsigned id) {
 }
 
 const wchar_t *rig_traffic_choice(unsigned char *game_image, unsigned index) {
-    if (index >= 6) {
+    if (index >= RIG_TRAFFIC_COUNT) {
         return L"";
     }
     return video_options_text_is_german(game_image) ? traffic_german[index]

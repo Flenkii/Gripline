@@ -75,6 +75,9 @@ for level, c in LEVELS.items():
     ref = MT.patch_car_loading(CAR_LOADING, dict(max_active=c['max_active'], initial=6, types=c['types'],
                                                  type_mult=c['type_mult']), [])
     check(run(0, level, CAR_LOADING) == ref, f'CarLoadingSettings.xml, TrafficLevel={level}')
+got = run(1, 6, DENSITIES)
+check(got.count('min="0" max="0"') == 6 and 'min="0.1" max="0.2"' in got, 'Kein Verkehr: Verkehr + Festival 0, Polizei bleibt')
+check(run(0, 6, CAR_LOADING) == CAR_LOADING, 'Kein Verkehr: CarLoadingSettings unverändert')
 check(run(1, 0, DENSITIES) == DENSITIES and run(0, 0, CAR_LOADING) == CAR_LOADING, 'TrafficLevel=0: unverändert')
 got = run(1, 4, DENSITIES)
 check('densityNameTagValue="open_world" min="0.8" max="1.4"' in got, 'open_world bekommt Zivilverkehr (wie "b")')
@@ -105,6 +108,7 @@ check(files == ['AI/CarLoadingSettings.xml', 'AI/Densities.xml', 'EntityModel/AI
 check(open(os.path.join(out, 'EntityModel', 'AI', 'Densities.xml')).read() == run(1, 4, DENSITIES), 'Densities.xml wie oben')
 check('MaxActiveTraffic="64"' in open(os.path.join(out, 'EntityModel', 'AI', 'CarLoadingSettings.xml')).read(),
       'MaxActiveTraffic 18 -> 64')
+check(f.call('Fh2TestTrafficFilesStart', f.put_wstr('C:\\test\\Mount'), 6) == 2, 'Kein Verkehr: Ordner wird eingebunden')
 check(f.call('Fh2TestTrafficFilesStart', f.put_wstr('C:\\test\\Mount'), 0) == 3, 'TrafficLevel=0: Ordner wird nicht eingebunden')
 
 print(f'\n{checks[0] - len(fails)}/{checks[0]} ok')
