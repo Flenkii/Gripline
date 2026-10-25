@@ -308,6 +308,8 @@ static void append_rig_resources(XamlBuffer *buffer, unsigned char *image) {
     append_number_slider_style(buffer, "EO_RigRotation", "EO_RigNumber0", "180", "2520", "30");
     append_number_slider_style(buffer, "EO_RigCurve", "EO_RigNumber1", "1", "6", "0.1");
     append_number_slider_style(buffer, "EO_KeyTime", "EO_RigNumber0", "0", "1000", "10");
+    append_number_slider_style(buffer, "EO_GripViewBack", "EO_RigNumber0", "-20", "60", "1");
+    append_number_slider_style(buffer, "EO_GripViewUp", "EO_RigNumber0", "-20", "30", "1");
     append_percent_slider_style(buffer, "EO_RigPercent200", "2", "0.05");
     append_percent_slider_style(buffer, "EO_RigPercent100", "1", "0.05");
     append_percent_slider_style(buffer, "EO_RigPercent50", "0.5", "0.01");

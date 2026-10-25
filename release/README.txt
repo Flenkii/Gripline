@@ -124,6 +124,7 @@ wirkt nach Neustart; der erste Start danach dauert etwas länger), passt zu fh2w
 Neu in V6: Lenkrad im Cockpit dreht 1:1 mit, Azimuth Mapper wird erkannt (Gripline-
 Tastatur und -Lenkrad dann aus), Start-Karte mit gefundenen Mods, Eingabe-Profil im Spiel
 umschaltbar, fh2wheels getestet, Einrichtungs-Assistent für andere Lenkräder,
-Fehlerbericht per Menü (Gripline_Report.zip).
+Fehlerbericht per Menü (Gripline_Report.zip), zweite Cockpit-Ansicht
+wie in FH5 (Taste V, Abstand im GRIPLINE-Menü).
 Probleme bitte auf GitHub unter "Issues" melden und FH2_ExtraOptions.log, FH2_Wheel.log,
 FH2_Wheel.ini, FH2_Keyboard.ini und fh2-mods\platform.log anhängen.

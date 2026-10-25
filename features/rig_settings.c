@@ -12,6 +12,7 @@
 #include "rig_settings.h"
 #include "ini_edit.h"
 #include "report.h"
+#include "cockpit_view.h"
 #include "ini_migrate.h"
 #include "logging.h"
 #include "support.h"
@@ -79,6 +80,8 @@ static const RigSettingInfo infos[RIG_SETTING_COUNT] = {
     [RIG_GRIP_NOTIFICATIONS] = {"EoGripNotify", "Notifications", 0, 1, RIG_KIND_TOGGLE, 0, 1, NULL},
     [RIG_GRIP_STEERING] = {"EoGripSteering", "SteeringAnimation", 0, 1, RIG_KIND_TOGGLE, 0, 1, NULL},
     [RIG_GRIP_REPORT] = {"EoGripReport", "", 0, 1, RIG_KIND_TOGGLE, 0, 1, NULL},
+    [RIG_GRIP_VIEW_BACK] = {"EoGripViewBack", "CockpitViewBack", -20, 60, RIG_KIND_NUMBER, 0, 1, "EO_GripViewBack"},
+    [RIG_GRIP_VIEW_UP] = {"EoGripViewUp", "CockpitViewUp", -20, 30, RIG_KIND_NUMBER, 0, 1, "EO_GripViewUp"},
 };
 
 /* Rows of the menu. The force feedback is the game's own (its wheel programs), so the old
@@ -93,7 +96,7 @@ static const unsigned char order[] = {
     RIG_WHEEL_ROTATION,  RIG_WHEEL_CLUTCH_BRAKE, RIG_WHEEL_BUTTON1, RIG_WHEEL_BUTTON2,  RIG_WHEEL_BUTTON3,
     RIG_KEY_ENABLED,     RIG_KEY_STEER,     RIG_KEY_RETURN,     RIG_KEY_PEDAL,
     RIG_TRAFFIC_PRESET,  RIG_TRAFFIC_LEVEL, RIG_TRAFFIC_ALL_DAY, RIG_WEATHER,
-    RIG_GRIP_STEERING,   RIG_GRIP_NOTIFICATIONS, RIG_GRIP_REPORT,
+    RIG_GRIP_STEERING,   RIG_GRIP_VIEW_BACK, RIG_GRIP_VIEW_UP, RIG_GRIP_NOTIFICATIONS, RIG_GRIP_REPORT,
 };
 _Static_assert(sizeof(order) <= RIG_SETTING_COUNT, "menu rows");
 
@@ -292,6 +295,13 @@ static const RigText german[RIG_SETTING_COUNT] = {
                                 "Kleine Gripline-Karten oben rechts im Bild, z. B. wenn etwas "
                                 "gespeichert wurde oder Nitro online aus ist. Auch im Vollbild. "
                                 "Wirkt sofort."},
+    [RIG_GRIP_VIEW_BACK] = {"Cockpit-Ansicht 2: zurück (cm)",
+                            "Zweite Cockpit-Ansicht wie in FH5: so viele Zentimeter sitzt du weiter "
+                            "hinten. Umschalten mit V auf der Tastatur oder einer freien Lenkradtaste "
+                            "(Funktion Cockpit-Ansicht). Wirkt sofort."},
+    [RIG_GRIP_VIEW_UP] = {"Cockpit-Ansicht 2: hoch (cm)",
+                          "So viele Zentimeter sitzt du in der zweiten Cockpit-Ansicht höher "
+                          "(negativ = tiefer). Wirkt sofort."},
     [RIG_GRIP_REPORT] = {"Gripline: Fehlerbericht erstellen",
                          "Auf An stellen: packt Logs und Einstellungen in Gripline_Report.zip "
                          "neben azimuth.exe. Die Datei bei einem Problem auf GitHub unter Issues "
@@ -406,6 +416,13 @@ static const RigText english[RIG_SETTING_COUNT] = {
                                 "Small Gripline cards at the top right of the picture, e.g. when "
                                 "something was saved or nitro is off online. Also in fullscreen. "
                                 "Applies immediately."},
+    [RIG_GRIP_VIEW_BACK] = {"Cockpit View 2: Back (cm)",
+                            "Second cockpit view like in FH5: you sit this many centimetres further "
+                            "back. Switch with V on the keyboard or a free wheel button (function "
+                            "Cockpit View). Applies immediately."},
+    [RIG_GRIP_VIEW_UP] = {"Cockpit View 2: Up (cm)",
+                          "You sit this many centimetres higher in the second cockpit view "
+                          "(negative = lower). Applies immediately."},
     [RIG_GRIP_REPORT] = {"Gripline: Create Problem Report",
                          "Set to On: packs logs and settings into Gripline_Report.zip next to "
                          "azimuth.exe. Attach that file to a GitHub issue when something goes "
@@ -506,11 +523,14 @@ static int is_gripline(unsigned id) {
     return id >= RIG_GRIP_FIRST && id < RIG_GRIP_END;
 }
 
-static volatile LONG gripline_values[RIG_GRIP_END - RIG_GRIP_FIRST] = {1, 0};
+static volatile LONG gripline_values[RIG_GRIP_END - RIG_GRIP_FIRST] = {1, 0, 20, 5};
 
-void rig_settings_gripline(int notifications, int steering_animation) {
+void rig_settings_gripline(int notifications, int steering_animation, int view_back, int view_up) {
     gripline_values[RIG_GRIP_NOTIFICATIONS - RIG_GRIP_FIRST] = notifications ? 1 : 0;
     gripline_values[RIG_GRIP_STEERING - RIG_GRIP_FIRST] = steering_animation ? 1 : 0;
+    gripline_values[RIG_GRIP_VIEW_BACK - RIG_GRIP_FIRST] = view_back;
+    gripline_values[RIG_GRIP_VIEW_UP - RIG_GRIP_FIRST] = view_up;
+    cockpit_view_set_offset(view_back, view_up);
 }
 
 static int stored_value(unsigned id) {
@@ -569,6 +589,9 @@ static void forward(unsigned id, int value) {
         if (id == RIG_GRIP_NOTIFICATIONS) {
             notify_set_enabled(value);
             if (value && !before) notify_show("Notifications on");
+        } else if (id == RIG_GRIP_VIEW_BACK || id == RIG_GRIP_VIEW_UP) {
+            cockpit_view_set_offset((int)gripline_values[RIG_GRIP_VIEW_BACK - RIG_GRIP_FIRST],
+                                    (int)gripline_values[RIG_GRIP_VIEW_UP - RIG_GRIP_FIRST]);
         } else if (before != value) {
             notify_show(value ? "Steering animation on\nApplies after a restart"
                               : "Steering animation off\nApplies after a restart");

@@ -115,7 +115,8 @@ int runtime_initialize(unsigned char *game_image, const wchar_t *executable_path
         notify_set_enabled(options.notifications);
         mod_scan_start(settings_directory);
         report_init(settings_directory);
-        rig_settings_gripline(options.notifications, options.steering_animation);
+        rig_settings_gripline(options.notifications, options.steering_animation, options.cockpit_view_back,
+                              options.cockpit_view_up);
         rig_settings_start(settings_directory);
     }
     if (initialized && options.enabled) {

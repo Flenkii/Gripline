@@ -38,6 +38,8 @@ enum {
     RIG_GRIP_FIRST = RIG_KEY_END,        /* FH2_ExtraOptions.ini [Gripline] */
     RIG_GRIP_NOTIFICATIONS = RIG_GRIP_FIRST, /* Notifications      0/1 */
     RIG_GRIP_STEERING,                   /* SteeringAnimation  0/1, next game start */
+    RIG_GRIP_VIEW_BACK,                  /* CockpitViewBack    cm, second cockpit view */
+    RIG_GRIP_VIEW_UP,                    /* CockpitViewUp      cm */
     RIG_GRIP_END,
     RIG_WHEEL_PROFILE = RIG_GRIP_END,     /* input profile: not stored, derived from wheel / keyboard / clutch-as-brake */
     RIG_TRAFFIC_PRESET,                  /* traffic preset: not stored, derived from level + rush hour */
@@ -82,7 +84,7 @@ int rig_setting_get(unsigned id);
 int rig_setting_set(unsigned id, int value);
 void rig_settings_start(const wchar_t *settings_directory);
 /* [Gripline] values read from FH2_ExtraOptions.ini at the game start */
-void rig_settings_gripline(int notifications, int steering_animation);
+void rig_settings_gripline(int notifications, int steering_animation, int view_back, int view_up);
 void rig_settings_flush(void);
 
 /* Texts of the page (German or English, following the game language). */

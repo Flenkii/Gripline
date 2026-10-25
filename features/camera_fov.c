@@ -1,4 +1,5 @@
 #include "camera_views.h"
+#include "cockpit_view.h"
 #include "features.h"
 #include "support.h"
 #include "video_settings.h"
@@ -28,6 +29,9 @@ static float get_fov(void *camera) {
     }
     if (!view) {
         return 0;
+    }
+    if (view == CAMERA_DRIVER) {
+        cockpit_view_frame(camera); /* Gripline: second cockpit view */
     }
     int chase = view <= CAMERA_CHASE_FAR;
     float result = (chase ? native_chase : native_mounted)(camera);

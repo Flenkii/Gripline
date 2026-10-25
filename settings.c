@@ -30,6 +30,8 @@ const SettingDefinition setting_definitions[] = {
     SETTING("Traffic", "Weather", weather, SETTING_WEATHER),
     SETTING("Gripline", "Notifications", notifications, SETTING_BOOLEAN),
     SETTING("Gripline", "SteeringAnimation", steering_animation, SETTING_BOOLEAN),
+    SETTING("Gripline", "CockpitViewBack", cockpit_view_back, SETTING_CENTIMETERS),
+    SETTING("Gripline", "CockpitViewUp", cockpit_view_up, SETTING_CENTIMETERS),
 };
 
 static const SettingDefinition legacy_settings[] = {
@@ -87,6 +89,8 @@ void settings_defaults(ModOptions *options) {
         .traffic_level = 4,
         .traffic_all_day = 1,
         .notifications = 1,
+        .cockpit_view_back = 20,
+        .cockpit_view_up = 5,
     };
 }
 
@@ -166,6 +170,24 @@ static int parse_value(const SettingDefinition *definition, const char *text, in
             return 1;
         }
         return 0;
+    }
+    if (definition->type == SETTING_CENTIMETERS) { /* -100 .. 100 */
+        const char *digit = text[0] == '-' ? text + 1 : text;
+        int number = 0;
+        if (!*digit) {
+            return 0;
+        }
+        for (; *digit; ++digit) {
+            if (*digit < '0' || *digit > '9' || number > 100) {
+                return 0;
+            }
+            number = number * 10 + (*digit - '0');
+        }
+        if (number > 100) {
+            return 0;
+        }
+        *value = text[0] == '-' ? -number : number;
+        return 1;
     }
     if (definition->type == SETTING_TRAFFIC_LEVEL) {
         if (text[0] >= '0' && text[0] <= '5' && !text[1]) {

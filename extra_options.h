@@ -94,5 +94,6 @@ typedef struct {
     int traffic_level, traffic_all_day;
     int weather;
     int notifications, steering_animation; /* [Gripline] */
+    int cockpit_view_back, cockpit_view_up; /* [Gripline] second cockpit view, cm */
 } ModOptions;
 #endif
