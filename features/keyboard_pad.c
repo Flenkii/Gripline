@@ -114,7 +114,7 @@ static Binding bindings[] = {
     {L"Nitro", KIND_NITRO, 0, L"N", {0}},
     {L"CockpitView", KIND_COCKPIT_VIEW, 0, L"V", {0}},
     {L"CreatorMode", KIND_CREATOR, 0, L"H", {0}},
-    {L"Keybinds", KIND_KEYLIST, 0, L"F1", {0}},
+    {L"Keybinds", KIND_KEYLIST, 0, L"F5", {0}},
     {L"Lights", KIND_FIXED, IN_RS, L"L", {0}},
     {L"Map", KIND_FIXED, IN_VIEW, L"M", {0}},
     {L"Pause", KIND_FIXED, IN_MENU, L"Esc", {0}},

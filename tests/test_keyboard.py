@@ -247,7 +247,7 @@ keys.clear()
 advance(300)
 read()
 
-# ---- key list panel (Keybinds = F1): shown until F1 again, the pad reading is unchanged
+# ---- key list panel (Keybinds = F5): shown until F5 again, the pad reading is unchanged
 def panel():
     w, rows, count = e.alloc(4), e.alloc(4), e.alloc(4)
     label, keys_ = e.alloc(64), e.alloc(64)
@@ -256,22 +256,22 @@ def panel():
 keys.clear()
 read()
 check(panel()[0] == 0, 'Tastenliste anfangs aus')
-keys.add(0x70)
+keys.add(0x74)
 r = read()
 count, label, kt, width, rows = panel()
-check(r['buttons'] == 0 and r['lx'] == 0.0, 'F1 drueckt nichts im Spiel')
-check(count == 35 and label == 'Throttle' and kt == 'W', f'F1: Tastenliste mit allen belegten Tasten + Autodrive: {count} {label}={kt}')
+check(r['buttons'] == 0 and r['lx'] == 0.0, 'F5 drueckt nichts im Spiel')
+check(count == 35 and label == 'Throttle' and kt == 'W', f'F5: Tastenliste mit allen belegten Tasten + Autodrive: {count} {label}={kt}')
 read()
-check(panel()[0] == count, 'F1 halten: bleibt an (nur Druck schaltet)')
+check(panel()[0] == count, 'F5 halten: bleibt an (nur Druck schaltet)')
 keys.clear()
 read()
-check(panel()[0] == count, 'F1 loslassen: bleibt an')
+check(panel()[0] == count, 'F5 loslassen: bleibt an')
 check(width > 0 and rows <= 1080, f'Tastenliste passt in 1080 Zeilen ({rows})')
-keys.add(0x70)
+keys.add(0x74)
 read()
 keys.clear()
 read()
-check(panel()[0] == 0, 'F1 nochmal: Tastenliste aus')
+check(panel()[0] == 0, 'F5 nochmal: Tastenliste aus')
 
 # vibration
 vib = e.alloc(32)
