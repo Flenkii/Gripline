@@ -33,6 +33,7 @@ enum {
     WHEEL_FUNCTION_SHIFT_DOWN,
     WHEEL_FUNCTION_NITRO, /* NitroSystem, see nitro_link.h - no game action */
     WHEEL_FUNCTION_COCKPIT_VIEW, /* second cockpit view, see cockpit_view.h - no game action */
+    WHEEL_FUNCTION_CREATOR, /* creator mode, see creator_mode.h - no game action */
     WHEEL_FUNCTION_COUNT
 };
 

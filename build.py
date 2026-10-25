@@ -68,6 +68,7 @@ COMMON_SOURCES = [
     "features/mod_scan.c",
     "features/report.c",
     "features/cockpit_view.c",
+    "features/creator_mode.c",
     "features/nitro_link.c",
     "features/notify.c",
     "features/platform_link.c",

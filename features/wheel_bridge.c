@@ -378,7 +378,7 @@ static const char default_ini[] =
     "; Function per button: 0 off, 1 camera, 2 look back, 3 look left, 4 look right,\r\n"
     "; 5 rewind, 6 telemetry, 7 photo mode, 8 radio previous, 9 radio next,\r\n"
     "; 10 handbrake, 11 clutch, 12 shift up, 13 shift down,\r\n"
-    "; 14 nitro (needs the NitroSystem mod)\r\n"
+    "; 14 nitro (needs the NitroSystem mod), 15 cockpit view 2, 16 creator mode\r\n"
     "ExtraFunction1=2\r\n"
     "ExtraFunction2=1\r\n"
     "ExtraFunction3=0\r\n"

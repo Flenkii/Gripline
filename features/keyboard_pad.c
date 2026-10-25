@@ -7,6 +7,7 @@
 #include "support.h"
 #include "nitro_link.h"
 #include "cockpit_view.h"
+#include "creator_mode.h"
 
 #define KEY_INI L"FH2_Keyboard.ini"
 #define MAX_PADS 8
@@ -71,6 +72,7 @@ enum {
     KIND_FIXED,  /* fixed controller input */
     KIND_NITRO,  /* NitroSystem nitro button, see nitro_link.h */
     KIND_COCKPIT_VIEW, /* second cockpit view on/off, see cockpit_view.h */
+    KIND_CREATOR, /* creator mode on/off, see creator_mode.h */
 };
 
 typedef struct {
@@ -108,6 +110,7 @@ static Binding bindings[] = {
     {L"LookRight", KIND_ACTION, 12, L"Num6", {0}},
     {L"Nitro", KIND_NITRO, 0, L"N", {0}},
     {L"CockpitView", KIND_COCKPIT_VIEW, 0, L"V", {0}},
+    {L"CreatorMode", KIND_CREATOR, 0, L"H", {0}},
     {L"Lights", KIND_FIXED, IN_RS, L"L", {0}},
     {L"Map", KIND_FIXED, IN_VIEW, L"M", {0}},
     {L"Pause", KIND_FIXED, IN_MENU, L"Esc", {0}},
@@ -227,7 +230,8 @@ static const char default_ini[] =
     "; Menus: Enter = A, Backspace = B, Esc = Menu.\r\n"
     "; Arrow keys: in menus = left stick, while driving = camera (right stick).\r\n"
     "; Nitro: only with the NitroSystem mod (presses its NitroButton).\r\n"
-    "; CockpitView: second cockpit view on/off (close to the dashboard, set in GRIPLINE).\r\n";
+    "; CockpitView: second cockpit view on/off (close to the dashboard, set in GRIPLINE).\r\n"
+    "; CreatorMode: hides HUD, minimap and Gripline cards for clean recordings, again = back.\r\n";
 
 /* Default file text including the key bindings (also used by ini_migrate.c). Returns the
    length, 0 if it does not fit. */
@@ -437,6 +441,9 @@ static void keyboard_reading(PadReading *r) {
                 break;
             case KIND_COCKPIT_VIEW:
                 cockpit_view_input(COCKPIT_VIEW_KEYBOARD, pressed);
+                break;
+            case KIND_CREATOR:
+                creator_mode_input(CREATOR_KEYBOARD, pressed);
                 break;
             case KIND_ACTION: {
                 int input = controller_action_input(b->target);
