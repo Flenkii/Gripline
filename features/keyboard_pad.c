@@ -273,7 +273,7 @@ static void write_default_ini(void) {
 
 static const wchar_t *const labels_german[ARRAY_COUNT(bindings)] = {
     L"Gas", L"Bremse", L"Links lenken", L"Rechts lenken", L"Handbremse", L"Hochschalten", L"Runterschalten",
-    L"Kupplung", L"Kamera wechseln", L"Zurückspulen", L"Telemetrie", L"Fotomodus", L"Radio: zurück",
+    L"Kupplung", L"Kamera wechseln", L"Zurückspulen", L"Telemetrie (halten)", L"Fotomodus (halten)", L"Radio: zurück",
     L"Radio: weiter", L"Blick zurück", L"Blick links", L"Blick rechts", L"Nitro (NitroSystem)",
     L"Cockpit-Ansicht 2", L"Creator-Modus", L"Tastenliste ein/aus", L"Licht", L"Karte", L"Pause",
     L"Bestätigen (A)", L"Zurück (B)", L"Taste X", L"Taste Y", L"Reiter links (LB)", L"Reiter rechts (RB)",
@@ -281,7 +281,7 @@ static const wchar_t *const labels_german[ARRAY_COUNT(bindings)] = {
     L"Steuerkreuz hoch", L"Steuerkreuz runter", L"Steuerkreuz links", L"Steuerkreuz rechts"};
 static const wchar_t *const labels_english[ARRAY_COUNT(bindings)] = {
     L"Throttle", L"Brake", L"Steer left", L"Steer right", L"Handbrake", L"Shift up", L"Shift down",
-    L"Clutch", L"Change camera", L"Rewind", L"Telemetry", L"Photo mode", L"Radio: previous",
+    L"Clutch", L"Change camera", L"Rewind", L"Telemetry (hold)", L"Photo mode (hold)", L"Radio: previous",
     L"Radio: next", L"Look back", L"Look left", L"Look right", L"Nitro (NitroSystem)",
     L"Cockpit view 2", L"Creator mode", L"Key list on/off", L"Lights", L"Map", L"Pause",
     L"Confirm (A)", L"Back (B)", L"Button X", L"Button Y", L"Tab left (LB)", L"Tab right (RB)",
@@ -290,25 +290,90 @@ static const wchar_t *const labels_english[ARRAY_COUNT(bindings)] = {
 _Static_assert(ARRAY_COUNT(bindings) + 1 <= NOTIFY_PANEL_ROWS, "key list rows");
 
 static unsigned char *game_base;
-static wchar_t key_texts[ARRAY_COUNT(bindings)][32]; /* keys as written in the INI, "" = none */
+static HMODULE user32;
 static volatile LONG key_list_held, key_list_on;
 
-/* "C,Num2" -> "C, Num2"; empty when no key of the binding is known */
-static void key_list_text(unsigned index, const wchar_t *text) {
-    wchar_t *out = key_texts[index];
-    unsigned n = 0;
-    if (bindings[index].vk[0]) {
-        for (const wchar_t *p = text; *p && n < 28; ++p) {
-            if (*p == L' ') continue;
-            if (*p == L',' || *p == L';') {
-                out[n++] = L',';
-                out[n++] = L' ';
-            } else {
-                out[n++] = *p;
-            }
+typedef int(WINAPI *MapKeyFn)(UINT, UINT);
+typedef int(WINAPI *KeyNameFn)(LONG, LPWSTR, int);
+
+/* Name of a key as printed on this keyboard (Windows keyboard layout), for the keys whose place
+   differs between layouts (Minus, Plus, Comma, Period: e.g. "=" on a US keyboard). */
+static int layout_key_name(unsigned char vk, wchar_t *out, int capacity) {
+#ifdef FH2_TWEAKS_TEST
+    (void)vk, (void)out, (void)capacity;
+    return 0;
+#else
+    static MapKeyFn map_key;
+    static KeyNameFn key_name;
+    if (!key_name) {
+        if (!user32) user32 = LoadLibraryExW(L"user32.dll", NULL, LOAD_LIBRARY_SEARCH_SYSTEM32);
+        if (!user32) return 0;
+        map_key = (MapKeyFn)(uintptr_t)GetProcAddress(user32, "MapVirtualKeyW");
+        key_name = (KeyNameFn)(uintptr_t)GetProcAddress(user32, "GetKeyNameTextW");
+        if (!map_key || !key_name) {
+            key_name = NULL;
+            return 0;
         }
     }
+    int scan = map_key(vk, 0); /* MAPVK_VK_TO_VSC */
+    return scan ? key_name((LONG)scan << 16, out, capacity) : 0;
+#endif
+}
+
+static const struct {
+    unsigned char vk;
+    const wchar_t *german, *english;
+} key_words[] = {
+    {0x20, L"Leertaste", L"Space"},        {0x0d, L"Enter", L"Enter"},
+    {0x1b, L"Esc", L"Esc"},                {0x09, L"Tab", L"Tab"},
+    {0x08, L"Rücktaste", L"Backspace"},    {0x10, L"Umschalt", L"Shift"},
+    {0xa0, L"Umschalt links", L"Left Shift"}, {0xa1, L"Umschalt rechts", L"Right Shift"},
+    {0x11, L"Strg", L"Ctrl"},              {0xa2, L"Strg links", L"Left Ctrl"},
+    {0xa3, L"Strg rechts", L"Right Ctrl"}, {0x12, L"Alt", L"Alt"},
+    {0x26, L"Pfeil hoch", L"Up"},          {0x28, L"Pfeil runter", L"Down"},
+    {0x25, L"Pfeil links", L"Left"},       {0x27, L"Pfeil rechts", L"Right"},
+    {0x21, L"Bild hoch", L"Page Up"},      {0x22, L"Bild runter", L"Page Down"},
+    {0x24, L"Pos1", L"Home"},              {0x23, L"Ende", L"End"},
+    {0x2d, L"Einfg", L"Insert"},           {0x2e, L"Entf", L"Delete"},
+    {0xbd, L"Minus", L"Minus"},            {0xbb, L"Plus", L"Plus"},
+    {0xbc, L"Komma", L"Comma"},            {0xbe, L"Punkt", L"Period"},
+    {0x01, L"Maus links", L"Left mouse"},  {0x02, L"Maus rechts", L"Right mouse"},
+    {0x04, L"Mausrad-Klick", L"Middle mouse"}, {0x05, L"Maus 4", L"Mouse 4"},
+    {0x06, L"Maus 5", L"Mouse 5"},
+};
+
+static unsigned append(wchar_t *out, unsigned n, unsigned capacity, const wchar_t *text) {
+    while (*text && n + 1 < capacity) out[n++] = *text++;
     out[n] = 0;
+    return n;
+}
+
+/* the keys of one binding as the player reads them, e.g. "C, Num 2" */
+static void key_list_keys(const Binding *b, int german, wchar_t *out, unsigned capacity) {
+    unsigned n = 0;
+    out[0] = 0;
+    for (unsigned k = 0; k < 4 && b->vk[k]; ++k) {
+        unsigned char vk = b->vk[k];
+        wchar_t name[24] = {0};
+        if (k) n = append(out, n, capacity, L", ");
+        if ((vk >= 'A' && vk <= 'Z') || (vk >= '0' && vk <= '9')) {
+            name[0] = (wchar_t)vk;
+        } else if (vk >= 0x70 && vk <= 0x7b) {
+            int f = vk - 0x70 + 1;
+            name[0] = L'F';
+            name[1] = (wchar_t)(f >= 10 ? L'1' : L'0' + f);
+            if (f >= 10) name[2] = (wchar_t)(L'0' + f - 10);
+        } else if (vk >= 0x60 && vk <= 0x69) {
+            append(name, 0, 24, L"Num ");
+            name[4] = (wchar_t)(L'0' + vk - 0x60);
+        } else if (vk >= 0xba && vk <= 0xe2 && layout_key_name(vk, name, 24) > 0) {
+            /* name from the keyboard layout */
+        } else {
+            for (unsigned i = 0; i < ARRAY_COUNT(key_words); ++i)
+                if (key_words[i].vk == vk) append(name, 0, 24, german ? key_words[i].german : key_words[i].english);
+        }
+        n = append(out, n, capacity, name);
+    }
 }
 
 static void copy_text(wchar_t *out, const wchar_t *text, unsigned capacity) {
@@ -325,9 +390,9 @@ static void key_list_show(void) {
     int german = video_options_text_is_german(game_base);
     unsigned count = 0;
     for (unsigned i = 0; i < ARRAY_COUNT(bindings); ++i) {
-        if (!key_texts[i][0]) continue;
+        if (!bindings[i].vk[0]) continue;
         copy_text(rows[count].label, german ? labels_german[i] : labels_english[i], 32);
-        copy_text(rows[count].keys, key_texts[i], 32);
+        key_list_keys(&bindings[i], german, rows[count].keys, 32);
         ++count;
     }
     copy_text(rows[count].label, L"Autodrive", 32); /* fixed key, game_input.c */
@@ -360,7 +425,6 @@ static void settings_load(void) {
         wchar_t text[96];
         GetPrivateProfileStringW(L"Keyboard", bindings[i].key, bindings[i].defaults, text, 96, ini_path);
         parse_keys(&bindings[i], text);
-        key_list_text(i, text);
     }
     loaded = 1;
 }
@@ -383,7 +447,6 @@ const wchar_t *keyboard_ini_path(void) {
 static AsyncKeyFn async_key;
 static ForegroundFn foreground;
 static WindowPidFn window_pid;
-static HMODULE user32;
 
 static int user32_ready(void) {
     if (async_key) return 1;

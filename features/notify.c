@@ -1155,6 +1155,13 @@ __declspec(dllexport) int Fh2TestNotifyDraw(unsigned height, unsigned char *pixe
     return draw_cards(cards, card_count, &l, pixels, pitch);
 }
 
+__declspec(dllexport) int Fh2TestNotifyPanelRow(unsigned index, wchar_t *label, wchar_t *keys) {
+    if (index >= (unsigned)panel_count) return 0;
+    memory_copy(label, panel_rows[index].label, sizeof(panel_rows[index].label));
+    memory_copy(keys, panel_rows[index].keys, sizeof(panel_rows[index].keys));
+    return 1;
+}
+
 /* Key list panel: rows/width of its bitmap; with pixels, draws it (l.panel_height rows). */
 __declspec(dllexport) int Fh2TestNotifyPanelDraw(unsigned height, unsigned char *pixels, int pitch, int *width,
                                                  int *rows, unsigned *count, wchar_t *first_label,

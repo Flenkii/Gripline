@@ -261,6 +261,17 @@ r = read()
 count, label, kt, width, rows = panel()
 check(r['buttons'] == 0 and r['lx'] == 0.0, 'F5 drueckt nichts im Spiel')
 check(count == 35 and label == 'Throttle' and kt == 'W', f'F5: Tastenliste mit allen belegten Tasten + Autodrive: {count} {label}={kt}')
+def panel_rows():
+    out = {}
+    for i in range(count):
+        l, k = e.alloc(64), e.alloc(64)
+        e.call('Fh2TestNotifyPanelRow', i, l, k)
+        out[e.wstr(l)] = e.wstr(k)
+    return out
+rw = panel_rows()
+check(rw.get('Look back') == 'C, Num 2' and rw.get('Radio: previous') == 'Minus' and rw.get('Clutch') == 'Left Shift'
+      and rw.get('Telemetry (hold)') == 'T' and rw.get('Photo mode (hold)') == 'P' and rw.get('Key list on/off') == 'F5'
+      and rw.get('Autodrive') == 'F2' and rw.get('Change camera') == 'Tab', f'Tastennamen lesbar: {rw}')
 read()
 check(panel()[0] == count, 'F5 halten: bleibt an (nur Druck schaltet)')
 keys.clear()
