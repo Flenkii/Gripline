@@ -279,13 +279,24 @@ static uint64_t layout_hook(void *map, uint64_t id, uint64_t kind, void *options
 }
 
 /* called by the state stubs on the game's input thread (wheel path only) */
+static volatile LONG wheel_reads;
+
 static int rs_pressed(void) {
+    InterlockedIncrement(&wheel_reads);
     return extra_rs != 0;
 }
 
 static float stick_y(void) {
     LONG value = extra_ly;
     return value > 0 ? 1.0f : value < 0 ? -1.0f : 0.0f;
+}
+
+unsigned wheel_buttons_wheel_reads(void) {
+    return (unsigned)wheel_reads;
+}
+
+int wheel_buttons_action_input(unsigned action) {
+    return installed && action < ACTION_COUNT ? (int)action_input[action] : -1;
 }
 
 void wheel_buttons_update(unsigned held, unsigned char *byte0, unsigned char *byte1) {

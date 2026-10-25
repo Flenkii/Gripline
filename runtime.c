@@ -5,6 +5,7 @@
 #include "features/nitro_link.h"
 #include "features/notify.h"
 #include "features/cockpit.h"
+#include "features/cockpit_view.h"
 #include "features/mod_scan.h"
 #include "features/report.h"
 #include "features/rig_settings.h"
@@ -101,6 +102,7 @@ int runtime_initialize(unsigned char *game_image, const wchar_t *executable_path
         wheel_bridge_start(game_image, executable_path, settings_directory);
         keyboard_pad_game_start(game_image, settings_directory);
         nitro_link_start(game_image);
+        cockpit_view_start(game_image);
         if (options.steering_animation) {
             static wchar_t mount_dir[PATH_CAPACITY];
             size_t n = 0, cut = 0;

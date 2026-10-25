@@ -50,4 +50,9 @@ const wchar_t *wheel_function_name(unsigned char *game_image, unsigned function)
 /* Controller (gamepad) layout of the game: input that triggers a game action (-1 = none).
    Layout 0 until the game loads the player's layout. Used by the keyboard. */
 int controller_action_input(unsigned action);
+
+/* For the second cockpit view: counts the game's reads of a wheel state (so a state read can be told
+   apart from a gamepad read), and the wheel layout's input of an action (-1 = unknown). */
+unsigned wheel_buttons_wheel_reads(void);
+int wheel_buttons_action_input(unsigned action);
 #endif
