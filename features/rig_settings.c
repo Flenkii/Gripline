@@ -513,9 +513,9 @@ const wchar_t *rig_function_choice(unsigned char *game_image, unsigned index) {
 }
 
 static const wchar_t *const traffic_german[6] = {L"Original (~14)", L"24 Autos", L"36 Autos",
-                                                  L"48 Autos",       L"64 Autos", L"100 Autos"};
+                                                  L"48 Autos",       L"64 Autos", L"150 Autos"};
 static const wchar_t *const traffic_english[6] = {L"Original (~14)", L"24 Cars", L"36 Cars",
-                                                   L"48 Cars",        L"64 Cars", L"100 Cars"};
+                                                   L"48 Cars",        L"64 Cars", L"150 Cars"};
 
 static const RigText *texts(unsigned char *game_image) {
     return video_options_text_is_german(game_image) ? german : english;

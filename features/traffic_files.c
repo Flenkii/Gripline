@@ -23,14 +23,15 @@ typedef struct {
     double traffic, festival, cap, distance;
 } Level;
 
-/* TrafficLevel 0..5; MaxActiveTraffic follows the menu ("24 cars" .. "100 cars") */
+/* TrafficLevel 0..5; MaxActiveTraffic follows the menu ("24 cars" .. "150 cars"). Higher levels also spawn
+   farther away, so a larger area is filled evenly instead of a convoy right in front of the player. */
 static const Level levels[6] = {
     {18, 8, 1, 0, 1.0, 1.0, 1.0, 1.0},   /* original */
     {24, 8, 1, 0, 1.5, 1.5, 1.0, 1.0},   /* light */
     {36, 10, 1, 1, 2.0, 2.0, 1.0, 1.25}, /* busy */
     {48, 10, 2, 1, 3.0, 2.5, 1.5, 1.25}, /* strong */
-    {64, 12, 2, 1, 4.0, 3.0, 1.5, 1.5},  /* rush hour */
-    {100, 16, 4, 1, 8.0, 5.0, 3.0, 2.0}, /* chaos */
+    {64, 12, 2, 1, 4.0, 3.0, 1.5, 2.0},  /* rush hour */
+    {150, 16, 4, 1, 8.0, 5.0, 3.0, 2.5}, /* chaos */
 };
 
 static const char *const density_files[] = {

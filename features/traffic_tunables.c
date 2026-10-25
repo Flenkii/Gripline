@@ -25,11 +25,11 @@ typedef struct {
 } Tunable;
 
 static const Tunable tunables[] = {
-    {0x36e8f18, VT_FLOAT, 14.0f, {14, 24, 36, 48, 64, 100}, 1, "Spawning/MaxTraffic"},
-    {0x36e6e88, VT_FLOAT, 16.0f, {16, 24, 36, 48, 64, 100}, 1, "Traffic/MaxTraffic"},
-    {0x36e8d10, VT_FLOAT, 10.0f, {10, 14, 20, 26, 32, 50}, 1, "Spawning/MaxFestival"},
-    {0x36e6dd0, VT_FLOAT, 7.0f, {7, 10, 14, 18, 24, 40}, 1, "Traffic/MaxFestival"},
-    {0x34c80f8, VT_FLOAT, 8.0f, {8, 7, 6, 5, 4, 3}, 0, "MinDistanceFromOtherCars"},
+    {0x36e8f18, VT_FLOAT, 14.0f, {14, 24, 36, 48, 64, 150}, 1, "Spawning/MaxTraffic"},
+    {0x36e6e88, VT_FLOAT, 16.0f, {16, 24, 36, 48, 64, 150}, 1, "Traffic/MaxTraffic"},
+    {0x36e8d10, VT_FLOAT, 10.0f, {10, 14, 20, 26, 32, 60}, 1, "Spawning/MaxFestival"},
+    {0x36e6dd0, VT_FLOAT, 7.0f, {7, 10, 14, 18, 24, 50}, 1, "Traffic/MaxFestival"},
+    {0x34c80f8, VT_FLOAT, 8.0f, {8, 8, 10, 12, 14, 16}, 1, "MinDistanceFromOtherCars"}, /* more gap: no long convoys */
     {0x34c8578, VT_INT, 5.0f, {5, 8, 12, 16, 20, 30}, 1, "InitialSpawnMaxCars"},
 };
 

@@ -39,11 +39,11 @@ def set_language(code):
     e.wq(GAME + 0x3662990, manager)
 
 VT_FLOAT, VT_INT = 0x2c5cb58, 0x2c81898
-TUNABLES = [(0x36e8f18, VT_FLOAT, 14.0, [14, 24, 36, 48, 64, 100]),
-            (0x36e6e88, VT_FLOAT, 16.0, [16, 24, 36, 48, 64, 100]),
-            (0x36e8d10, VT_FLOAT, 10.0, [10, 14, 20, 26, 32, 50]),
-            (0x36e6dd0, VT_FLOAT, 7.0, [7, 10, 14, 18, 24, 40]),
-            (0x34c80f8, VT_FLOAT, 8.0, [8, 7, 6, 5, 4, 3]),
+TUNABLES = [(0x36e8f18, VT_FLOAT, 14.0, [14, 24, 36, 48, 64, 150]),
+            (0x36e6e88, VT_FLOAT, 16.0, [16, 24, 36, 48, 64, 150]),
+            (0x36e8d10, VT_FLOAT, 10.0, [10, 14, 20, 26, 32, 60]),
+            (0x36e6dd0, VT_FLOAT, 7.0, [7, 10, 14, 18, 24, 50]),
+            (0x34c80f8, VT_FLOAT, 8.0, [8, 8, 10, 12, 14, 16]),
             (0x34c8578, VT_INT, 5, [5, 8, 12, 16, 20, 30])]
 TIMES = [(0x36e6d80, 7.0, 0.5), (0x36e6e60, 19.0, 23.5), (0x36e8ea0, 23.0, 23.5), (0x36e6df8, 5.0, 0.5)]
 for rva, vt, orig, _ in TUNABLES:
@@ -253,7 +253,7 @@ e.call('Fh2TestWheelLiveApply')
 print('Verkehr live')
 r = e.call('Fh2TestTrafficApply')
 vals = [tunable(rva, vt) for rva, vt, _, _ in TUNABLES]
-check(vals == [48.0, 48.0, 26.0, 18.0, 5.0, 16], f'Stufe 3 im Spielspeicher: {vals}')
+check(vals == [48.0, 48.0, 26.0, 18.0, 12.0, 16], f'Stufe 3 im Spielspeicher: {vals}')
 times = [tunable(rva) for rva, _, _ in TIMES]
 check(times == [0.5, 23.5, 23.5, 0.5], f'Rushhour ganztägig: {times}')
 set_box(ALLDAY, 0, False); e.call('Fh2TestTrafficApply')
@@ -264,7 +264,7 @@ vals = [tunable(rva, vt) for rva, vt, _, _ in TUNABLES]
 check(vals == [14.0, 16.0, 10.0, 7.0, 8.0, 5], f'Stufe 0 -> Originalwerte zurück: {vals}')
 set_box(LEVEL, 5, False); e.call('Fh2TestTrafficApply')
 vals = [tunable(rva, vt) for rva, vt, _, _ in TUNABLES]
-check(vals == [100.0, 100.0, 50.0, 40.0, 3.0, 30], f'Stufe 5 wieder: {vals}')
+check(vals == [150.0, 150.0, 60.0, 50.0, 16.0, 30], f'Stufe 5 wieder: {vals}')
 set_box(LEVEL, 3, False)
 
 # ---- saving
