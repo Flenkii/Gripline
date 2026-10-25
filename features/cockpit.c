@@ -8,17 +8,22 @@
 #include "cockpit.h"
 #include "cockpit_view.h"
 
-#define COCKPIT_VERSION 5
+#define COCKPIT_VERSION 6
 #define COCKPIT_FOLDER L"gripline_cockpit"
 #define HALF_SAMPLES 121
-#define SAMPLES (2 * HALF_SAMPLES + 2) /* + the held ends at TURN_SPLIT */
-/* The animation time holds two copies of the steering: [0, TURN_PART] with the wheel shown, and
-   [1 - TURN_PART, 1] with the wheel shrunk to nothing (second cockpit view). The game's "Turn" value
-   is moved into one of them at runtime (cockpit_patch_game). The wheel shrinks between TURN_SPLIT and
-   1 - TURN_SPLIT; the wheel holds its full lock until there. The gap is for the game running the time
-   a little past full lock (the wheel tilted and grew there). */
-#define TURN_PART 0.40
-#define TURN_SPLIT 0.47
+#define SAMPLES (HALF_SAMPLES + 2) /* + held ends at 0 and the end */
+/* The game's driver graph (driver.gsf) reads the "Turn" value itself: 0.3 < Turn < 0.7 is "not turning"
+   and its base pose is taken at 0.5. So the middle stays as in the game and only the outer parts are
+   pressed together (TURN_OUTER), which frees the time below TURN_FIRST for the second cockpit view:
+   there the wheel and the driver are shrunk to nothing (until SCALE_LOW, back to full at SCALE_HIGH).
+   The game's Turn value is moved at runtime (cockpit_patch_game). */
+#define TURN_LOW 0.3
+#define TURN_HIGH 0.7
+#define TURN_OUTER 0.6
+#define TURN_FIRST (TURN_LOW * (1.0 - TURN_OUTER))
+#define HIDDEN_TIME 0.03
+#define SCALE_LOW 0.06
+#define SCALE_HIGH 0.10
 #define HIDDEN_SCALE 0.0001f
 
 /* ------------------------------------------------------------------ memory, math */
@@ -1084,40 +1089,64 @@ static void gr2_put(Gr2 *g, uint32_t abs, const void *value, uint32_t size) {
     memory_copy(g->datas[section] + offset, value, size);
 }
 
-/* Moves the knots of a curve (variant: type definition td, object obj) into [0, TURN_PART] of the
-   time. Every keyed Granny curve keeps its knots as Knots (floats) or quantized with
-   OneOverKnotScale / OneOverKnotScaleTrunc; constant curves have none. */
-static void squeeze_curve(Gr2 *g, uint32_t td, uint32_t obj, uint32_t *done, uint32_t *done_count) {
-    if (td == UINT32_MAX || obj == UINT32_MAX) return;
+/* the game's Turn (0..1) -> the time in our file (0..1): the middle as in the game */
+static double turn_warp(double turn) {
+    if (turn < TURN_LOW) return TURN_LOW - (TURN_LOW - turn) * TURN_OUTER;
+    if (turn > TURN_HIGH) return TURN_HIGH + (turn - TURN_HIGH) * TURN_OUTER;
+    return turn;
+}
+
+/* Moves the knots of a curve (variant: type definition td, object obj) with turn_warp. Every keyed
+   Granny curve keeps its knots as Knots (floats) or quantized in KnotsControls (first the knots, then
+   the controls) with OneOverKnotScale / OneOverKnotScaleTrunc; constant curves have none. Quantized
+   knots are rounded outwards: the first and last knot stay outside the times the game plays. */
+static void warp_curve(Gr2 *g, uint32_t td, uint32_t obj, double dur, uint32_t *done, uint32_t *done_count) {
+    if (td == UINT32_MAX || obj == UINT32_MAX || dur <= 0) return;
     for (uint32_t i = 0; i < *done_count; ++i)
         if (done[i] == obj) return; /* a curve shared by two tracks: only once */
     if (*done_count < 1024) done[(*done_count)++] = obj;
-    Member m;
-    uint32_t off = gr2_member(g, td, "OneOverKnotScale", &m);
-    if (off != UINT32_MAX && m.type == 10 && gr2_ok(g, obj + off, 4)) {
-        float f = rdf(g->buf + obj + off) / (float)TURN_PART;
-        gr2_put(g, obj + off, &f, 4);
-    }
-    off = gr2_member(g, td, "OneOverKnotScaleTrunc", &m);
-    if (off != UINT32_MAX && gr2_ok(g, obj + off, 2)) {
-        uint16_t trunc;
-        memory_copy(&trunc, g->buf + obj + off, 2);
-        uint32_t bits = (uint32_t)trunc << 16;
-        float f;
-        memory_copy(&f, &bits, 4);
-        f /= (float)TURN_PART;
-        memory_copy(&bits, &f, 4);
-        /* round the scale down: the knots reach a little past TURN_PART (the gap is free). Rounded up
-           they ended up to 0.8 % early and full lock ran past the driver's end (hands gone). */
-        trunc = (uint16_t)(bits >> 16);
-        gr2_put(g, obj + off, &trunc, 2);
-    }
-    off = gr2_member(g, td, "Knots", &m);
+    Member m, first;
+    uint32_t off = gr2_member(g, td, "Knots", &m);
     if (off != UINT32_MAX && m.type == 3 && gr2_ok(g, obj + off, 4 + g->P)) {
         uint32_t count = gr2_u32(g, obj + off), knots = gr2_p(g, obj + off + 4);
         for (uint32_t k = 0; knots != UINT32_MAX && k < count && gr2_ok(g, knots + 4 * k, 4); ++k) {
-            float f = rdf(g->buf + knots + 4 * k) * (float)TURN_PART;
+            float f = (float)(turn_warp(rdf(g->buf + knots + 4 * k) / dur) * dur);
             gr2_put(g, knots + 4 * k, &f, 4);
+        }
+        return;
+    }
+    float scale = 0;
+    off = gr2_member(g, td, "OneOverKnotScale", &m);
+    if (off != UINT32_MAX && m.type == 10 && gr2_ok(g, obj + off, 4)) scale = rdf(g->buf + obj + off);
+    off = gr2_member(g, td, "OneOverKnotScaleTrunc", &m);
+    if (off != UINT32_MAX && gr2_ok(g, obj + off, 2)) {
+        uint32_t bits = (uint32_t)rd16(g->buf + obj + off) << 16;
+        memory_copy(&scale, &bits, 4);
+    }
+    off = gr2_member(g, td, "KnotsControls", &m);
+    if (!(scale > 0) || off == UINT32_MAX || m.type != 3 || !gr2_ok(g, obj + off, 4 + g->P) ||
+        !gr2_member_at(g, td, 0, &first))
+        return;
+    /* knot + 3 controls (D4n.., D3K..) or knot + 1 control (D3I1..) */
+    uint32_t per = 4;
+    for (const char *c = first.name; c && c[0] && c[1]; ++c)
+        if (c[0] == 'I' && c[1] == '1') per = 2;
+    uint32_t size = gr2_size_of(g, m.sub, 0);
+    uint32_t count = gr2_u32(g, obj + off) / per, array = gr2_p(g, obj + off + 4);
+    if ((size != 1 && size != 2) || array == UINT32_MAX || !gr2_ok(g, array, count * size)) return;
+    double top = size == 1 ? 255.0 : 65535.0, units = scale * dur;
+    for (uint32_t k = 0; k < count; ++k) {
+        double v = size == 1 ? g->buf[array + k] : rd16(g->buf + array + 2 * k);
+        double turn = v / units, w = turn_warp(turn) * units;
+        uint32_t q = (uint32_t)(w + 1e-6); /* down below the middle, up above it */
+        if (turn > 0.5 && (double)q + 1e-6 < w) ++q;
+        if (q > top) q = (uint32_t)top;
+        if (size == 1) {
+            unsigned char b = (unsigned char)q;
+            gr2_put(g, array + k, &b, 1);
+        } else {
+            uint16_t h = (uint16_t)q;
+            gr2_put(g, array + 2 * k, &h, 2);
         }
     }
 }
@@ -1230,11 +1259,11 @@ static unsigned char *steering_gr2(const unsigned char *src, size_t src_length, 
     double dur = rdf(g.buf + anim + dur_off);
     *why = "no scale curve";
     if (track_ss == UINT32_MAX) goto done;
-    /* every other track (the driver) plays in [0, TURN_PART] of the time */
-    static uint32_t squeezed[1024];
-    uint32_t squeezed_count = 0;
-    /* the driver's top bones: shrunk in the second part too. The driver's curves end at TURN_PART and
-       Granny runs them on past their end there (feet flying up), shrunk the whole body is one point. */
+    /* every other track (the driver): its time moved with turn_warp */
+    static uint32_t warped[1024];
+    uint32_t warped_count = 0;
+    /* the driver's top bones: shrunk for the second view too. HIDDEN_TIME lies before the driver's
+       first knot, where Granny runs the curves on (feet flying up); shrunk the whole body is one point. */
     uint32_t body[2] = {UINT32_MAX, UINT32_MAX}, body_ss = UINT32_MAX;
     for (uint32_t i = 0; i < tg_count; ++i) {
         uint32_t tg = gr2_p(&g, tg_array + i * P);
@@ -1255,7 +1284,7 @@ static unsigned char *steering_gr2(const unsigned char *src, size_t src_length, 
             if (e == track && turning) continue;
             for (int c = 0; c < 3; ++c) {
                 uint32_t co = gr2_member(&g, ttm.sub, curves[c], NULL);
-                if (co != UINT32_MAX) squeeze_curve(&g, gr2_p(&g, e + co), gr2_p(&g, e + co + P), squeezed, &squeezed_count);
+                if (co != UINT32_MAX) warp_curve(&g, gr2_p(&g, e + co), gr2_p(&g, e + co + P), dur, warped, &warped_count);
             }
         }
     }
@@ -1315,18 +1344,17 @@ static unsigned char *steering_gr2(const unsigned char *src, size_t src_length, 
         bytes_align(&sec0, 8);
         kn = (uint32_t)sec0.length;
         for (int j = 0; j < SAMPLES; ++j) {
-            int i = j < HALF_SAMPLES ? j : j - 2;
-            double part = (double)(i % HALF_SAMPLES) / (HALF_SAMPLES - 1);
-            float k = (float)(dur * ((i < HALF_SAMPLES ? 0.0 : 1.0 - TURN_PART) + TURN_PART * part));
-            if (j == HALF_SAMPLES) k = (float)(dur * TURN_SPLIT);
-            if (j == HALF_SAMPLES + 1) k = (float)(dur * (1.0 - TURN_SPLIT));
+            int i = j == 0 ? 0 : (j > HALF_SAMPLES ? HALF_SAMPLES - 1 : j - 1);
+            float k = (float)(dur * turn_warp((double)i / (HALF_SAMPLES - 1)));
+            if (j == 0) k = 0.0f;
+            if (j == SAMPLES - 1) k = (float)dur;
             bytes_put(&sec0, &k, 4);
         }
         bytes_align(&sec0, 8);
         cn = (uint32_t)sec0.length;
         for (int j = 0; j < SAMPLES; ++j) {
-            int i = j < HALF_SAMPLES ? j : (j == HALF_SAMPLES ? HALF_SAMPLES - 1 : (j == HALF_SAMPLES + 1 ? HALF_SAMPLES : j - 2));
-            double u = 1 - 2 * (double)(i % HALF_SAMPLES) / (HALF_SAMPLES - 1);
+            int i = j == 0 ? 0 : (j > HALF_SAMPLES ? HALF_SAMPLES - 1 : j - 1);
+            double u = 1 - 2 * (double)i / (HALF_SAMPLES - 1);
             if (curve > 1.0) {
                 double a = u < 0 ? -u : u;
                 double m = 1 - dpow(1 - (a < 1.0 ? a : 1.0), 1.0 / curve);
@@ -1341,7 +1369,8 @@ static unsigned char *steering_gr2(const unsigned char *src, size_t src_length, 
             }
         }
     }
-    /* scale of the wheel: 1 in the first part, almost 0 in the second (3x3 matrix per knot) */
+    /* scale of the wheel (and the driver's top bones): almost 0 for the second cockpit view, 1 from
+       SCALE_HIGH on (3x3 matrix per knot) */
     bytes_align(&sec0, 8);
     uint32_t sobj = (uint32_t)sec0.length;
     bytes_put(&sec0, head, 4);
@@ -1351,12 +1380,12 @@ static unsigned char *steering_gr2(const unsigned char *src, size_t src_length, 
     bytes_put(&sec0, NULL, P);
     bytes_align(&sec0, 8);
     uint32_t skn = (uint32_t)sec0.length;
-    float scale_knots[4] = {0.0f, (float)(dur * TURN_SPLIT), (float)(dur * (1.0 - TURN_SPLIT)), (float)dur};
+    float scale_knots[4] = {0.0f, (float)(dur * SCALE_LOW), (float)(dur * SCALE_HIGH), (float)dur};
     bytes_put(&sec0, scale_knots, sizeof(scale_knots));
     bytes_align(&sec0, 8);
     uint32_t scn = (uint32_t)sec0.length;
     for (int k = 0; k < 4; ++k) {
-        float v = k < 2 ? 1.0f : HIDDEN_SCALE, zero = 0.0f;
+        float v = k < 2 ? HIDDEN_SCALE : 1.0f, zero = 0.0f;
         for (int cell = 0; cell < 9; ++cell) bytes_put(&sec0, cell % 4 == 0 ? &v : &zero, 4);
     }
     *why = "pointer not found";
@@ -1790,12 +1819,12 @@ int cockpit_wait_ready(void) {
 /* car presentation update: Turn = (car->vtable[0x160]() + 0.999) * 0.5, then set as GameScalars:Turn */
 #define RVA_TURN_CALL 0xf7c745u
 
-/* the game's steering value -> the part of the animation to play (see TURN_PART) */
+/* the game's steering value -> the time to play (see turn_warp, HIDDEN_TIME) */
 static float turn_value(float value) {
     float turn = (value + 0.999f) * 0.5f;
     if (!(turn >= 0.0f)) turn = 0.0f;
     if (turn > 1.0f) turn = 1.0f;
-    turn = cockpit_view_second() ? (float)(1.0 - TURN_PART) + (float)TURN_PART * turn : (float)TURN_PART * turn;
+    turn = cockpit_view_second() ? (float)HIDDEN_TIME : (float)turn_warp(turn);
     return turn * 2.0f - 0.999f;
 }
 

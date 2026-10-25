@@ -113,11 +113,15 @@ def turn(v):
     r = struct.unpack('<f', struct.pack('<I', e.mu.reg_read(UC_X86_REG_XMM0) & 0xffffffff))[0]
     return (r + 0.999) * 0.5  # Turn as the game computes it
 game_turn = lambda v: min(1, max(0, (v + 0.999) * 0.5))
-worst = max(abs(turn(v) - 0.40 * game_turn(v)) for v in (-1, -0.5, 0, 0.3, 1))
-check(worst < 1e-4, f'normal: Lenkrad-Teil 0..0.40 (Abw. {worst:.6f})')
+warp = lambda t: 0.3 - (0.3 - t) * 0.6 if t < 0.3 else (0.7 + (t - 0.7) * 0.6 if t > 0.7 else t)
+vs = (-1, -0.7, -0.5, -0.2, 0, 0.2, 0.39, 0.5, 1)
+worst = max(abs(turn(v) - warp(game_turn(v))) for v in vs)
+check(worst < 1e-4, f'normal: Mitte wie im Spiel, außen gestaucht (Abw. {worst:.6f})')
+same = all((0.3 < turn(v) < 0.7) == (0.3 < game_turn(v) < 0.7) for v in vs) and abs(turn(0.001) - 0.5) < 1e-4
+check(same, 'Fahrer-Logik des Spiels (0.3/0.7, Mitte 0.5) unverändert')
 e.call('Fh2TestCockpitView', 0, 1, 35, -5)
-worst = max(abs(turn(v) - (0.60 + 0.40 * game_turn(v))) for v in (-1, -0.5, 0, 0.3, 1))
-check(worst < 1e-4, f'Cockpit 2: Teil ohne Lenkrad 0.60..1 (Abw. {worst:.6f})')
+worst = max(abs(turn(v) - 0.03) for v in vs)
+check(worst < 1e-4, f'Cockpit 2: feste Zeit ohne Lenkrad 0.03 (Abw. {worst:.6f})')
 e.call('Fh2TestCockpitView', 0, 1, 35, -5)
 
 print('Mit Patch (1080 Grad):')

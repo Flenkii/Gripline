@@ -48,8 +48,13 @@ def spindle_curves(data):
     return result
 
 
+def warp(t):
+    """features/cockpit.c turn_warp: the middle as in the game, the outer parts pressed by 0.6"""
+    return 0.3 - (0.3 - t) * 0.6 if t < 0.3 else (0.7 + (t - 0.7) * 0.6 if t > 0.7 else t)
+
+
 def curve_ends(data):
-    """(track, curve) -> time of the last knot, for every keyed curve of a GR2"""
+    """(track, curve) -> knot times, for every keyed curve of a GR2"""
     g = L.GR2(data)
     P = g.P
     rtd = g.base[g.root_type[0]] + g.root_type[1]
@@ -73,34 +78,48 @@ def curve_ends(data):
                 ko, _, _ = g.member(vt, 'Knots')
                 n = struct.unpack_from('<I', g.buf, obj + ko)[0]
                 if n:
-                    result[(name, curve)] = struct.unpack_from('<f', g.buf, g.p(obj + ko + 4) + 4 * (n - 1))[0]
-            elif 'KnotsControls' in names and 'OneOverKnotScaleTrunc' in names:
-                so, _, _ = g.member(vt, 'OneOverKnotScaleTrunc')
-                scale = struct.unpack('<f', struct.pack('<I', struct.unpack_from('<H', g.buf, obj + so)[0] << 16))[0]
+                    knots = struct.unpack_from('<%df' % n, g.buf, g.p(obj + ko + 4))
+                    result[(name, curve)] = list(knots)
+            elif 'KnotsControls' in names:
+                if 'OneOverKnotScaleTrunc' in names:
+                    so, _, _ = g.member(vt, 'OneOverKnotScaleTrunc')
+                    scale = struct.unpack('<f', struct.pack('<I', struct.unpack_from('<H', g.buf, obj + so)[0] << 16))[0]
+                else:
+                    so, _, _ = g.member(vt, 'OneOverKnotScale')
+                    scale = struct.unpack_from('<f', g.buf, obj + so)[0]
                 ko, _, _ = g.member(vt, 'KnotsControls')
                 n = struct.unpack_from('<I', g.buf, obj + ko)[0]
-                wide = 'K16u' in kind
+                fmt, size = ('<H', 2) if 'K16u' in kind else ('<B', 1)
                 per = 2 if 'I1' in kind else 4
-                fmt, size = ('<H', 2) if wide else ('<B', 1)
                 knots = [struct.unpack_from(fmt, g.buf, g.p(obj + ko + 4) + size * i)[0] for i in range(n // per)]
                 if knots and scale:
-                    result[(name, curve)] = max(knots) / scale
+                    result[(name, curve)] = [k / scale for k in knots]
     return result
 
 
 def check_driver_reach(got, src, label):
-    """the driver's curves reach full lock (Turn 0.9995 -> 0.40 * 0.9995): past their end Granny runs on
-    and the hands vanished"""
+    """the driver's curves are moved with warp and cover every time the game plays (Turn 0.0005..0.9995):
+    past their end Granny runs on and the hands vanished"""
     old, new = curve_ends(src), curve_ends(got)
-    worst = min((new[key] / old[key], key) for key in old if key in new and old[key] > 0 and
-                key[0] not in ('boneSteeringWheelSpindle',))
-    check(0.40 * 0.9995 <= worst[0] <= 0.47 and len(new) > 10,
-          f'{label}: Fahrer-Kurven reichen bis Vollausschlag ({worst[0]:.4f}, {len(new)} Kurven)')
+    dur = max(v[-1] for v in old.values())
+    keys = [k for k in old if k in new and k[0] != 'boneSteeringWheelSpindle' and old[k][-1] > old[k][0]]
+    worst = 0
+    middle = all(abs(n - o) < 1e-6 for k in keys for o, n in zip(old[k], new[k]) if 0.3 * dur < o < 0.7 * dur)
+    check(middle, f'{label}: Fahrer-Knoten in der Mitte (0.3..0.7) unverändert')
+    for key in keys:
+        (o0, o1), (n0, n1) = (old[key][0], old[key][-1]), (new[key][0], new[key][-1])
+        worst = max(worst, abs(n1 - warp(o1 / dur) * dur), abs(n0 - warp(o0 / dur) * dur))
+        if o1 >= 0.999 * dur and n1 < warp(0.9995) * dur:
+            worst = max(worst, 9)
+        if o0 <= 0.0005 * dur and n0 > warp(0.0005) * dur:
+            worst = max(worst, 9)
+    check(len(keys) > 10 and worst < 0.02 * dur,
+          f'{label}: Fahrer-Kurven verschoben, decken Vollausschlag ab ({len(keys)} Kurven, Abw. {worst:.4f}s)')
 
 
 def check_two_parts(got, ref, label):
-    """the new file: [0, 0.40] the script's curve (every second sample), held to 0.47, [0.53, 0.60] held,
-    [0.60, 1] the same with the wheel scaled to almost 0 (from 0.47 to 0.53); the driver squeezed into [0, 0.40]"""
+    """the new file: the script's curve (every second sample) at the times warp(Turn), held to 0 and the
+    end; the scale ~0 for the second view (until 0.06), 1 from 0.10 on"""
     if not got:
         check(False, label + ': keine Datei')
         return
@@ -109,21 +128,20 @@ def check_two_parts(got, ref, label):
     _, knots, q = ours[key]
     _, rknots, rq = script[key]
     dur = rknots[-1]
-    half = (len(knots) - 2) // 2
-    worst = max(abs(q[4 * j + c] - rq[8 * j + c]) for j in range(half) for c in range(4))
-    same = all(abs(q[4 * (half + 2 + j) + c] - q[4 * j + c]) < 1e-6 for j in range(half) for c in range(4))
-    held = all(abs(q[4 * half + c] - q[4 * (half - 1) + c]) < 1e-6 and
-               abs(q[4 * (half + 1) + c] - q[4 * (half + 2) + c]) < 1e-6 for c in range(4))
-    want = [0.40 * dur, 0.47 * dur, 0.53 * dur, 0.60 * dur]
-    check(len(knots) == 244 and all(abs(a - b) < 1e-4 for a, b in zip(knots[half - 1:half + 3], want)),
-          f'{label}: Lenkrad-Kurve in zwei Teilen (0..0.40, 0.60..1, dazwischen Puffer)')
-    check(worst < 1e-5 and same and held, f'{label}: beide Teile drehen wie das Skript, Vollausschlag gehalten (Abw. {worst:.2e})')
+    half = len(knots) - 2
+    worst = max(abs(q[4 * (j + 1) + c] - rq[8 * j + c]) for j in range(half) for c in range(4))
+    held = all(abs(q[c] - q[4 + c]) < 1e-6 and abs(q[4 * (half + 1) + c] - q[4 * half + c]) < 1e-6 for c in range(4))
+    times = all(abs(knots[j + 1] - warp(j / (half - 1)) * dur) < 1e-4 for j in range(half))
+    check(len(knots) == 123 and knots[0] == 0 and abs(knots[-1] - dur) < 1e-4 and times,
+          f'{label}: Lenkrad-Kurve mit der Mitte wie im Spiel (0.3..0.7), außen gestaucht')
+    check(worst < 1e-5 and held, f'{label}: dreht wie das Skript, Enden gehalten (Abw. {worst:.2e})')
     kind, sk, sc = ours[('boneSteeringWheelSpindle', 'ScaleShearCurve')]
-    check(kind == 'CurveDataHeader_DaK32fC32f' and sc[0::9][:2] == (1.0, 1.0) and max(sc[0::9][2:]) < 0.001,
-          f'{label}: Lenkrad-Größe 1 im ersten Teil, ~0 im zweiten')
+    check(kind == 'CurveDataHeader_DaK32fC32f' and sc[0::9][2:] == (1.0, 1.0) and max(sc[0::9][:2]) < 0.001 and
+          abs(sk[1] - 0.06 * dur) < 1e-4 and abs(sk[2] - 0.10 * dur) < 1e-4,
+          f'{label}: Lenkrad-Größe ~0 für Cockpit 2 (bis 0.06), 1 ab 0.10')
     hips = ours[('Hips', 'ScaleShearCurve')]
-    check(hips[0] == 'CurveDataHeader_DaK32fC32f' and max(hips[2][0::9][2:]) < 0.001,
-          f'{label}: Fahrer im zweiten Teil auch geschrumpft (keine Füße mehr)')
+    check(hips[0] == 'CurveDataHeader_DaK32fC32f' and max(hips[2][0::9][:2]) < 0.001,
+          f'{label}: Fahrer für Cockpit 2 auch geschrumpft (keine Füße mehr)')
 
 
 here = os.path.dirname(os.path.abspath(__file__))
