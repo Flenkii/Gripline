@@ -37,6 +37,31 @@ typedef struct {
 } KnownModule;
 static const KnownModule known_modules[] = {{L"fh2wheels.dll", "fh2wheels"}, {L"fh2wheels-next.dll", "fh2wheels"}};
 
+/* fh2wheels installs itself as data\bin\azimuth-tls.dll (Azimuth's own helper becomes
+   fh2wheels-next.dll), so it is loaded under Azimuth's name. Its export table still carries the
+   name it was built with. */
+static int tls_helper_is_fh2wheels(void) {
+    static const char want[] = "fh2wheels";
+    unsigned char *base = (unsigned char *)GetModuleHandleW(L"azimuth-tls.dll");
+    IMAGE_DOS_HEADER dos;
+    IMAGE_NT_HEADERS64 nt;
+    IMAGE_EXPORT_DIRECTORY exports;
+    char name[sizeof(want)];
+    if (!base || !memory_read(base, &dos, sizeof(dos)) || dos.e_magic != IMAGE_DOS_SIGNATURE ||
+        dos.e_lfanew < 64 || dos.e_lfanew > 4096 || !memory_read(base + dos.e_lfanew, &nt, sizeof(nt)) ||
+        nt.Signature != IMAGE_NT_SIGNATURE)
+        return 0;
+    IMAGE_DATA_DIRECTORY dir = nt.OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_EXPORT];
+    if (!dir.VirtualAddress || !memory_read(base + dir.VirtualAddress, &exports, sizeof(exports)) ||
+        !exports.Name || !memory_read(base + exports.Name, name, sizeof(name) - 1))
+        return 0;
+    for (unsigned i = 0; i < sizeof(want) - 1; ++i) {
+        char c = name[i] >= 'A' && name[i] <= 'Z' ? (char)(name[i] + 32) : name[i];
+        if (c != want[i]) return 0;
+    }
+    return 1;
+}
+
 typedef struct {
     char *out;
     unsigned size, used, names_at, count;
@@ -119,6 +144,7 @@ static int mod_scan_mods_text(char *out, unsigned size) {
         if (GetModuleHandleW(known_modules[k].module))
             add_name(&list, known_modules[k].name, (unsigned)text_length(known_modules[k].name));
     }
+    if (tls_helper_is_fh2wheels()) add_name(&list, "fh2wheels", 9);
     if (list.cut) add_text(&list, "...", 3);
     return list.count > 0;
 }
