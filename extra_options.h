@@ -8,8 +8,13 @@
 #define MOD_NAME "Forza Horizon 2 Extra Options"
 #define MOD_VERSION "0.3.2"
 #define GRIPLINE_VERSION "V6"
+#ifdef FH2_GRIPLINE_PLUGIN /* Gripline as an FH2 Mod Platform mod next to the official Extra Options */
+#define MOD_INI_NAME L"Gripline.ini"
+#define MOD_LOG_NAME L"Gripline.log"
+#else
 #define MOD_INI_NAME L"FH2_ExtraOptions.ini"
 #define MOD_LOG_NAME L"FH2_ExtraOptions.log"
+#endif
 #define GAME_EXE_NAME L"forza_durango_release_final.exe"
 #define PATH_CAPACITY 32768
 #define GAME_FILE_SIZE 58204160u

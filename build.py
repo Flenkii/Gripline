@@ -77,12 +77,44 @@ COMMON_SOURCES = [
     "features/cockpit.c",
 ]
 
+# Plugin build (--plugin): Gripline as an FH2 Mod Platform mod next to the official Extra Options.
+PLUGIN_SOURCES = [
+    "support.c",
+    "logging.c",
+    "settings.c",
+    "sha256.c",
+    "plugin/gripline_plugin.c",
+    "features/autodrive_game.c",
+    "features/video_options_text.c",
+    "features/traffic_tunables.c",
+    "features/traffic_files.c",
+    "features/wheel_bridge.c",
+    "features/wheel_soft.c",
+    "features/ini_edit.c",
+    "features/ini_migrate.c",
+    "features/rig_settings.c",
+    "features/wheel_buttons.c",
+    "features/weather.c",
+    "features/time_of_day.c",
+    "features/ffb_vm.c",
+    "features/keyboard_pad.c",
+    "features/mod_scan.c",
+    "features/report.c",
+    "features/cockpit_view.c",
+    "features/creator_mode.c",
+    "features/nitro_link.c",
+    "features/notify.c",
+    "features/cockpit.c",
+]
+
 
 def parse_arguments():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("zig", type=Path)
     parser.add_argument("--test", action="store_true")
     parser.add_argument("--azimuth", action="store_true", help="Build the Azimuth winmm proxy")
+    parser.add_argument("--plugin", action="store_true",
+                        help="Build fh2-mods/Gripline.dll and mods/Gripline/plugins/GriplineTick.dll")
     parser.add_argument("--output", type=Path)
     parser.add_argument("--build-dir", type=Path)
     parser.add_argument("--jobs", type=int, default=min(8, os.cpu_count() or 1))
@@ -118,8 +150,10 @@ def compiler_arguments(compiler, options):
     ]
     if options.test:
         arguments.append("-DFH2_TWEAKS_TEST=1")
-    if options.azimuth:
+    if options.azimuth or options.plugin:
         arguments.append("-DFH2_AZIMUTH=1")
+    if options.plugin:
+        arguments.append("-DFH2_GRIPLINE_PLUGIN=1")
     return arguments
 
 
@@ -203,6 +237,51 @@ def build_platform_mod(compiler, output, directory, arguments, import_library, o
                     "/nodefaultlib", "/dynamicbase", "/nxcompat", "/Brepro",
                     "/out:" + str(output), "/implib:" + str(directory / "gripline_mod.lib"),
                     str(object_file), str(import_library)], check=True)
+
+
+def build_plugin(compiler, output, directory, options):
+    """output = the folder that gets fh2-mods/Gripline.dll and mods/Gripline/plugins/GriplineTick.dll"""
+    started = time.monotonic()
+    directory.mkdir(parents=True, exist_ok=True)
+    arguments = compiler_arguments(compiler, options)
+
+    def compile_source(filename):
+        object_file = directory / (Path(filename).stem + ".obj")
+        command = [*arguments, str(SOURCE / filename), "-o", str(object_file)]
+        compiled = cached_command(command, project_dependencies(SOURCE / filename), object_file,
+                                  compiler, options.rebuild)
+        return str(object_file), compiled
+
+    with ThreadPoolExecutor(max_workers=options.jobs) as workers:
+        results = list(workers.map(compile_source, PLUGIN_SOURCES))
+    import_library = directory / "kernel32.lib"
+    cached_command([str(compiler), "dlltool", "-m", "i386:x86-64", "-d", str(SOURCE / "kernel32.def"),
+                    "-l", str(import_library)], [SOURCE / "kernel32.def"], import_library, compiler,
+                   options.rebuild)
+    exception_library = directory / "ntdll.lib"
+    cached_command([str(compiler), "dlltool", "-m", "i386:x86-64", "-d", str(SOURCE / "ntdll.def"),
+                    "-l", str(exception_library)], [SOURCE / "ntdll.def"], exception_library, compiler,
+                   options.rebuild)
+    mods = output / "fh2-mods"
+    plugins = output / "mods" / "Gripline" / "plugins"
+    mods.mkdir(parents=True, exist_ok=True)
+    plugins.mkdir(parents=True, exist_ok=True)
+    resource = directory / "version.res"
+    resource.write_bytes(version_resource("Gripline.dll"))
+    link = [str(compiler), "lld-link", "/dll", "/entry:DllMain", "/machine:x64", "/nodefaultlib",
+            "/dynamicbase", "/nxcompat", "/Brepro"]
+    subprocess.run([*link, "/out:" + str(mods / "Gripline.dll"), "/implib:" + str(directory / "gripline.lib"),
+                    *[path for path, _ in results], str(import_library), str(exception_library),
+                    str(resource)], check=True)
+    tick_object = directory / "gripline_tick.obj"
+    cached_command([*arguments, str(SOURCE / "plugin/gripline_tick.c"), "-o", str(tick_object)],
+                   project_dependencies(SOURCE / "plugin/gripline_tick.c"), tick_object, compiler,
+                   options.rebuild)
+    subprocess.run([*link, "/out:" + str(plugins / "GriplineTick.dll"),
+                    "/implib:" + str(directory / "gripline_tick.lib"), str(tick_object),
+                    str(import_library)], check=True)
+    print(f"Compiled {sum(compiled for _, compiled in results)}/{len(PLUGIN_SOURCES)} objects; "
+          f"{time.monotonic() - started:.1f}s", flush=True)
 
 
 def build(compiler, output, directory, options):
@@ -293,6 +372,12 @@ def main():
         if options.test
         else "winmm.dll" if options.azimuth else "xg.dll"
     )
+    if options.plugin:
+        output = (options.output or SOURCE.parent / "gripline-plugin").resolve()
+        directory = options.build_dir or SOURCE.parent / ".build" / "plugin"
+        build_plugin(compiler, output, directory.resolve(), options)
+        print(output)
+        return
     output = (options.output or SOURCE.parent / filename).resolve()
     variant = ("azimuth" if options.azimuth else "mezcal") + ("-test" if options.test else "")
     directory = options.build_dir or SOURCE.parent / ".build" / variant

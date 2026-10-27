@@ -23,6 +23,8 @@ static const struct {
 } files[] = {
     {L"FH2_ExtraOptions.log", "FH2_ExtraOptions.log"},
     {L"FH2_ExtraOptions.ini", "FH2_ExtraOptions.ini"},
+    {L"Gripline.log", "Gripline.log"}, /* plugin build */
+    {L"Gripline.ini", "Gripline.ini"},
     {L"FH2_Wheel.log", "FH2_Wheel.log"},
     {L"FH2_Wheel_previous.log", "FH2_Wheel_previous.log"},
     {L"FH2_Wheel.ini", "FH2_Wheel.ini"},

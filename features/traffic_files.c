@@ -421,8 +421,10 @@ static int write_both(const wchar_t *root, const char *name, const Text *text) {
 
 static int make_files(const wchar_t *mount_dir, const Level *l) {
     static wchar_t root[PATH_CAPACITY], zip[PATH_CAPACITY], backup[PATH_CAPACITY];
-    if (!path_join(root, mount_dir, TRAFFIC_FOLDER) || !path_join(zip, mount_dir, L"media\\EntityModel.zip"))
-        return 0;
+    const wchar_t *plugin_root = gripline_output_root();
+    if (plugin_root) lstrcpynW(root, plugin_root, PATH_CAPACITY);
+    else if (!path_join(root, mount_dir, TRAFFIC_FOLDER)) return 0;
+    if (!path_join(zip, mount_dir, L"media\\EntityModel.zip")) return 0;
     /* the old script tools/fh2_more_traffic.py changes the zip itself and keeps the original next to it */
     if (path_join(backup, mount_dir, L"media\\EntityModel.zip.moretraffic-original") &&
         GetFileAttributesW(backup) != INVALID_FILE_ATTRIBUTES) {

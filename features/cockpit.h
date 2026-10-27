@@ -31,4 +31,9 @@ int cockpit_patch_game(void);
 unsigned char *gripline_zip_extract(const wchar_t *zip_path, const char *entry, uint32_t *size);
 void gripline_zip_free(void *data);
 
+/* Plugin build: the files go to this folder (Extra Options mounts it over game:\media) instead
+   of Mount\gripline_cockpit / Mount\gripline_traffic. NULL = not set. */
+void gripline_set_output_root(const wchar_t *root);
+const wchar_t *gripline_output_root(void);
+
 #endif

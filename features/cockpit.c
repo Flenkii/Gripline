@@ -1570,6 +1570,15 @@ static int hide_hands(unsigned char *d, size_t length) {
 /* ------------------------------------------------------------------ files */
 
 static wchar_t mount_path[PATH_CAPACITY];
+static wchar_t output_root[PATH_CAPACITY]; /* plugin build: Extra Options' mods\Gripline\media */
+
+void gripline_set_output_root(const wchar_t *root) {
+    lstrcpynW(output_root, root, PATH_CAPACITY);
+}
+
+const wchar_t *gripline_output_root(void) {
+    return output_root[0] ? output_root : NULL;
+}
 static volatile LONG state; /* 0 off, 1 making, 2 ready, 3 failed */
 static int want_rotation, want_curve;
 static unsigned char *game;
@@ -1660,7 +1669,9 @@ static void log_number(const char *label, int value, const char *tail) {
 static int make_files(void) {
     static wchar_t root[PATH_CAPACITY], media[PATH_CAPACITY], path[PATH_CAPACITY], pattern[PATH_CAPACITY];
     static char manifest[256], existing[256];
-    if (!wjoin(root, mount_path, COCKPIT_FOLDER) || !wjoin(media, mount_path, L"media")) return 0;
+    if (output_root[0]) lstrcpynW(root, output_root, PATH_CAPACITY);
+    else if (!wjoin(root, mount_path, COCKPIT_FOLDER)) return 0;
+    if (!wjoin(media, mount_path, L"media")) return 0;
     format_manifest(manifest, sizeof(manifest), want_rotation, want_rotation ? want_curve : 0);
     if (!wjoin(path, root, L"gripline_cockpit.txt")) return 0;
     if (read_small(path, existing, sizeof(existing)) && same_text(existing, manifest)) {

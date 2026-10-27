@@ -41,6 +41,7 @@ EXPORTS
     OpenEventW
     lstrcpyW
     lstrlenW
+    lstrcpynW
     DisableThreadLibraryCalls
     InitOnceExecuteOnce
     GetSystemDirectoryW
