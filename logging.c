@@ -75,11 +75,7 @@ void log_start(const wchar_t *directory, const ModOptions *options) {
     if (file == INVALID_HANDLE_VALUE) {
         return;
     }
-#ifdef FH2_AZIMUTH
-    write_text(file, "Gripline " GRIPLINE_VERSION " (based on " MOD_NAME " " MOD_VERSION ") - Azimuth winmm proxy\r\n");
-#else
-    write_text(file, "Gripline " GRIPLINE_VERSION " (based on " MOD_NAME " " MOD_VERSION ") - xg.dll hook\r\n");
-#endif
+    write_text(file, "Gripline " GRIPLINE_VERSION " - FH2 Mod Platform mod next to the official Extra Options\r\n");
     write_text(file, status_get());
     for (size_t index = 0; index < setting_count; ++index) {
         const SettingDefinition *definition = &setting_definitions[index];
@@ -91,4 +87,38 @@ void log_start(const wchar_t *directory, const ModOptions *options) {
     }
     write_text(file, "\r\n");
     CloseHandle(file);
+}
+
+/* diagnostics: "<label><module>+0x<offset>" for a code or data address */
+void log_append_module(const char *label, const void *address) {
+    char line[400];
+    size_t n = 0;
+    for (const char *p = label; *p && n < 200; ++p) line[n++] = *p;
+    HMODULE module = NULL;
+    wchar_t path[MAX_PATH];
+    if (address && GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+                                      (LPCWSTR)address, &module) &&
+        GetModuleFileNameW(module, path, MAX_PATH)) {
+        const wchar_t *name = path;
+        for (const wchar_t *p = path; *p; ++p)
+            if (*p == L'\\' || *p == L'/') name = p + 1;
+        for (; *name && n < 300; ++name) line[n++] = *name < 128 ? (char)*name : '?';
+    } else {
+        for (const char *p = "(no module)"; *p; ++p) line[n++] = *p;
+    }
+    uintptr_t offset = (uintptr_t)address - (uintptr_t)module;
+    line[n++] = '+';
+    line[n++] = '0';
+    line[n++] = 'x';
+    int started = 0;
+    for (int shift = 60; shift >= 0; shift -= 4) {
+        unsigned digit = (unsigned)(offset >> shift) & 15;
+        if (!digit && !started && shift) continue;
+        started = 1;
+        line[n++] = (char)(digit < 10 ? '0' + digit : 'a' + digit - 10);
+    }
+    line[n++] = '\r';
+    line[n++] = '\n';
+    line[n] = 0;
+    log_append(line);
 }

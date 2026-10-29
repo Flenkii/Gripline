@@ -5,7 +5,7 @@ the DLL patches its XInputGetState slot and reports NitroButton while a Gripline
 import os, struct, sys, tempfile
 from emu import Emu
 
-DLL = sys.argv[1] if len(sys.argv) > 1 else 'winmm_test.dll'
+DLL = sys.argv[1] if len(sys.argv) > 1 else '../../gripline-plugin/fh2-mods/Gripline.dll'
 fails = []
 checks = [0]
 
@@ -129,13 +129,13 @@ check(poll()[1] == 0x1000, 'online: real controller LB hidden from NitroSystem t
 check(e.call('Fh2TestNotifyCount') >= 1, 'notification shown')
 l1, l2 = e.alloc(200), e.alloc(200)
 e.call('Fh2TestNotifyText', 0, l1, l2)
-check(e.wstr(l1) == 'Nitro off' and 'online' in e.wstr(l2), 'card text: %r / %r' % (e.wstr(l1), e.wstr(l2)))
+check(e.wstr(l1) == 'Nitro off' and e.wstr(l2) == 'Online session (FH2MP)', 'card text: %r / %r' % (e.wstr(l1), e.wstr(l2)))
 e.wd(conn + 0x10, 2)
 e.tick += 600
 pad['buttons'] = 0x1000
 check(poll()[1] == 0x1100, 'offline again: nitro back')
 e.call('Fh2TestNotifyText', 0, l1, l2)
-check(e.wstr(l1) == 'Nitro on again', 'card: nitro on again')
+check(e.wstr(l1) == 'Nitro on again' and e.wstr(l2) == 'Offline session', 'card: nitro on again / offline session')
 e.wq(NET, 0)
 e.tick += 600
 check(poll()[1] == 0x1100, 'no connection object: offline')

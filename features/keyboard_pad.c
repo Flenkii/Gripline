@@ -1,10 +1,14 @@
 /* Keyboard as a gamepad (unofficial add-on). See keyboard_pad.h. */
 #include "keyboard_pad.h"
+#include "mod_scan.h"
 #include "ini_migrate.h"
 #include "game_addresses.h"
 #include "logging.h"
 #include "support.h"
 #include "nitro_link.h"
+#include "cockpit_view.h"
+#include "notify.h"
+#include "game_language.h"
 
 #define KEY_INI L"FH2_Keyboard.ini"
 #define MAX_PADS 8
@@ -68,6 +72,8 @@ enum {
     KIND_NAV,    /* arrows, 0 up, 1 down, 2 left, 3 right: left stick in menus, camera while driving */
     KIND_FIXED,  /* fixed controller input */
     KIND_NITRO,  /* NitroSystem nitro button, see nitro_link.h */
+    KIND_COCKPIT_VIEW, /* second cockpit view on/off, see cockpit_view.h */
+    KIND_KEYLIST, /* key list panel on/off (notify.h), the game keeps the key */
 };
 
 typedef struct {
@@ -104,6 +110,8 @@ static Binding bindings[] = {
     {L"LookLeft", KIND_ACTION, 11, L"Num4", {0}},
     {L"LookRight", KIND_ACTION, 12, L"Num6", {0}},
     {L"Nitro", KIND_NITRO, 0, L"N", {0}},
+    {L"CockpitView", KIND_COCKPIT_VIEW, 0, L"V", {0}},
+    {L"Keybinds", KIND_KEYLIST, 0, L"F5", {0}},
     {L"Lights", KIND_FIXED, IN_RS, L"L", {0}},
     {L"Map", KIND_FIXED, IN_VIEW, L"M", {0}},
     {L"Pause", KIND_FIXED, IN_MENU, L"Esc", {0}},
@@ -222,7 +230,9 @@ static const char default_ini[] =
     "; Driving functions follow the controller layout chosen in the game.\r\n"
     "; Menus: Enter = A, Backspace = B, Esc = Menu.\r\n"
     "; Arrow keys: in menus = left stick, while driving = camera (right stick).\r\n"
-    "; Nitro: only with the NitroSystem mod (presses its NitroButton).\r\n";
+    "; Nitro: only with the NitroSystem mod (presses its NitroButton).\r\n"
+    "; CockpitView: second cockpit view on/off (close to the dashboard, set on the MODS page).\r\n"
+    "; Keybinds: shows this key list at the right of the picture, again = off (the game keeps running).\r\n";
 
 /* Default file text including the key bindings (also used by ini_migrate.c). Returns the
    length, 0 if it does not fit. */
@@ -253,6 +263,148 @@ static void write_default_ini(void) {
     DWORD written;
     WriteFile(file, text, (DWORD)length, &written, NULL);
     CloseHandle(file);
+}
+
+/* ------------------------------------------------------------------ key list panel */
+
+static const wchar_t *const labels_german[ARRAY_COUNT(bindings)] = {
+    L"Gas", L"Bremse", L"Links lenken", L"Rechts lenken", L"Handbremse", L"Hochschalten", L"Runterschalten",
+    L"Kupplung", L"Kamera wechseln", L"Zurückspulen", L"Telemetrie (halten)", L"Fotomodus (halten)", L"Radio: zurück",
+    L"Radio: weiter", L"Blick zurück", L"Blick links", L"Blick rechts", L"Nitro (NitroSystem)",
+    L"Cockpit-Ansicht 2", L"Tastenliste ein/aus", L"Licht", L"Karte", L"Pause",
+    L"Bestätigen (A)", L"Zurück (B)", L"Taste X", L"Taste Y", L"Reiter links (LB)", L"Reiter rechts (RB)",
+    L"Menü/Kamera hoch", L"Menü/Kamera runter", L"Menü/Kamera links", L"Menü/Kamera rechts",
+    L"Steuerkreuz hoch", L"Steuerkreuz runter", L"Steuerkreuz links", L"Steuerkreuz rechts"};
+static const wchar_t *const labels_english[ARRAY_COUNT(bindings)] = {
+    L"Throttle", L"Brake", L"Steer left", L"Steer right", L"Handbrake", L"Shift up", L"Shift down",
+    L"Clutch", L"Change camera", L"Rewind", L"Telemetry (hold)", L"Photo mode (hold)", L"Radio: previous",
+    L"Radio: next", L"Look back", L"Look left", L"Look right", L"Nitro (NitroSystem)",
+    L"Cockpit view 2", L"Key list on/off", L"Lights", L"Map", L"Pause",
+    L"Confirm (A)", L"Back (B)", L"Button X", L"Button Y", L"Tab left (LB)", L"Tab right (RB)",
+    L"Menu/camera up", L"Menu/camera down", L"Menu/camera left", L"Menu/camera right",
+    L"D-pad up", L"D-pad down", L"D-pad left", L"D-pad right"};
+_Static_assert(ARRAY_COUNT(bindings) + 1 <= NOTIFY_PANEL_ROWS, "key list rows");
+
+static unsigned char *game_base;
+static HMODULE user32;
+static volatile LONG key_list_held, key_list_on;
+
+typedef int(WINAPI *MapKeyFn)(UINT, UINT);
+typedef int(WINAPI *KeyNameFn)(LONG, LPWSTR, int);
+
+/* Name of a key as printed on this keyboard (Windows keyboard layout), for the keys whose place
+   differs between layouts (Minus, Plus, Comma, Period: e.g. "=" on a US keyboard). */
+static int layout_key_name(unsigned char vk, wchar_t *out, int capacity) {
+#ifdef FH2_TWEAKS_TEST
+    (void)vk, (void)out, (void)capacity;
+    return 0;
+#else
+    static MapKeyFn map_key;
+    static KeyNameFn key_name;
+    if (!key_name) {
+        if (!user32) user32 = LoadLibraryExW(L"user32.dll", NULL, LOAD_LIBRARY_SEARCH_SYSTEM32);
+        if (!user32) return 0;
+        map_key = (MapKeyFn)(uintptr_t)GetProcAddress(user32, "MapVirtualKeyW");
+        key_name = (KeyNameFn)(uintptr_t)GetProcAddress(user32, "GetKeyNameTextW");
+        if (!map_key || !key_name) {
+            key_name = NULL;
+            return 0;
+        }
+    }
+    int scan = map_key(vk, 0); /* MAPVK_VK_TO_VSC */
+    return scan ? key_name((LONG)scan << 16, out, capacity) : 0;
+#endif
+}
+
+static const struct {
+    unsigned char vk;
+    const wchar_t *german, *english;
+} key_words[] = {
+    {0x20, L"Leertaste", L"Space"},        {0x0d, L"Enter", L"Enter"},
+    {0x1b, L"Esc", L"Esc"},                {0x09, L"Tab", L"Tab"},
+    {0x08, L"Rücktaste", L"Backspace"},    {0x10, L"Umschalt", L"Shift"},
+    {0xa0, L"Umschalt links", L"Left Shift"}, {0xa1, L"Umschalt rechts", L"Right Shift"},
+    {0x11, L"Strg", L"Ctrl"},              {0xa2, L"Strg links", L"Left Ctrl"},
+    {0xa3, L"Strg rechts", L"Right Ctrl"}, {0x12, L"Alt", L"Alt"},
+    {0x26, L"Pfeil hoch", L"Up"},          {0x28, L"Pfeil runter", L"Down"},
+    {0x25, L"Pfeil links", L"Left"},       {0x27, L"Pfeil rechts", L"Right"},
+    {0x21, L"Bild hoch", L"Page Up"},      {0x22, L"Bild runter", L"Page Down"},
+    {0x24, L"Pos1", L"Home"},              {0x23, L"Ende", L"End"},
+    {0x2d, L"Einfg", L"Insert"},           {0x2e, L"Entf", L"Delete"},
+    {0xbd, L"Minus", L"Minus"},            {0xbb, L"Plus", L"Plus"},
+    {0xbc, L"Komma", L"Comma"},            {0xbe, L"Punkt", L"Period"},
+    {0x01, L"Maus links", L"Left mouse"},  {0x02, L"Maus rechts", L"Right mouse"},
+    {0x04, L"Mausrad-Klick", L"Middle mouse"}, {0x05, L"Maus 4", L"Mouse 4"},
+    {0x06, L"Maus 5", L"Mouse 5"},
+};
+
+static unsigned append(wchar_t *out, unsigned n, unsigned capacity, const wchar_t *text) {
+    while (*text && n + 1 < capacity) out[n++] = *text++;
+    out[n] = 0;
+    return n;
+}
+
+/* the keys of one binding as the player reads them, e.g. "C, Num 2" */
+static void key_list_keys(const Binding *b, int german, wchar_t *out, unsigned capacity) {
+    unsigned n = 0;
+    out[0] = 0;
+    for (unsigned k = 0; k < 4 && b->vk[k]; ++k) {
+        unsigned char vk = b->vk[k];
+        wchar_t name[24] = {0};
+        if (k) n = append(out, n, capacity, L", ");
+        if ((vk >= 'A' && vk <= 'Z') || (vk >= '0' && vk <= '9')) {
+            name[0] = (wchar_t)vk;
+        } else if (vk >= 0x70 && vk <= 0x7b) {
+            int f = vk - 0x70 + 1;
+            name[0] = L'F';
+            name[1] = (wchar_t)(f >= 10 ? L'1' : L'0' + f);
+            if (f >= 10) name[2] = (wchar_t)(L'0' + f - 10);
+        } else if (vk >= 0x60 && vk <= 0x69) {
+            append(name, 0, 24, L"Num ");
+            name[4] = (wchar_t)(L'0' + vk - 0x60);
+        } else if (vk >= 0xba && vk <= 0xe2 && layout_key_name(vk, name, 24) > 0) {
+            /* name from the keyboard layout */
+        } else {
+            for (unsigned i = 0; i < ARRAY_COUNT(key_words); ++i)
+                if (key_words[i].vk == vk) append(name, 0, 24, german ? key_words[i].german : key_words[i].english);
+        }
+        n = append(out, n, capacity, name);
+    }
+}
+
+static void copy_text(wchar_t *out, const wchar_t *text, unsigned capacity) {
+    unsigned n = 0;
+    while (text[n] && n + 1 < capacity) {
+        out[n] = text[n];
+        ++n;
+    }
+    out[n] = 0;
+}
+
+static void key_list_show(void) {
+    static NotifyPanelRow rows[NOTIFY_PANEL_ROWS];
+    int german = game_language_is_german(game_base);
+    unsigned count = 0;
+    for (unsigned i = 0; i < ARRAY_COUNT(bindings); ++i) {
+        if (!bindings[i].vk[0]) continue;
+        copy_text(rows[count].label, german ? labels_german[i] : labels_english[i], 32);
+        key_list_keys(&bindings[i], german, rows[count].keys, 32);
+        ++count;
+    }
+    notify_panel_set(german ? L"Tastenbelegung" : L"Key Bindings", rows, count);
+}
+
+static void key_list_input(int pressed) {
+    LONG before = InterlockedExchange(&key_list_held, pressed ? 1 : 0);
+    if (!pressed || before) return;
+    LONG on = !key_list_on;
+    InterlockedExchange(&key_list_on, on);
+    if (on) {
+        key_list_show();
+    } else {
+        notify_panel_set(NULL, NULL, 0);
+    }
+    log_append(on ? "KEYBOARD: key list shown\r\n" : "KEYBOARD: key list hidden\r\n");
 }
 
 static void settings_load(void) {
@@ -288,7 +440,6 @@ const wchar_t *keyboard_ini_path(void) {
 static AsyncKeyFn async_key;
 static ForegroundFn foreground;
 static WindowPidFn window_pid;
-static HMODULE user32;
 
 static int user32_ready(void) {
     if (async_key) return 1;
@@ -321,7 +472,6 @@ static int game_has_focus(void) {
 /* While the simulation runs (free roam, races) the arrows move the camera; in menus, the pause
    menu, loading screens and before the world is loaded they move the left stick. Same check
    as autodrive: player manager -> simulation -> paused flag. */
-static unsigned char *game_base;
 
 static int simulation_running(void) {
     void *manager, *simulation;
@@ -430,6 +580,12 @@ static void keyboard_reading(PadReading *r) {
             case KIND_NITRO:
                 nitro_link_set(NITRO_SOURCE_KEYBOARD, pressed);
                 break;
+            case KIND_COCKPIT_VIEW:
+                cockpit_view_input(COCKPIT_VIEW_KEYBOARD, pressed);
+                break;
+            case KIND_KEYLIST:
+                key_list_input(pressed);
+                break;
             case KIND_ACTION: {
                 int input = controller_action_input(b->target);
                 if (input == IN_LT || input == IN_RT) { /* analog pedal: ramp */
@@ -460,6 +616,8 @@ static void keyboard_reading(PadReading *r) {
 /* ------------------------------------------------------------------ virtual gamepad */
 
 static void *real_statics;
+static int keyboard_only; /* late hook: Azimuth keeps its own real pads, ours is the keyboard */
+static GetPadsFn real_get_pads; /* set when the late hook patched the real statics' vtable */
 static void *real_pads[MAX_PADS];
 static unsigned real_count;
 static ULONGLONG pads_refreshed;
@@ -504,7 +662,7 @@ static void refresh_pads(ULONGLONG now) {
     void *view = NULL;
     void *fresh[MAX_PADS];
     unsigned count = 0;
-    if (((GetPadsFn)VT(real_statics)[10])(real_statics, &view) >= 0 && view) {
+    if ((real_get_pads ? real_get_pads : (GetPadsFn)VT(real_statics)[10])(real_statics, &view) >= 0 && view) {
         UINT32 n = 0;
         ((SizeFn)VT(view)[7])(view, &n);
         for (UINT32 i = 0; i < n && count < MAX_PADS; ++i) {
@@ -576,8 +734,10 @@ static HRESULT WINAPI pad_reading(void *self, PadReading *out) {
     QueryPerformanceCounter(&counter);
     QueryPerformanceFrequency(&frequency);
     UINT64 timestamp = (UINT64)((double)counter.QuadPart * 1000000.0 / (double)frequency.QuadPart);
+    static volatile LONG reported;
+    if (!InterlockedExchange(&reported, 1)) log_append("KEYBOARD: Azimuth reads the Gripline controller.\r\n");
     AcquireSRWLockExclusive(&pad_lock);
-    refresh_pads(GetTickCount64());
+    if (!keyboard_only) refresh_pads(GetTickCount64());
     for (unsigned i = 0; i < real_count; ++i) {
         PadReading p;
         if (((ReadingFn)VT(real_pads[i])[8])(real_pads[i], &p) < 0) continue;
@@ -704,6 +864,8 @@ static HRESULT WINAPI statics_add_removed(void *self, void *handler, INT64 *toke
 }
 static HRESULT WINAPI statics_get_gamepads(void *self, void **out) {
     (void)self;
+    static volatile LONG reported;
+    if (!InterlockedExchange(&reported, 1)) log_append("KEYBOARD: the game asked for the gamepad list (merged list given).\r\n");
     if (!out) return E_POINTER;
     *out = &view;
     return S_OK;
@@ -748,6 +910,11 @@ static HRESULT WINAPI hook_get_factory(void *name, const GUID *iid, void **out) 
     if (!loaded) settings_load();
     if (!values[KEY_SETTING_ENABLED]) {
         log_append("KEYBOARD: keyboard off (FH2_Keyboard.ini Enabled=0); gamepads unchanged.\r\n");
+        return original_get_factory(name, iid, out);
+    }
+    if (mod_scan_mapper_running()) {
+        log_append("KEYBOARD: Azimuth Mapper is running; Gripline keyboard off, gamepads unchanged.\r\n");
+        mod_scan_announce_mapper();
         return original_get_factory(name, iid, out);
     }
     if (!real_statics) {
@@ -810,12 +977,120 @@ int keyboard_pad_arm(unsigned char *host_image, const wchar_t *settings_director
     return previous == current;
 }
 
+static int32_t rel32(const unsigned char *at) {
+    return (int32_t)((uint32_t)at[0] | (uint32_t)at[1] << 8 | (uint32_t)at[2] << 16 | (uint32_t)at[3] << 24);
+}
+
+/* Azimuth (1.0.3) asks for the gamepad list once and then follows the added/removed events. Its
+   start-up code loads the Gamepad statics ("Windows.Gaming.Input.Gamepad"), stores them in a global
+   and calls a function that reads that global, calls get_Gamepads and adds every pad. That function
+   is found here so the late hook can run it once more; NULL when the code does not look like that. */
+typedef void (*EnumerateFn)(void);
+static EnumerateFn find_enumerate(unsigned char *host) {
+    IMAGE_DOS_HEADER *dos = (IMAGE_DOS_HEADER *)host;
+    if (dos->e_magic != IMAGE_DOS_SIGNATURE) return NULL;
+    IMAGE_NT_HEADERS64 *nt = (IMAGE_NT_HEADERS64 *)(host + dos->e_lfanew);
+    if (nt->Signature != IMAGE_NT_SIGNATURE) return NULL;
+    size_t size = nt->OptionalHeader.SizeOfImage;
+    static const wchar_t wanted[] = L"Windows.Gaming.Input.Gamepad";
+    const size_t bytes = sizeof(wanted) - sizeof(wchar_t);
+    IMAGE_SECTION_HEADER *sec = IMAGE_FIRST_SECTION(nt);
+    for (unsigned i = 0; i < nt->FileHeader.NumberOfSections; ++i) {
+        if (!(sec[i].Characteristics & IMAGE_SCN_MEM_EXECUTE)) continue;
+        unsigned char *code = host + sec[i].VirtualAddress;
+        size_t length = sec[i].Misc.VirtualSize;
+        for (size_t at = 0; at + 7 < length; ++at) {
+            /* lea rcx, [rip + string] */
+            if (code[at] != 0x48 || code[at + 1] != 0x8d || code[at + 2] != 0x0d) continue;
+            unsigned char *target = code + at + 7 + rel32(code + at + 3);
+            if (target < host || target + bytes > host + size) continue;
+            const unsigned char *w = (const unsigned char *)wanted;
+            size_t k = 0;
+            while (k < bytes && target[k] == w[k]) ++k;
+            if (k != bytes) continue;
+            /* mov [rip + global], rax followed by call enumerate */
+            for (size_t m = at + 7; m + 12 < at + 0x180 && m + 12 < length; ++m) {
+                if (code[m] != 0x48 || code[m + 1] != 0x89 || code[m + 2] != 0x05) continue;
+                unsigned char *global = code + m + 7 + rel32(code + m + 3);
+                for (size_t c = m + 7; c < m + 15 && c + 5 <= length; ++c) {
+                    if (code[c] != 0xe8) continue;
+                    unsigned char *fn = code + c + 5 + rel32(code + c + 1);
+                    if (fn < code || fn + 0x40 > code + length) continue;
+                    /* it must read the same global and call slot 10 (get_Gamepads) */
+                    int reads = 0, calls = 0;
+                    for (unsigned j = 0; j + 7 <= 0x40; ++j) {
+                        if (fn[j] == 0x48 && fn[j + 1] == 0x8b && fn[j + 2] == 0x0d &&
+                            fn + j + 7 + rel32(fn + j + 3) == global)
+                            reads = 1;
+                        if (reads && fn[j] == 0xff && fn[j + 1] == 0x50 && fn[j + 2] == 0x50) calls = 1;
+                    }
+                    if (reads && calls) return (EnumerateFn)(uintptr_t)fn;
+                }
+            }
+        }
+    }
+    return NULL;
+}
+
+/* plugin build: the platform may load Gripline after Azimuth asked for its gamepads, so the import
+   swap above comes too late. Then the real IGamepadStatics (a cached singleton, the same object
+   Azimuth holds) gets its get_Gamepads entry pointed at the merged list instead. */
+int keyboard_pad_late(void) {
+    if (wrapped) return 1;
+    if (!ini_path[0]) return 0;
+    if (!loaded) settings_load();
+    if (!values[KEY_SETTING_ENABLED] || mod_scan_mapper_running()) return 0;
+    HMODULE combase = LoadLibraryExW(L"combase.dll", NULL, LOAD_LIBRARY_SEARCH_SYSTEM32);
+    if (!combase) return 0;
+    GetFactoryFn get_factory = original_get_factory ? original_get_factory
+                                                    : (GetFactoryFn)(uintptr_t)GetProcAddress(combase, "RoGetActivationFactory");
+    if (!create_string) create_string = (CreateStringFn)(uintptr_t)GetProcAddress(combase, "WindowsCreateString");
+    if (!get_factory || !create_string) return 0;
+    void *name = NULL, *real = NULL;
+    if (create_string(L"Windows.Gaming.Input.Gamepad", 28, &name) < 0) return 0;
+    HRESULT hr = get_factory(name, &IID_GamepadStatics, &real);
+    typedef HRESULT(WINAPI * DeleteStringFn)(void *);
+    DeleteStringFn delete_string = (DeleteStringFn)(uintptr_t)GetProcAddress(combase, "WindowsDeleteString");
+    if (delete_string) delete_string(name);
+    if (hr < 0 || !real) return 0;
+    void **slot = &VT(real)[10];
+    log_append_module("KEYBOARD: gamepad statics vtable ", VT(real));
+    log_append_module("KEYBOARD: get_Gamepads before the hook ", *slot);
+    DWORD protection, ignored;
+    if (!VirtualProtect((void *)slot, sizeof(void *), PAGE_READWRITE, &protection)) return 0;
+    real_statics = real;
+    real_get_pads = (GetPadsFn)*slot;
+    pad.vtbl = pad_vtbl;
+    InterlockedExchangePointer(slot, (void *)(uintptr_t)statics_get_gamepads);
+    VirtualProtect((void *)slot, sizeof(void *), protection, &ignored);
+    InterlockedExchange(&wrapped, 1);
+    EnumerateFn enumerate = find_enumerate((unsigned char *)GetModuleHandleW(NULL));
+    if (!enumerate) {
+        log_append("KEYBOARD: Azimuth's gamepad list was not found; keyboard needs a newer Gripline.\r\n");
+        return 0;
+    }
+    log_append_module("KEYBOARD: Azimuth gamepad list ", (void *)(uintptr_t)enumerate);
+    keyboard_only = 1;
+    __try {
+        enumerate(); /* Azimuth asks again and adds the Gripline pad next to its own */
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        log_append("KEYBOARD: an exception while adding the Gripline pad.\r\n");
+    }
+    /* everyone else gets the real list again */
+    if (VirtualProtect((void *)slot, sizeof(void *), PAGE_READWRITE, &protection)) {
+        InterlockedExchangePointer(slot, (void *)(uintptr_t)real_get_pads);
+        VirtualProtect((void *)slot, sizeof(void *), protection, &ignored);
+    }
+    log_append("KEYBOARD: keyboard active (late hook); the Gripline pad was added to Azimuth's list.\r\n");
+    return 1;
+}
+
 void keyboard_pad_game_start(unsigned char *game_image, const wchar_t *settings_directory) {
     if (!ini_path[0] && (!settings_directory || !path_join(ini_path, settings_directory, KEY_INI))) return;
     ini_migrate(settings_directory);
     if (!loaded) settings_load();
     game_base = game_image;
-    if (values[KEY_SETTING_ENABLED]) wheel_buttons_install(game_image); /* follows the controller layout */
+    if (values[KEY_SETTING_ENABLED] && !mod_scan_mapper_running()) wheel_buttons_install(game_image); /* follows the controller layout */
 }
 
 #ifdef FH2_TWEAKS_TEST

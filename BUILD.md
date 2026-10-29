@@ -1,54 +1,38 @@
 # Building and testing
 
-Use Python 3.10 or later and Zig 0.15.2. Run these commands from this source
-folder. Builds target x86_64 Windows PE DLLs and use only Zig's bundled Windows
-headers and Kernel32 import library. No Microsoft C runtime, Xbox SDK, original
-helper DLL, or translation-layer source is required.
-
-## Release builds
+Python 3.10 or later and Zig 0.15.2. Run the commands from this folder; the result is a Windows x64 DLL
+(also when building on Linux). No Microsoft C runtime or SDK is needed, only Zig's bundled headers.
 
 ```text
-python build.py /absolute/path/to/zig.exe
-python build.py /absolute/path/to/zig.exe --azimuth
+python build.py /path/to/zig --output out
 ```
 
-The outputs are `../xg.dll` for Mezcal and `../azimuth-tls.dll` for Azimuth.
-`--output PATH` chooses another destination. `--build-dir PATH` keeps the
-intermediate files in that directory; otherwise they use a temporary directory.
-The script lists common modules explicitly and selects one layer adapter.
-Azimuth also includes its guarded host, livery and save compatibility modules.
-All modules compile with warnings treated as errors and x64 unwind tables.
+makes `out/fh2-mods/Gripline.dll`. `--build-dir PATH` keeps the intermediate files there, `--rebuild` ignores
+the build cache. `--test` adds the `Fh2Test*` exports used by the emulator tests.
 
-On Linux, use the portable Linux Zig distribution and the same commands with
-`zig` as the compiler filename. The target remains a Windows DLL. Cross-build
-support is retained; Linux/Wine execution has not been tested.
+## Tests
 
-The public exports are `Fh2TweaksStatus` on both adapters and the additional
-`azimuth_tls_index` / `azimuth_tls_attached` data exports on Azimuth. These names
-are retained for compatibility. Azimuth has a 336-byte zero TLS template aligned
-to 16 bytes and no TLS callbacks. The release binaries import Kernel32 only.
-The gamerpic feature lazily loads the system Windows codec on a later UI call.
-Autodrive loads User32 lazily on a native GPS update to read F2 and focus.
-Controller buttons and telemetry visibility are read from native game state;
-the cinematic transition calls the game's existing white-flash routine.
-
-Both adapters initialize synchronously in `DllMain`. Startup performs simple
-configuration I/O, hashing, mapped-image validation, and memory patching.
-Callback resource work and PNG decoding happen on normal game call paths.
-There is no worker thread or startup wait. Callback installation pins the DLL
-before any callback pointer is written.
-
-## Patch data
-
-Edit `patches.json`, then regenerate the checked-in C tables:
+The tests run the compiled DLL in an x64 emulator (`pip install unicorn pefile`):
 
 ```text
-python generate_data.py
+python build.py /path/to/zig --test --output out-test
+cd tests
+python test_plugin.py ../out-test/fh2-mods/Gripline.dll
+python test_keyboard.py ../out-test/fh2-mods/Gripline.dll
+python test_traffic_files.py ../out-test/fh2-mods/Gripline.dll
+python test_modscan.py ../out-test/fh2-mods/Gripline.dll
+python test_report.py ../out-test/fh2-mods/Gripline.dll
+python test_ini_migrate.py ../out-test/fh2-mods/Gripline.dll
+python test_cockpit_view.py ../out-test/fh2-mods/Gripline.dll
+python test_nitro.py ../out-test/fh2-mods/Gripline.dll
+python test_cockpit.py ../out-test/fh2-mods/Gripline.dll
 ```
 
-The generator validates non-overlapping file/image ranges, supported groups,
-and equal-length byte variants. It emits `patches_generated.c` and
-`patches_generated.h`. You can format these with clang-format afterward.
-It needs no game executable. Runtime patches use RVAs; file verification uses
-raw offsets. The fifteen runtime callback descriptors live in the feature
-modules and are described in `runtime_hooks` in the manifest.
+`test_cockpit_range.py` needs locally extracted game files in `tests/game` (not part of the repository);
+`test_cockpit.py` checks more with `FH2_COCKPIT_DATA` set to a folder with the game's cockpit media.
+
+## Release ZIP
+
+```text
+python tools/make_release.py out Gripline_V6.zip
+```

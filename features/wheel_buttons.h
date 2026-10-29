@@ -1,6 +1,6 @@
 #ifndef FH2_WHEEL_BUTTONS_H
 #define FH2_WHEEL_BUTTONS_H
-#include "extra_options.h"
+#include "gripline.h"
 
 /* Free wheel buttons (e.g. RSB, LSB, Xbox button on the G920) can trigger game functions.
 
@@ -32,6 +32,7 @@ enum {
     WHEEL_FUNCTION_SHIFT_UP,
     WHEEL_FUNCTION_SHIFT_DOWN,
     WHEEL_FUNCTION_NITRO, /* NitroSystem, see nitro_link.h - no game action */
+    WHEEL_FUNCTION_COCKPIT_VIEW, /* second cockpit view, see cockpit_view.h - no game action */
     WHEEL_FUNCTION_COUNT
 };
 
@@ -49,4 +50,9 @@ const wchar_t *wheel_function_name(unsigned char *game_image, unsigned function)
 /* Controller (gamepad) layout of the game: input that triggers a game action (-1 = none).
    Layout 0 until the game loads the player's layout. Used by the keyboard. */
 int controller_action_input(unsigned action);
+
+/* For the second cockpit view: counts the game's reads of a wheel state (so a state read can be told
+   apart from a gamepad read), and the wheel layout's input of an action (-1 = unknown). */
+unsigned wheel_buttons_wheel_reads(void);
+int wheel_buttons_action_input(unsigned action);
 #endif

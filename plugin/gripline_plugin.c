@@ -1,0 +1,500 @@
+/* fh2-mods\Gripline.dll - Gripline as an FH2 Mod Platform mod (plugin build, FH2_GRIPLINE_PLUGIN).
+
+   Since FH2MP 1.1.1 the launcher only starts the game with the official Extra Options (0.3.2 then,
+   0.3.9 with FH2MP 1.1.2; winmm.dll next to azimuth.exe, checked by its SHA-256). Gripline therefore no longer replaces
+   Extra Options: it runs next to it as a platform mod.
+   - The platform loads this DLL when Azimuth starts, so the keyboard (Azimuth's gamepad import) and
+     the picture cards (DXGI import) are taken over before Azimuth sets them up.
+   - Once the game is mapped, the Gripline features start on their own thread, as in runtime.c.
+   - Settings are Gripline.ini ([Traffic], [Gripline]); Extra Options refuses unknown keys in its
+     own INI. FH2_Keyboard.ini stays as it is.
+   - V6 leaves to the others what they already do: the wheel and its force feedback to Azimuth (its
+     launcher), weather, time of day and hiding the HUD to Extra Options. Gripline only reads Azimuth's
+     wheel rotation for the cockpit animation.
+   - Steering animation and More Traffic files go to mods\Gripline\media, which Extra Options mounts
+     over game:\media like any mod's media folder.
+   - The in-game settings are rows on the game's Mods page (Pause > Settings > MODS). */
+#include "gripline.h"
+#include "../third_party/fh2mod/fh2mod.h"
+#include "logging.h"
+#include "settings.h"
+#include "support.h"
+#include "features.h"
+#include "features/cockpit.h"
+#include "features/cockpit_view.h"
+#include "features/keyboard_pad.h"
+#include "features/mod_scan.h"
+#include "features/nitro_link.h"
+#include "features/notify.h"
+#include "features/report.h"
+#include "features/rig_settings.h"
+#include "features/traffic_files.h"
+#include "features/game_language.h"
+
+void keyboard_pad_game_start(unsigned char *game_image, const wchar_t *settings_directory);
+void report_init(const wchar_t *settings_directory);
+
+static const FH2ModApi *api;
+static FH2Mod *mod;
+static wchar_t directory[PATH_CAPACITY];   /* the Azimuth folder (next to azimuth.exe) */
+static wchar_t game_path[PATH_CAPACITY];   /* ...\Mount\forza_durango_release_final.exe */
+static wchar_t mount_dir[PATH_CAPACITY];   /* ...\Mount */
+static wchar_t media_dir[PATH_CAPACITY];   /* Azimuth\mods\Gripline\media */
+static unsigned char *game;
+static volatile LONG started;
+
+__declspec(dllexport) const char *Fh2TweaksStatus(void) {
+    return status_get();
+}
+
+static void platform_log(const char *line) {
+    if (api && mod) api->log(mod, line);
+}
+
+/* ------------------------------------------------------------------ paths */
+
+/* the platform knows both: Azimuth's folder and the game's Mount folder */
+static int find_folders(void) {
+    if (!api->azimuth_dir || !api->azimuth_dir[0] || lstrlenW(api->azimuth_dir) >= PATH_CAPACITY) return 0;
+    lstrcpynW(directory, api->azimuth_dir, PATH_CAPACITY);
+    if (api->game_dir && api->game_dir[0] && lstrlenW(api->game_dir) < PATH_CAPACITY) {
+        lstrcpynW(mount_dir, api->game_dir, PATH_CAPACITY);
+        path_join(game_path, mount_dir, GAME_EXE_NAME);
+    }
+    return 1;
+}
+
+/* ------------------------------------------------------------------ Gripline.ini */
+
+static int write_whole(const wchar_t *path, const char *data, size_t length, DWORD disposition) {
+    HANDLE file = CreateFileW(path, GENERIC_WRITE, 0, NULL, disposition, FILE_ATTRIBUTE_NORMAL, NULL);
+    if (file == INVALID_HANDLE_VALUE) return 0;
+    DWORD written = 0;
+    int ok = WriteFile(file, data, (DWORD)length, &written, NULL) && written == length;
+    CloseHandle(file);
+    return ok;
+}
+
+/* Every start, before Extra Options reads its INI (it does so when the game is mapped, the platform
+   loads this DLL earlier): the [Traffic] and [Gripline] sections move out of FH2_ExtraOptions.ini,
+   because Extra Options (0.3.2 and later) refuses keys it does not know. They go to Gripline.ini when that does
+   not exist yet; the INI as it was is kept once as FH2_ExtraOptions.ini.before-gripline. */
+static void move_gripline_sections(void) {
+    static wchar_t ini[PATH_CAPACITY], old[PATH_CAPACITY], backup[PATH_CAPACITY];
+    static char text[16384], ours[16384], rest[16384];
+    if (!path_join(ini, directory, MOD_INI_NAME) || !path_join(old, directory, L"FH2_ExtraOptions.ini") ||
+        !path_join(backup, directory, L"FH2_ExtraOptions.ini.before-gripline"))
+        return;
+    DWORD got = 0;
+    HANDLE file = CreateFileW(old, GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE, NULL, OPEN_EXISTING,
+                              FILE_ATTRIBUTE_NORMAL, NULL);
+    if (file != INVALID_HANDLE_VALUE) {
+        if (!ReadFile(file, text, sizeof(text) - 1, &got, NULL)) got = 0;
+        CloseHandle(file);
+    }
+    size_t used = 0, kept = 0;
+    int mine = 0;
+    for (DWORD i = 0; i < got;) {
+        DWORD start = i;
+        while (i < got && text[i] != '\n') ++i;
+        if (i < got) ++i;
+        const char *line = text + start;
+        DWORD length = i - start, k = 0;
+        while (k < length && (line[k] == ' ' || line[k] == '\t')) ++k;
+        if (k < length && line[k] == '[') {
+            mine = (length - k >= 9 && memory_equal(line + k, "[Traffic]", 9)) ||
+                   (length - k >= 10 && memory_equal(line + k, "[Gripline]", 10));
+        }
+        char *out = mine ? ours : rest;
+        size_t *count = mine ? &used : &kept;
+        if (*count + length < sizeof(ours)) {
+            memory_copy(out + *count, line, length);
+            *count += length;
+        }
+    }
+    int have_ini = GetFileAttributesW(ini) != INVALID_FILE_ATTRIBUTES;
+    if (!have_ini) {
+        if (used) {
+            write_whole(ini, ours, used, CREATE_NEW);
+        } else {
+            static const char defaults[] = "[Traffic]\r\nTrafficLevel=4\r\nRushHourAllDay=1\r\n"
+                                           "[Gripline]\r\nNotifications=1\r\nSteeringAnimation=0\r\n"
+                                           "CockpitViewForward=35\r\nCockpitViewUp=-5\r\n";
+            write_whole(ini, defaults, sizeof(defaults) - 1, CREATE_NEW);
+        }
+    }
+    if (used) {
+        write_whole(backup, text, got, CREATE_NEW); /* only the first time */
+        if (write_whole(old, rest, kept, CREATE_ALWAYS))
+            platform_log("moved [Traffic]/[Gripline] from FH2_ExtraOptions.ini (Extra Options refuses them)");
+    }
+}
+
+/* ------------------------------------------------------------------ Mods page rows */
+
+#define MAX_ROWS 40
+static unsigned row_ids[MAX_ROWS], row_count;
+static char row_keys[MAX_ROWS][8];
+static char row_descriptions[MAX_ROWS][768];
+
+static int is_slider(unsigned id) {
+    const RigSettingInfo *info = rig_setting_info(id);
+    return info && !(info->kind == RIG_KIND_TOGGLE);
+}
+
+static void append(char *out, size_t capacity, size_t *used, const char *text) {
+    while (*text && *used + 1 < capacity) out[(*used)++] = *text++;
+    out[*used] = 0;
+}
+
+static void append_wide(char *out, size_t capacity, size_t *used, const wchar_t *text) {
+    char utf8[128];
+    int n = text ? WideCharToMultiByte(CP_UTF8, 0, text, -1, utf8, sizeof(utf8), NULL, NULL) : 0;
+    if (n > 0) append(out, capacity, used, utf8);
+}
+
+static void append_number(char *out, size_t capacity, size_t *used, int value) {
+    char digits[16];
+    unsigned n = 0, v = value < 0 ? (unsigned)-value : (unsigned)value;
+    do digits[n++] = (char)('0' + v % 10); while ((v /= 10) && n < sizeof(digits));
+    if (value < 0 && *used + 1 < capacity) out[(*used)++] = '-';
+    while (n && *used + 1 < capacity) out[(*used)++] = digits[--n];
+    out[*used] = 0;
+}
+
+/* choices are shown as numbers on a slider; the description names them */
+static const wchar_t *choice_name(unsigned kind, unsigned index) {
+    switch (kind) {
+    case RIG_KIND_TRAFFIC: return rig_traffic_choice(game, index);
+    case RIG_KIND_DENSITY: return rig_density_choice(game, index);
+    }
+    return NULL;
+}
+
+static void describe(unsigned row) {
+    unsigned id = row_ids[row];
+    const RigSettingInfo *info = rig_setting_info(id);
+    char *out = row_descriptions[row];
+    size_t used = 0, capacity = sizeof(row_descriptions[row]);
+    out[0] = 0;
+    append(out, capacity, &used, rig_setting_description(game, id));
+    if (info && rig_kind_is_choice(info->kind)) {
+        append(out, capacity, &used, "\n");
+        for (int v = info->minimum; v <= info->maximum; ++v) {
+            const wchar_t *name = choice_name(info->kind, (unsigned)v);
+            if (!name) break;
+            append_number(out, capacity, &used, v);
+            append(out, capacity, &used, " = ");
+            append_wide(out, capacity, &used, name);
+            append(out, capacity, &used, v < info->maximum ? ", " : "");
+        }
+    }
+}
+
+static int needs_restart(unsigned id) {
+    return id == RIG_KEY_ENABLED || id == RIG_GRIP_STEERING || id == RIG_TRAFFIC_LEVEL ||
+           id == RIG_TRAFFIC_ALL_DAY || id == RIG_TRAFFIC_PRESET;
+}
+
+static int row_of(const char *key) {
+    for (unsigned i = 0; i < row_count; ++i)
+        if (text_equal_ignore_case(row_keys[i], key)) return (int)i;
+    return -1;
+}
+
+static void sync_rows(void);
+
+static void on_change(void *user, const char *key, int value) {
+    (void)user;
+    int row = row_of(key);
+    if (row < 0 || !started) return;
+    unsigned id = row_ids[row];
+    rig_setting_set(id, value);
+    if (id == RIG_GRIP_REPORT || id == RIG_TRAFFIC_PRESET) sync_rows();
+}
+
+static void on_slide(void *user, const char *key, float value) {
+    (void)user;
+    int row = row_of(key);
+    if (row < 0 || !started) return;
+    const RigSettingInfo *info = rig_setting_info(row_ids[row]);
+    float scale = info && info->kind == RIG_KIND_NUMBER && info->scale > 0 ? info->scale : 1.0f;
+    float units = value / scale;
+    int rounded = (int)(units < 0 ? units - 0.5f : units + 0.5f);
+    rig_setting_set(row_ids[row], rounded);
+    if (row_ids[row] == RIG_TRAFFIC_PRESET) sync_rows();
+}
+
+/* values known once the features have read their INI files */
+static void sync_rows(void) {
+    for (unsigned i = 0; i < row_count; ++i) {
+        unsigned id = row_ids[i];
+        const RigSettingInfo *info = rig_setting_info(id);
+        int value = rig_setting_get(id);
+        if (is_slider(id)) {
+            float scale = info->kind == RIG_KIND_NUMBER && info->scale > 0 ? info->scale : 1.0f;
+            api->set_slider(mod, row_keys[i], (float)value * scale);
+        } else {
+            api->set_setting(mod, row_keys[i], value ? 1 : 0);
+        }
+    }
+}
+
+static void add_rows(void) {
+    if (api->api_version < 5 || !api->add_setting) {
+        platform_log("platform older than 2.4.0: no settings rows, use the INI files");
+        return;
+    }
+    unsigned count = rig_setting_menu_count();
+    for (unsigned position = 0; position < count && row_count < MAX_ROWS; ++position) {
+        unsigned id = rig_setting_order(position);
+        const RigSettingInfo *info = rig_setting_info(id);
+        if (!info) continue;
+        unsigned row = row_count;
+        row_ids[row] = id;
+        row_keys[row][0] = 'G';
+        unsigned n = 1, v = id;
+        char digits[4];
+        unsigned d = 0;
+        do digits[d++] = (char)('0' + v % 10); while ((v /= 10) && d < sizeof(digits));
+        while (d) row_keys[row][n++] = digits[--d];
+        row_keys[row][n] = 0;
+        describe(row);
+        FH2Setting setting;
+        memory_copy(&setting, &(FH2Setting){0}, sizeof(setting));
+        setting.size = sizeof(setting);
+        setting.key = row_keys[row];
+        setting.label = rig_setting_heading(game, id);
+        setting.description = row_descriptions[row];
+        setting.needs_restart = needs_restart(id);
+        setting.on_change = on_change;
+        setting.on_slide = on_slide;
+        if (is_slider(id)) {
+            float scale = info->kind == RIG_KIND_NUMBER && info->scale > 0 ? info->scale : 1.0f;
+            setting.kind = FH2_SETTING_SLIDER;
+            setting.min = (float)info->minimum * scale;
+            setting.max = (float)info->maximum * scale;
+            if (setting.min > setting.max) {
+                float t = setting.min;
+                setting.min = setting.max;
+                setting.max = t;
+            }
+            setting.step = rig_kind_is_choice(info->kind) ? 1.0f
+                           : info->kind == RIG_KIND_PERCENT ? 5.0f
+                                                            : 0.0f;
+            setting.slider_value = (float)rig_setting_get(id) * scale;
+            setting.decimals = info->kind == RIG_KIND_NUMBER ? info->digits : 0;
+        } else {
+            setting.value = rig_setting_get(id) ? 1 : 0;
+        }
+        if (api->add_setting(mod, &setting)) ++row_count;
+    }
+}
+
+/* ------------------------------------------------------------------ Traffic page */
+
+/* Preset and amount as a list of names (MODS > Installed mods > Gripline > Traffic): A picks one.
+   The Mods page itself only knows On/Off rows and numbered sliders. */
+#define TRAFFIC_PAGE "Traffic"
+#define PAGE_ROWS (2 + RIG_DENSITY_COUNT + RIG_TRAFFIC_COUNT)
+static char page_labels[PAGE_ROWS][64];
+static char page_keys[PAGE_ROWS][8];
+
+static const char *const preset_help_en[RIG_DENSITY_COUNT] = {
+    "", "The game's own traffic.",
+    "As much traffic as the game spawns, at any time of day, coming from further away.",
+    "Nobody drives (offline).", "Drivatars instead of civilian traffic."};
+static const char *const preset_help_de[RIG_DENSITY_COUNT] = {
+    "", "Der Verkehr des Spiels.",
+    "So viel Verkehr, wie das Spiel erzeugt, zu jeder Uhrzeit und aus größerer Entfernung.",
+    "Offline fährt niemand.", "Drivatare statt normalem Verkehr."};
+
+static void build_traffic_page(void) {
+    if (!api || api->api_version < 8 || !api->set_page_rows) return;
+    int german = game && game_language_is_german(game);
+    static FH2PageRow rows[PAGE_ROWS];
+    unsigned n = 0;
+    int preset = rig_setting_get(RIG_TRAFFIC_PRESET), level = rig_setting_get(RIG_TRAFFIC_LEVEL);
+    const char *picked = german ? "Ausgewählt" : "Selected";
+    const char *restart = german ? "Wirkt nach einem Neustart von Azimuth." : "Applies after restarting Azimuth.";
+    memset(rows, 0, sizeof(rows));
+    rows[n].size = sizeof(FH2PageRow);
+    rows[n].label = german ? "Voreinstellung" : "Preset";
+    rows[n++].style = FH2_ROW_HEADING;
+    for (unsigned p = 1; p < RIG_DENSITY_COUNT; ++p, ++n) {
+        size_t used = 0;
+        page_labels[n][0] = 0;
+        append_wide(page_labels[n], sizeof(page_labels[n]), &used, rig_density_choice(game, p));
+        page_keys[n][0] = 'P';
+        page_keys[n][1] = (char)('0' + p);
+        page_keys[n][2] = 0;
+        rows[n].size = sizeof(FH2PageRow);
+        rows[n].key = page_keys[n];
+        rows[n].label = page_labels[n];
+        rows[n].value = preset == (int)p ? picked : NULL;
+        rows[n].description = german ? preset_help_de[p] : preset_help_en[p];
+        rows[n].footer = restart;
+    }
+    rows[n].size = sizeof(FH2PageRow);
+    rows[n].label = german ? "Menge (eigene Werte)" : "Amount (custom)";
+    rows[n++].style = FH2_ROW_HEADING;
+    for (unsigned v = 0; v < RIG_TRAFFIC_COUNT; ++v, ++n) {
+        size_t used = 0;
+        page_labels[n][0] = 0;
+        append_wide(page_labels[n], sizeof(page_labels[n]), &used, rig_traffic_choice(game, v));
+        page_keys[n][0] = 'A';
+        page_keys[n][1] = (char)('0' + v);
+        page_keys[n][2] = 0;
+        rows[n].size = sizeof(FH2PageRow);
+        rows[n].key = page_keys[n];
+        rows[n].label = page_labels[n];
+        rows[n].value = level == (int)v ? picked : NULL;
+        rows[n].description = rig_setting_description(game, RIG_TRAFFIC_LEVEL);
+        rows[n].footer = restart;
+    }
+    api->set_page_rows(mod, TRAFFIC_PAGE, rows, n);
+}
+
+static void on_page_open(void *user, const char *page_key) {
+    (void)user;
+    (void)page_key;
+    build_traffic_page();
+}
+
+static void on_page_select(void *user, const char *page_key, const char *row_key) {
+    (void)user;
+    (void)page_key;
+    if (!started || !row_key || !row_key[0] || row_key[1] < '0' || row_key[1] > '9') return;
+    unsigned value = (unsigned)(row_key[1] - '0');
+    if (row_key[0] == 'P' && value < RIG_DENSITY_COUNT) rig_setting_set(RIG_TRAFFIC_PRESET, (int)value);
+    if (row_key[0] == 'A' && value < RIG_TRAFFIC_COUNT) rig_setting_set(RIG_TRAFFIC_LEVEL, (int)value);
+    build_traffic_page();
+    sync_rows();
+}
+
+static void add_traffic_page(void) {
+    if (api->api_version < 8 || !api->add_page || !api->set_page_rows) {
+        platform_log("platform older than 2.7.0: traffic preset only in Gripline.ini");
+        return;
+    }
+    static FH2Page page;
+    page.size = sizeof(page);
+    page.key = TRAFFIC_PAGE;
+    page.title = "Gripline Traffic";
+    page.label = "Traffic: Preset and Amount";
+    page.description = "Original, Much More Traffic, No Traffic or Drivatars Only - by name. "
+                       "Press A on one. Applies after restarting Azimuth.";
+    page.on_open = on_page_open;
+    page.on_select = on_page_select;
+    if (!api->add_page(mod, &page)) platform_log("could not add the Traffic page");
+}
+
+/* ------------------------------------------------------------------ start */
+
+/* Azimuth 1.0.3 drives the wheel (launcher, data\azimuth.ini [launcher] wheel_rotation); the cockpit
+   wheel turns as far as that. 900 when no wheel is set there. */
+static int azimuth_rotation(void) {
+    static wchar_t path[PATH_CAPACITY];
+    if (!path_join(path, directory, L"data\\azimuth.ini")) return 900;
+    int rotation = (int)GetPrivateProfileIntW(L"launcher", L"wheel_rotation", 900, path);
+    return rotation >= 180 && rotation <= 2520 ? rotation : 900;
+}
+
+static void start_features(void) {
+    ModOptions options;
+    settings_defaults(&options);
+    log_reset();
+    int read = settings_read(directory, &options);
+    log_start(directory, &options);
+    log_set_directory(directory);
+    log_append("GRIPLINE: plugin build - FH2 Mod Platform mod next to the official Extra Options.\r\n");
+    if (!read) {
+        log_append("GRIPLINE: Gripline.ini could not be read; defaults are used.\r\n");
+        platform_log("Gripline.ini could not be read - defaults used (see Gripline.log)");
+    }
+    traffic_tunables_start(game, &options);
+    keyboard_pad_game_start(game, directory);
+    nitro_link_start(game);
+    cockpit_view_start(game);
+    gripline_set_output_root(media_dir);
+    traffic_files_start(mount_dir, options.traffic_level);
+    cockpit_start(game, mount_dir, options.steering_animation, azimuth_rotation(), 10 /* linear */);
+    notify_set_enabled(options.notifications);
+    mod_scan_start(directory);
+    report_init(directory);
+    rig_settings_gripline(options.notifications, options.steering_animation, options.cockpit_view_forward,
+                          options.cockpit_view_up);
+    rig_settings_start(directory);
+    /* the platform may have loaded Gripline after Azimuth set up gamepads and swap chain */
+    if (!keyboard_pad_late()) platform_log("keyboard: not active (off in FH2_Keyboard.ini, Mapper running, or no hook)");
+    if (!notify_install_late()) platform_log("cards: could not hook the game picture");
+    notify_show_deferred("Gripline V6 active\nKeyboard, cockpit view 2 (V), key list (F5)");
+    InterlockedExchange(&started, 1);
+    if (row_count) sync_rows();
+    /* Extra Options mounts mods\Gripline\media; the game's steering angle follows once the files are there */
+    if (cockpit_wait_ready()) cockpit_patch_game();
+    platform_log("Gripline features started");
+}
+
+static DWORD WINAPI start_thread(LPVOID unused) {
+    (void)unused;
+    game = api->api_version >= 3 && api->wait_for_code ? (unsigned char *)api->wait_for_code(120000)
+                              : (unsigned char *)api->wait_for_game(120000);
+    if (!game) {
+        platform_log("the game was not found within 2 minutes - Gripline stays off");
+        return 0;
+    }
+    start_features();
+    return 0;
+}
+
+FH2MOD_EXPORT int fh2mod_init(const FH2ModApi *platform) {
+    if (!platform || mod || !platform->register_mod || !platform->wait_for_game) return 1;
+    api = platform;
+    static FH2ModInfo info;
+    info.size = sizeof(info);
+    info.name = "Gripline";
+    info.version = GRIPLINE_VERSION;
+    info.github_repo = "Flenkii/Gripline";
+    info.platform_version = "2.7.4";
+    info.check_updates = 0;
+    info.description = "Keyboard driving, 1:1 cockpit wheel, cockpit view 2, more traffic and nitro keys for "
+                       "Forza Horizon 2. Runs next to Extra Options and Azimuth's wheel. Settings: Pause > Settings > MODS.";
+    mod = api->register_mod(&info);
+    if (!mod) return 1;
+    if (!find_folders()) {
+        platform_log("the platform did not name the Azimuth folder - Gripline stays off");
+        return 0;
+    }
+    if (!mount_dir[0]) platform_log("the platform did not find the game folder - steering animation and traffic files off");
+    if (path_join(media_dir, directory, L"mods\\Gripline\\media")) CreateDirectoryW(media_dir, NULL);
+    move_gripline_sections();
+    log_set_directory(directory);
+    unsigned char *host = (unsigned char *)GetModuleHandleW(NULL);
+    if (host) {
+        int keys = keyboard_pad_arm(host, directory); /* before Azimuth sets up its gamepads */
+        int cards = notify_install(host);             /* game picture cards */
+        platform_log(keys ? "early keyboard hook: yes" : "early keyboard hook: no");
+        platform_log(cards ? "early card hook: yes" : "early card hook: no");
+    }
+    add_rows();
+    add_traffic_page();
+    HANDLE thread = CreateThread(NULL, 0, start_thread, NULL, 0, NULL);
+    if (!thread) {
+        platform_log("could not start - no thread");
+        return 0;
+    }
+    CloseHandle(thread);
+    api->log(mod, "Gripline " GRIPLINE_VERSION " registered (plugin build, next to Extra Options)");
+    return 0;
+}
+
+BOOL WINAPI DllMain(HINSTANCE instance, DWORD reason, LPVOID reserved) {
+    (void)reserved;
+    if (reason == DLL_PROCESS_ATTACH) {
+        DisableThreadLibraryCalls(instance);
+    } else if (reason == DLL_PROCESS_DETACH) {
+        rig_settings_flush();
+    }
+    return TRUE;
+}

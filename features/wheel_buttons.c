@@ -14,10 +14,15 @@
 #include "wheel_buttons.h"
 #include "logging.h"
 #include "support.h"
-#include "video_options_text.h"
+#include "game_language.h"
 #include "nitro_link.h"
+#include "cockpit_view.h"
 
-void wheel_log_text(const char *text);
+static void wheel_log_text(const char *text) {
+    log_append("BUTTONS: ");
+    log_append(text);
+    log_append("\r\n");
+}
 
 #define RVA_RS_SITE 0x106c65bu
 #define RVA_RS_WHEEL 0x106c681u
@@ -65,22 +70,25 @@ static const signed char function_actions[WHEEL_FUNCTION_COUNT] = {
     [WHEEL_FUNCTION_SHIFT_UP] = ACTION_SHIFT_UP,
     [WHEEL_FUNCTION_SHIFT_DOWN] = ACTION_SHIFT_DOWN,
     [WHEEL_FUNCTION_NITRO] = -1,
+    [WHEEL_FUNCTION_COCKPIT_VIEW] = -1,
 };
 
 static const wchar_t *const names_german[WHEEL_FUNCTION_COUNT] = {
     L"Aus",          L"Kamera wechseln", L"Blick zurück", L"Blick links",     L"Blick rechts",
     L"Zurückspulen", L"Telemetrie",      L"Fotomodus",    L"Radio: zurück",   L"Radio: weiter",
-    L"Handbremse",   L"Kupplung",        L"Hochschalten", L"Runterschalten", L"Nitro (NitroSystem)"};
+    L"Handbremse",   L"Kupplung",        L"Hochschalten", L"Runterschalten", L"Nitro (NitroSystem)",
+    L"Cockpit-Ansicht 2"};
 static const wchar_t *const names_english[WHEEL_FUNCTION_COUNT] = {
     L"Off",    L"Change Camera", L"Look Back",     L"Look Left",      L"Look Right",
     L"Rewind", L"Telemetry",     L"Photo Mode",    L"Radio: Previous", L"Radio: Next",
-    L"Handbrake", L"Clutch",     L"Shift Up",      L"Shift Down",    L"Nitro (NitroSystem)"};
+    L"Handbrake", L"Clutch",     L"Shift Up",      L"Shift Down",    L"Nitro (NitroSystem)",
+    L"Cockpit View 2"};
 
 const wchar_t *wheel_function_name(unsigned char *game_image, unsigned function) {
     if (function >= WHEEL_FUNCTION_COUNT) {
         return L"";
     }
-    return video_options_text_is_german(game_image) ? names_german[function]
+    return game_language_is_german(game_image) ? names_german[function]
                                                      : names_english[function];
 }
 
@@ -140,7 +148,7 @@ static void log_table(uint64_t id) {
     static const char *const labels[WHEEL_FUNCTION_COUNT] = {
         "", "Kamera", "Blick zurueck", "Blick links", "Blick rechts", "Zurueckspulen", "Telemetrie",
         "Fotomodus", "Radio zurueck", "Radio weiter", "Handbremse", "Kupplung", "Hochschalten",
-        "Runterschalten", "Nitro"};
+        "Runterschalten", "Nitro", "Cockpit-Ansicht"};
     char line[700];
     size_t length = 0;
     char number[4] = {(char)('0' + (id % 100) / 10), (char)('0' + id % 10), 0, 0};
@@ -275,7 +283,10 @@ static uint64_t layout_hook(void *map, uint64_t id, uint64_t kind, void *options
 }
 
 /* called by the state stubs on the game's input thread (wheel path only) */
+static volatile LONG wheel_reads;
+
 static int rs_pressed(void) {
+    InterlockedIncrement(&wheel_reads);
     return extra_rs != 0;
 }
 
@@ -284,9 +295,18 @@ static float stick_y(void) {
     return value > 0 ? 1.0f : value < 0 ? -1.0f : 0.0f;
 }
 
+unsigned wheel_buttons_wheel_reads(void) {
+    return (unsigned)wheel_reads;
+}
+
+int wheel_buttons_action_input(unsigned action) {
+    return installed && action < ACTION_COUNT ? (int)action_input[action] : -1;
+}
+
 void wheel_buttons_update(unsigned held, unsigned char *byte0, unsigned char *byte1) {
     LONG rs = 0, ly = 0;
     nitro_link_set(NITRO_SOURCE_WHEEL, (held >> WHEEL_FUNCTION_NITRO) & 1);
+    cockpit_view_input(COCKPIT_VIEW_WHEEL, (held >> WHEEL_FUNCTION_COCKPIT_VIEW) & 1);
     for (unsigned f = 1; f < WHEEL_FUNCTION_NITRO; ++f) {
         if (!(held & (1u << f))) continue;
         int input = (int)action_input[function_actions[f]];
@@ -308,35 +328,6 @@ void wheel_buttons_update(unsigned held, unsigned char *byte0, unsigned char *by
 }
 
 /* ------------------------------------------------------------------ installation */
-
-static unsigned char *alloc_near(unsigned char *base, size_t size) {
-    SYSTEM_INFO info;
-    GetSystemInfo(&info);
-    uintptr_t step = info.dwAllocationGranularity ? info.dwAllocationGranularity : 0x10000;
-    uintptr_t start = (uintptr_t)base, end = start + GAME_IMAGE_SIZE;
-    const uintptr_t reach = 0x60000000; /* well inside +-2 GB of every patch site */
-    for (int direction = 0; direction < 2; ++direction) {
-        uintptr_t address = direction == 0 ? ((start - step) & ~(step - 1))
-                                           : ((end + step - 1) & ~(step - 1));
-        for (unsigned tries = 0; tries < 0x8000; ++tries) {
-            if (direction == 0 ? (address < 0x10000 || start - address > reach)
-                               : (address - end > reach)) {
-                break;
-            }
-            MEMORY_BASIC_INFORMATION region;
-            if (VirtualQuery((void *)address, &region, sizeof(region)) == sizeof(region) &&
-                region.State == MEM_FREE) {
-                void *memory = VirtualAlloc((void *)address, size, MEM_RESERVE | MEM_COMMIT,
-                                            PAGE_READWRITE);
-                if (memory) {
-                    return memory;
-                }
-            }
-            address = direction == 0 ? address - step : address + step;
-        }
-    }
-    return NULL;
-}
 
 static int rel32(const unsigned char *from_next, const unsigned char *to, int32_t *out) {
     int64_t delta = (int64_t)((intptr_t)to - (intptr_t)from_next);
@@ -425,7 +416,7 @@ int wheel_buttons_install(unsigned char *game_image) {
                        "andere Funktionen gehen trotzdem.");
         return 0;
     }
-    unsigned char *page = alloc_near(image, 0x1000);
+    unsigned char *page = memory_alloc_near(image, 0x1000);
     if (!page) {
         wheel_log_text("Zusatztasten: kein Speicher nahe am Spiel - Blicke nicht verfuegbar.");
         return 0;

@@ -1,4 +1,4 @@
-Gripline V5 – Keyboard bindings / Tastenbelegung
+Gripline V6 – Keyboard bindings / Tastenbelegung
 ========================================================================
 Default bindings. Change them in FH2_Keyboard.ini next to azimuth.exe (several keys with a
 comma, e.g. Throttle=W,Up; the key names are listed at the top of the file).
@@ -14,10 +14,11 @@ FAHREN / DRIVING
 
 KAMERA & BLICK / CAMERA & LOOK
   Pfeiltasten        Kamera bewegen (beim Fahren) Arrow keys: camera (while driving)
-  Tab                Kamera wechseln              Change camera
+  Tab                Kamera wechseln (+Cockpit 2) Change camera (incl. cockpit 2)
   C oder Num2        Blick zurück                 Look back
   Num4 / Num6        Blick links / rechts         Look left / right
   N                  Nitro (nur mit NitroSystem)  Nitro (only with NitroSystem)
+  V                  Cockpit-Ansicht 2 ein/aus    Cockpit view 2 on/off
 
 FUNKTIONEN / FUNCTIONS
   R                  Zurückspulen                 Rewind
@@ -27,6 +28,9 @@ FUNKTIONEN / FUNCTIONS
   M                  Karte                        Map
   Minus / Plus       Radio zurück / weiter        Radio previous / next
 
+GRIPLINE
+  F5                 Tastenliste ein/aus          Key list on/off
+
 MENÜS / MENUS
   Pfeiltasten        Blättern                     Arrow keys: navigate
   Enter              Bestätigen (A)               Confirm (A)
@@ -35,5 +39,4 @@ MENÜS / MENUS
   X / Y              Tasten X / Y                 Buttons X / Y
   Bild↑ / Bild↓      Reiter links / rechts        Page Up / Down: tabs left / right (LB / RB)
 
-Hinweis: Ist ein Lenkrad angeschlossen, fährt das Spiel mit dem Lenkrad.
-Note: while a wheel is connected, the game drives with the wheel.
+Lenkrad: im Azimuth-Launcher einrichten. / Wheel: set it up in the Azimuth launcher.

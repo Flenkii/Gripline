@@ -19,18 +19,30 @@ typedef struct {
     unsigned rva;
     unsigned vtable;
     float original;               /* default stored at +0x14 */
-    float levels[6];              /* TrafficLevel 0..5 */
+    float levels[8];              /* TrafficLevel 0..5, 6 = no traffic, 7 = Drivatars only */
     int raise_max;
     const char *name;
 } Tunable;
 
+/* Names and defaults read from the game (AI/Spawning/..., AI/Traffic/Density/...). The density caps alone
+   were not enough: the spawner only adds one car every 1-30 s (SpawnTrafficControl) and now and then a
+   whole group at once (the convoys), so with a high cap the roads still filled slowly and unevenly. */
 static const Tunable tunables[] = {
-    {0x36e8f18, VT_FLOAT, 14.0f, {14, 24, 36, 48, 64, 100}, 1, "Spawning/MaxTraffic"},
-    {0x36e6e88, VT_FLOAT, 16.0f, {16, 24, 36, 48, 64, 100}, 1, "Traffic/MaxTraffic"},
-    {0x36e8d10, VT_FLOAT, 10.0f, {10, 14, 20, 26, 32, 50}, 1, "Spawning/MaxFestival"},
-    {0x36e6dd0, VT_FLOAT, 7.0f, {7, 10, 14, 18, 24, 40}, 1, "Traffic/MaxFestival"},
-    {0x34c80f8, VT_FLOAT, 8.0f, {8, 7, 6, 5, 4, 3}, 0, "MinDistanceFromOtherCars"},
-    {0x34c8578, VT_INT, 5.0f, {5, 8, 12, 16, 20, 30}, 1, "InitialSpawnMaxCars"},
+    {0x36e8f18, VT_FLOAT, 14.0f, {14, 30, 45, 70, 100, 200, 14, 14}, 1, "Spawning/MaxTraffic"},
+    {0x36e6e88, VT_FLOAT, 16.0f, {16, 30, 45, 70, 100, 200, 16, 16}, 1, "Traffic/MaxTraffic"},
+    {0x36e8d10, VT_FLOAT, 10.0f, {10, 16, 22, 30, 40, 80, 10, 80}, 1, "Spawning/MaxFestival"},
+    {0x36e6dd0, VT_FLOAT, 7.0f, {7, 12, 18, 24, 32, 60, 7, 80}, 1, "Traffic/MaxFestival"},
+    {0x34c80f8, VT_FLOAT, 8.0f, {8, 8, 8, 8, 7, 5, 8, 10}, 1, "MinDistanceFromOtherCars"},
+    {0x34c8578, VT_INT, 5.0f, {5, 10, 14, 20, 30, 60, 5, 10}, 1, "InitialSpawnMaxCars"},
+    /* spawn rhythm: seconds between new cars (the game: 1 / 10 / 30 s, at least 0.5 s) */
+    {0x34c8080, VT_FLOAT, 1.0f, {1, 0.6f, 0.4f, 0.3f, 0.2f, 0.05f, 1, 0.4f}, 0, "SpawnTrafficControl/IntervalMin"},
+    {0x34c8428, VT_FLOAT, 10.0f, {10, 6, 4, 2, 1.5f, 0.5f, 10, 3}, 0, "SpawnTrafficControl/IntervalMed"},
+    {0x34c85a0, VT_FLOAT, 30.0f, {30, 15, 10, 5, 3, 1, 30, 8}, 0, "SpawnTrafficControl/IntervalMax"},
+    {0x34c7e68, VT_FLOAT, 0.5f, {0.5f, 0.4f, 0.3f, 0.25f, 0.15f, 0.05f, 0.5f, 0.3f}, 0, "SpawnTrafficControl/MinIntervalTime"},
+    {0x34c0b30, VT_FLOAT, 10.0f, {10, 6, 4, 2, 1.5f, 0.5f, 10, 3}, 0, "CivTrafficSpawnDelay"},
+    /* whole groups at once = the convoys with empty road in between */
+    {0x34c7ff8, VT_FLOAT, 0.1f, {0.1f, 0.1f, 0.08f, 0.06f, 0.05f, 0.05f, 0.1f, 0.05f}, 0, "SpawnTrafficControl/GroupSpawnProbability"},
+    {0x34c8120, VT_FLOAT, 0.25f, {0.25f, 0.25f, 0.2f, 0.15f, 0.1f, 0.05f, 0.25f, 0.05f}, 0, "FestivalGroupSpawns/Probability"},
 };
 
 /* Time-of-day density curve: 0.5..23.5 h. "Rush hour all day" keeps max density. */
@@ -153,7 +165,11 @@ static DWORD WINAPI traffic_thread(LPVOID unused) {
         unsigned total = ARRAY_COUNT(tunables) + (all_day ? ARRAY_COUNT(times) : 0);
         int done = apply_once(level, all_day);
         if (!logged && done >= (int)total) {
-            if (level > 0) {
+            if (level == 6) {
+                log_append("TRAFFIC: no traffic (density 0 in the traffic files).\r\n");
+            } else if (level == 7) {
+                log_append("TRAFFIC: Drivatars only (no civilian traffic, more Drivatars).\r\n");
+            } else if (level > 0) {
                 log_append_value("TRAFFIC: density caps raised in memory, TrafficLevel=", level);
             } else {
                 log_append("TRAFFIC: original density caps (TrafficLevel=0).\r\n");
@@ -184,7 +200,7 @@ void traffic_set_setting(unsigned id, int value) {
     if (!loaded) {
         return;
     }
-    if (id == RIG_TRAFFIC_LEVEL && value >= 0 && value <= 5) {
+    if (id == RIG_TRAFFIC_LEVEL && value >= 0 && value <= 7) {
         InterlockedExchange(&want_level, value);
     } else if (id == RIG_TRAFFIC_ALL_DAY && (value == 0 || value == 1)) {
         InterlockedExchange(&want_all_day, value);
@@ -199,7 +215,7 @@ void traffic_tunables_start(unsigned char *game_image, const ModOptions *options
         return;
     }
     image = game_image;
-    want_level = options->traffic_level >= 0 && options->traffic_level <= 5 ? options->traffic_level : 0;
+    want_level = options->traffic_level >= 0 && options->traffic_level <= 7 ? options->traffic_level : 0;
     want_all_day = options->traffic_all_day != 0;
     loaded = 1;
     /* The watcher also runs at TrafficLevel=0, so the in-game menu can raise it later;

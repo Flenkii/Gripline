@@ -1,5 +1,5 @@
-"""Build the native mod with Zig 0.15.2, including cross-compilation on Linux.
-Usage: python build.py /path/to/zig [--azimuth] [--test] [--output PATH]
+"""Build Gripline (fh2-mods/Gripline.dll, an FH2 Mod Platform mod) with Zig 0.15.2, also on Linux.
+Usage: python build.py /path/to/zig [--test] [--output FOLDER]
 """
 
 import argparse
@@ -12,62 +12,27 @@ import subprocess
 import re
 import struct
 import time
-from generate_data import generate
 
 SOURCE = Path(__file__).resolve().parent
-COMMON_SOURCES = [
-    "dllmain.c",
-    "runtime.c",
-    "settings.c",
+PLUGIN_SOURCES = [
     "support.c",
     "logging.c",
-    "patch_engine.c",
-    "verification.c",
+    "settings.c",
     "sha256.c",
-    "patches_generated.c",
-    "features/garage.c",
-    "features/road_placement.c",
-    "features/gamerpic.c",
-    "features/treasure_map.c",
-    "features/minimap.c",
-    "features/rims.c",
-    "features/return_garage.c",
-    "features/stock_wheels.c",
-    "features/wheel_variants.c",
-    "features/drift_camera.c",
-    "features/video_settings.c",
-    "features/camera_fov.c",
-    "features/video_options.c",
-    "features/video_options_text.c",
-    "features/video_options_xaml.c",
-    "features/photo_sampling.c",
-    "features/sun_shadows.c",
-    "features/livery.c",
-    "features/media_overrides.c",
-    "features/vehicle_controls.c",
-    "features/blinkers.c",
-    "features/aero_tuning.c",
-    "features/roof_fade.c",
-    "features/autodrive.c",
-    "features/game_input.c",
-    "features/autodrive_game.c",
-    "features/autodrive_notice.c",
-    "features/autodrive_ui.c",
-    "features/png_validation.c",
-    "features/png_decode.c",
+    "plugin/gripline_plugin.c",
+    "features/game_language.c",
     "features/traffic_tunables.c",
-    "features/wheel_bridge.c",
-    "features/wheel_soft.c",
+    "features/traffic_files.c",
     "features/ini_edit.c",
     "features/ini_migrate.c",
     "features/rig_settings.c",
     "features/wheel_buttons.c",
-    "features/weather.c",
-    "features/ffb_vm.c",
     "features/keyboard_pad.c",
+    "features/mod_scan.c",
+    "features/report.c",
+    "features/cockpit_view.c",
     "features/nitro_link.c",
     "features/notify.c",
-    "features/platform_link.c",
     "features/cockpit.c",
 ]
 
@@ -76,7 +41,7 @@ def parse_arguments():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("zig", type=Path)
     parser.add_argument("--test", action="store_true")
-    parser.add_argument("--azimuth", action="store_true", help="Build the Azimuth winmm proxy")
+    parser.add_argument("--plugin", action="store_true", help="Accepted for old scripts; always on")
     parser.add_argument("--output", type=Path)
     parser.add_argument("--build-dir", type=Path)
     parser.add_argument("--jobs", type=int, default=min(8, os.cpu_count() or 1))
@@ -112,14 +77,13 @@ def compiler_arguments(compiler, options):
     ]
     if options.test:
         arguments.append("-DFH2_TWEAKS_TEST=1")
-    if options.azimuth:
-        arguments.append("-DFH2_AZIMUTH=1")
+    arguments.append("-DFH2_AZIMUTH=1")
+    arguments.append("-DFH2_GRIPLINE_PLUGIN=1")
     return arguments
 
 
 def version_resource(filename):
-    version = re.search(r'#define MOD_VERSION "([\d.]+)"',
-                        (SOURCE / "extra_options.h").read_text()).group(1)
+    version = "6.0.0"
     numbers = [int(part) for part in version.split(".")]
     numbers += [0] * (4 - len(numbers))
 
@@ -136,10 +100,11 @@ def version_resource(filename):
             data = padded(data) + children
         return struct.pack("<H", len(data)) + data[2:]
 
-    strings = {"FileDescription": "Forza Horizon 2 Extra Options",
-               "FileVersion": version, "InternalName": "FH2_ExtraOptions",
-               "OriginalFilename": filename, "ProductName": "Forza Horizon 2 Extra Options",
-               "ProductVersion": version, "LegalCopyright": "Arthur (RokkuDayo)"}
+    strings = {"FileDescription": "Gripline V6 - FH2 Mod Platform mod",
+               "FileVersion": version, "InternalName": "Gripline",
+               "OriginalFilename": filename, "ProductName": "Gripline",
+               "ProductVersion": "V6",
+               "LegalCopyright": "Flenkii, GPL-3.0; based on Extra Options by Arthur (RokkuDayo)"}
     entries = b"".join(padded(block(key, wide(value), text=True)) for key, value in strings.items())
     string_info = block("StringFileInfo", children=block("040904b0", children=entries))
     variable_info = block("VarFileInfo", children=block("Translation", struct.pack("<HH", 0x409, 1200)))
@@ -187,110 +152,48 @@ def cached_command(command, inputs, target, compiler, rebuild):
     return True
 
 
-def build_platform_mod(compiler, output, directory, arguments, import_library, options):
-    """fh2-mods\\Gripline.dll: hands the FH2 Mod Platform's API to Gripline's winmm.dll."""
-    source = SOURCE / "platform/gripline_mod.c"
-    object_file = directory / "gripline_mod.obj"
-    cached_command([*arguments, str(source), "-o", str(object_file)],
-                   project_dependencies(source), object_file, compiler, options.rebuild)
-    subprocess.run([str(compiler), "lld-link", "/dll", "/entry:DllMain", "/machine:x64",
-                    "/nodefaultlib", "/dynamicbase", "/nxcompat", "/Brepro",
-                    "/out:" + str(output), "/implib:" + str(directory / "gripline_mod.lib"),
-                    str(object_file), str(import_library)], check=True)
-
-
-def build(compiler, output, directory, options):
+def build_plugin(compiler, output, directory, options):
+    """output = the folder that gets fh2-mods/Gripline.dll"""
     started = time.monotonic()
     directory.mkdir(parents=True, exist_ok=True)
-    output.parent.mkdir(parents=True, exist_ok=True)
-    objects = []
-    sources = [*COMMON_SOURCES]
-    sources.extend(
-        [
-            "adapters/azimuth.c",
-            "adapters/winmm.c",
-            "adapters/winmm_exports.s",
-            "adapters/azimuth_host.c",
-            "adapters/azimuth_save.c",
-            "adapters/azimuth_markers.c",
-            "adapters/azimuth_guard.c",
-        ]
-        if options.azimuth
-        else ["adapters/mezcal.c"]
-    )
     arguments = compiler_arguments(compiler, options)
+
     def compile_source(filename):
         object_file = directory / (Path(filename).stem + ".obj")
-        command = ([str(compiler), "clang", "-target", "x86_64-w64-windows-gnu", "-c"]
-                   if filename.endswith(".s") else arguments)
-        command = [*command, str(SOURCE / filename), "-o", str(object_file)]
+        command = [*arguments, str(SOURCE / filename), "-o", str(object_file)]
         compiled = cached_command(command, project_dependencies(SOURCE / filename), object_file,
                                   compiler, options.rebuild)
         return str(object_file), compiled
 
     with ThreadPoolExecutor(max_workers=options.jobs) as workers:
-        results = list(workers.map(compile_source, sources))
-    objects = [path for path, _ in results]
+        results = list(workers.map(compile_source, PLUGIN_SOURCES))
     import_library = directory / "kernel32.lib"
-    cached_command(
-        [
-            str(compiler),
-            "dlltool",
-            "-m",
-            "i386:x86-64",
-            "-d",
-            str(SOURCE / "kernel32.def"),
-            "-l",
-            str(import_library),
-        ],
-        [SOURCE / "kernel32.def"], import_library, compiler, options.rebuild,
-    )
+    cached_command([str(compiler), "dlltool", "-m", "i386:x86-64", "-d", str(SOURCE / "kernel32.def"),
+                    "-l", str(import_library)], [SOURCE / "kernel32.def"], import_library, compiler,
+                   options.rebuild)
     exception_library = directory / "ntdll.lib"
-    cached_command([str(compiler), "dlltool", "-m", "i386:x86-64", "-d",
-                    str(SOURCE / "ntdll.def"), "-l", str(exception_library)],
-                   [SOURCE / "ntdll.def"], exception_library, compiler, options.rebuild)
+    cached_command([str(compiler), "dlltool", "-m", "i386:x86-64", "-d", str(SOURCE / "ntdll.def"),
+                    "-l", str(exception_library)], [SOURCE / "ntdll.def"], exception_library, compiler,
+                   options.rebuild)
+    mods = output / "fh2-mods"
+    mods.mkdir(parents=True, exist_ok=True)
     resource = directory / "version.res"
-    resource.write_bytes(version_resource("winmm.dll" if options.azimuth else "xg.dll"))
-    link_arguments = [
-        str(compiler),
-        "lld-link",
-        "/dll",
-        "/entry:DllMain",
-        "/machine:x64",
-        "/nodefaultlib",
-        "/dynamicbase",
-        "/nxcompat",
-        "/Brepro",
-        "/out:" + str(output),
-        "/implib:" + str(directory / "extra_options.lib"),
-        *objects,
-        str(import_library),
-        str(exception_library),
-        str(resource),
-    ]
-    if options.azimuth:
-        link_arguments.append("/def:" + str(SOURCE / "adapters/winmm_exports.def"))
-    subprocess.run(link_arguments, check=True)
-    if options.azimuth:
-        build_platform_mod(compiler, output.parent / "Gripline.dll", directory, arguments,
-                           import_library, options)
-    print(f"Compiled {sum(compiled for _, compiled in results)}/{len(sources)} objects; "
+    resource.write_bytes(version_resource("Gripline.dll"))
+    link = [str(compiler), "lld-link", "/dll", "/entry:DllMain", "/machine:x64", "/nodefaultlib",
+            "/dynamicbase", "/nxcompat", "/Brepro"]
+    subprocess.run([*link, "/out:" + str(mods / "Gripline.dll"), "/implib:" + str(directory / "gripline.lib"),
+                    *[path for path, _ in results], str(import_library), str(exception_library),
+                    str(resource)], check=True)
+    print(f"Compiled {sum(compiled for _, compiled in results)}/{len(PLUGIN_SOURCES)} objects; "
           f"{time.monotonic() - started:.1f}s", flush=True)
 
 
 def main():
     options = parse_arguments()
-    generate()
     compiler = options.zig.resolve()
-    filename = (
-        "fh2-extra-options-test.dll"
-        if options.test
-        else "winmm.dll" if options.azimuth else "xg.dll"
-    )
-    output = (options.output or SOURCE.parent / filename).resolve()
-    variant = ("azimuth" if options.azimuth else "mezcal") + ("-test" if options.test else "")
-    directory = options.build_dir or SOURCE.parent / ".build" / variant
-    build(compiler, output, directory.resolve(), options)
+    output = (options.output or SOURCE.parent / "gripline-plugin").resolve()
+    directory = options.build_dir or SOURCE.parent / ".build" / ("plugin-test" if options.test else "plugin")
+    build_plugin(compiler, output, directory.resolve(), options)
     print(output)
 
 

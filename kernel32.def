@@ -19,6 +19,7 @@ EXPORTS
     GetCurrentThreadId
     GetCurrentProcessId
     GetFullPathNameW
+    GetPrivateProfileIntW
     GetPrivateProfileStringW
     ExitProcess
     GetProcessHeap
@@ -38,7 +39,10 @@ EXPORTS
     GetTickCount64
     MultiByteToWideChar
     lstrcmpiW
+    OpenEventW
     lstrcpyW
+    lstrlenW
+    lstrcpynW
     DisableThreadLibraryCalls
     InitOnceExecuteOnce
     GetSystemDirectoryW

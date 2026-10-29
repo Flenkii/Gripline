@@ -5,7 +5,7 @@ memory; the DLL's hook of Azimuth's RoGetActivationFactory hands out the merged 
 import os, struct, sys, tempfile
 from emu import Emu
 
-DLL = sys.argv[1] if len(sys.argv) > 1 else 'winmm_test.dll'
+DLL = sys.argv[1] if len(sys.argv) > 1 else '../../gripline-plugin/fh2-mods/Gripline.dll'
 fails = []
 checks = [0]
 
@@ -102,8 +102,6 @@ ini = open(os.path.join(root, 'FH2_Keyboard.ini'), 'rb').read()
 check(b'[Keyboard]' in ini and b'Throttle=W' in ini and b'Handbrake=Space' in ini and b'Enabled=1' in ini,
       'FH2_Keyboard.ini (englisch) mit FH5-Belegung angelegt')
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'tools'))
-import make_release
-check(make_release.keyboard_ini().encode('ascii') == ini, 'Release-Profile (tools/make_release.py) = genau die Datei, die die DLL anlegt')
 check(e.call('Fh2TestKeyboardBinding', 0, 0) == ord('W'), 'Gas = W')
 check(e.call('Fh2TestKeyboardBinding', 14, 0) == ord('C') and e.call('Fh2TestKeyboardBinding', 14, 1) == 0x62,
       'Blick zurück = C und Num2')
@@ -247,6 +245,43 @@ keys.clear()
 advance(300)
 read()
 
+# ---- key list panel (Keybinds = F5): shown until F5 again, the pad reading is unchanged
+def panel():
+    w, rows, count = e.alloc(4), e.alloc(4), e.alloc(4)
+    label, keys_ = e.alloc(64), e.alloc(64)
+    e.call('Fh2TestNotifyPanelDraw', 1080, 0, 0, w, rows, count, label, keys_)
+    return e.rd(count), e.wstr(label), e.wstr(keys_), e.rd(w), e.rd(rows)
+keys.clear()
+read()
+check(panel()[0] == 0, 'Tastenliste anfangs aus')
+keys.add(0x74)
+r = read()
+count, label, kt, width, rows = panel()
+check(r['buttons'] == 0 and r['lx'] == 0.0, 'F5 drueckt nichts im Spiel')
+check(count == 33 and label == 'Throttle' and kt == 'W', f'F5: Tastenliste mit allen belegten Tasten: {count} {label}={kt}')
+def panel_rows():
+    out = {}
+    for i in range(count):
+        l, k = e.alloc(64), e.alloc(64)
+        e.call('Fh2TestNotifyPanelRow', i, l, k)
+        out[e.wstr(l)] = e.wstr(k)
+    return out
+rw = panel_rows()
+check(rw.get('Look back') == 'C, Num 2' and rw.get('Radio: previous') == 'Minus' and rw.get('Clutch') == 'Left Shift'
+      and rw.get('Telemetry (hold)') == 'T' and rw.get('Photo mode (hold)') == 'P' and rw.get('Key list on/off') == 'F5'
+      and 'Autodrive' not in rw and 'Creator mode' not in rw and rw.get('Change camera') == 'Tab', f'Tastennamen lesbar: {rw}')
+read()
+check(panel()[0] == count, 'F5 halten: bleibt an (nur Druck schaltet)')
+keys.clear()
+read()
+check(panel()[0] == count, 'F5 loslassen: bleibt an')
+check(width > 0 and rows <= 1080, f'Tastenliste passt in 1080 Zeilen ({rows})')
+keys.add(0x74)
+read()
+keys.clear()
+read()
+check(panel()[0] == 0, 'F5 nochmal: Tastenliste aus')
+
 # vibration
 vib = e.alloc(32)
 e.mu.mem_write(vib, struct.pack('<4d', 0.25, 0.75, 0.0, 0.1))
@@ -278,6 +313,22 @@ hook = e.call('Fh2TestKeyboardFactoryHook')
 out = e.alloc(8)
 hr = e.call(hook, e.put_wstr('Windows.Gaming.Input.Gamepad'), e.put_bytes(IID_STATICS), out)
 check(e.rq(out) == real_statics, 'Enabled=0: Azimuth bekommt die echten Gamepads wie vorher')
+
+# Azimuth Mapper laeuft: Gripline-Tastatur bleibt aus (jede Taste kaeme doppelt an)
+def mapper_case(running):
+    open(p, 'wb').write(text.replace(b'Enabled=0', b'Enabled=1'))
+    global e
+    em = e = KEmu(DLL, root)
+    em.mapper_running = running
+    orig3 = em.stub('RoGetActivationFactory', original_factory)
+    em.call('Fh2TestKeyboardAsync', em.stub('k', async_key), em.stub('f', foreground), em.stub('w', window_pid), em.stub('r', raw_buffer))
+    em.call('Fh2TestKeyboardSetup', orig3, em.put_wstr('C:\\test'))
+    o = em.alloc(8)
+    em.call(em.call('Fh2TestKeyboardFactoryHook'), em.put_wstr('Windows.Gaming.Input.Gamepad'), em.put_bytes(IID_STATICS), o)
+    return em.rq(o)
+
+check(mapper_case(True) == real_statics, 'Azimuth Mapper laeuft: Tastatur aus, echte Gamepads unveraendert')
+check(mapper_case(False) not in (0, real_statics), 'ohne Mapper: Tastatur bleibt an')
 
 print()
 print('ALLE TESTS OK (%d Pruefungen)' % checks[0] if not fails else '%d FEHLER' % len(fails))

@@ -1,6 +1,6 @@
 #ifndef FH2_SUPPORT_H
 #define FH2_SUPPORT_H
-#include "extra_options.h"
+#include "gripline.h"
 void memory_copy(void *destination, const void *source, size_t size);
 int memory_equal(const void *left, const void *right, size_t size);
 size_t text_length(const char *text);
@@ -14,5 +14,6 @@ int memory_is_writable(const void *address, size_t size);
 void status_set(const char *message);
 void status_append(const char *message);
 const char *status_get(void);
+unsigned char *memory_alloc_near(unsigned char *base, size_t size);
 int path_join(wchar_t output[PATH_CAPACITY], const wchar_t *directory, const wchar_t *name);
 #endif

@@ -1,57 +1,76 @@
 # Gripline
 
-**Wheel, keyboard, traffic & weather for Forza Horizon 2 on PC** (Xbox One version running on the **Azimuth** wrapper).
+**Keyboard driving, cockpit and traffic for Forza Horizon 2 on PC** (Xbox One version on the **Azimuth** wrapper).
 Works offline and online with [FH2MP](https://github.com/Charelene/FH2MP).
 
-**[⬇ Download the latest version](../../releases/latest)** · current version: **V5**
+**[⬇ Download the latest version](../../releases/latest)** · current version: **V6**
 
-Gripline is built on [Extra Options 0.2.98](https://github.com/RokkuDayo/ForzaHorizon2_ExtraOptions) by RokkuDayo (GPL-3.0):
-all features of Extra Options are included unchanged – see [README_ORIGINAL.md](README_ORIGINAL.md). Gripline adds:
+Gripline is an add-on next to Azimuth, the official [Extra Options](https://github.com/RokkuDayo/ForzaHorizon2_ExtraOptions)
+by RokkuDayo and FH2MP. It is one file, `fh2-mods\Gripline.dll`, a [FH2 Mod Platform](https://github.com/Trinculo54/fh2-mod-platform)
+mod. Since V6 Gripline only does what the others don't:
 
-| Feature | In short |
+| Gripline | In short |
 |---|---|
-| **Wheel bridge (Logitech G920)** | The wheel is reported to the game as an Xbox wheel: steering, pedals, clutch, paddles, buttons. Optional: clutch pedal as brake. Also works on game copies without `Microsoft.Xbox.Input.Wheel.dll` (the mod brings its own version). |
-| **Force feedback** | The **game's own wheel force feedback** – FH2's original Xbox wheel programs run on the PC, exactly like on the Xbox. No custom FFB profiles; only strength and rumble can be scaled. |
-| **Keyboard** | Drive with WASD, arrow keys move the camera while driving and scroll in menus, Enter/Backspace/Esc in menus, FH5-like bindings. Works together with a controller (one merged pad, no "player 2" problems). Bindings in `FH2_Keyboard.ini`. While a wheel is connected, the game drives with the wheel. |
-| **Free wheel buttons** | RSB, LSB and the Xbox button can be assigned (look back/left/right, camera, handbrake, radio, shifting …). |
-| **GRIPLINE tile** *(V5)* | With the [FH2 Mod Platform](https://github.com/Trinculo54/fh2-mod-platform) (comes with FH2MP) all Gripline settings are on their own blue **GRIPLINE** tile in the pause menu (`fh2-mods\Gripline.dll`). Without the platform they stay at Options › HUD › bottom. |
-| **Notifications** *(V5)* | Small Gripline cards with the logo at the top right of the game picture – drawn into the game's own image, so they also show in fullscreen. Can be switched off. |
-| **Nitro on keyboard & wheel** *(V5)* | For the mod [NitroSystem](https://github.com/qiangqiang101/NitroSystem) by qiangqiang101: `N` on the keyboard or a free wheel button (function 14) presses its nitro button. Switched off automatically in online sessions. NitroSystem itself is not included. |
-| **Full steering animation** *(V5, experimental, off by default)* | Cockpit: hands hidden, the steering wheel turns up to your wheel's rotation. **Known issue:** the in-game wheel can turn faster than your real wheel (the game drives it with its own steering value) – a fix is planned. Built in (no script any more); the files are made once into `Mount\gripline_cockpit`, game files stay untouched. Applies after a restart. |
-| **fh2wheels compatibility** *(V5, untested)* | [fh2wheels](https://github.com/conner-mcvay/fh2-mods) by conner-mcvay (rims, tire widths, ride height, camber) should install and run next to Gripline (checked in the code, not tested in game yet). |
-| **In-game settings page** | Options › HUD › bottom (or the GRIPLINE tile). All values are saved instantly. Wheel values apply instantly (except "Use Wheel In Game", which needs a restart), weather applies after closing the menu, traffic only after restarting Azimuth (see Known issues). |
-| **More traffic** | Traffic limits up to 100 cars, rush hour all day, presets Original/Calm/Busy/Rush Hour/Chaos. |
-| **Fixed weather** | Sunny, Cloudy, Storm Clouds, Rain or Fog (fog only on Storm Island, sunny elsewhere) – through the game's own weather control, no game files changed. |
-| **Tools** (`tools/`) | Python scripts (the V1 cockpit-wheel script, now built in), More Traffic files and "traffic variety" (20 extra traffic car models). Not part of the release download. |
+| **Keyboard** | Drive with WASD, arrow keys move the camera while driving and scroll in menus, Enter/Backspace/Esc in menus. Works together with a controller (one merged pad). Bindings in `FH2_Keyboard.ini`. |
+| **Steering animation** *(off by default)* | Cockpit: hands hidden, the in-game steering wheel turns 1:1 with your real wheel, as far as the rotation set in the Azimuth launcher. Files are made once into `mods\Gripline\media`, game files stay untouched. Applies after a restart. |
+| **Cockpit view 2** | A second interior camera like in FH5: Tab goes cockpit → cockpit 2 → next camera (also **V**). Distance: *Cockpit View 2: Forward / Up*. |
+| **More traffic** | Presets Original / Much More Traffic (as much as the game spawns, all day) / No Traffic / Drivatars Only, or an amount from 30 to 200 cars, picked by name on the *Traffic* page (MODS › Installed mods › Gripline). Gripline raises the game's own traffic data (copies, game files unchanged). Applies after a restart; offline only. |
+| **Nitro key** | For [NitroSystem](https://github.com/qiangqiang101/NitroSystem) by qiangqiang101: **N** presses its nitro button. Off in online sessions. |
+| **Key list** | **F5** shows all your key bindings at the right of the picture; F5 again hides it. |
+| **Cards** | Small Gripline cards at the top right of the picture (also in fullscreen). Can be switched off. |
+| **Azimuth Mapper check** | While Azimuth Mapper (by bigdamnhero6) runs, Gripline's keyboard stays off and a card says so. |
+| **Problem report** | *Gripline: Create Problem Report* packs logs and settings into `Gripline_Report.zip` next to `azimuth.exe`. Nothing is sent anywhere. |
 
-> 🚨 **Security:** See the original author's warning in [README_ORIGINAL.md](README_ORIGINAL.md): scammers spread
-> keyloggers using this mod's name. **This fork never asks you to paste commands into PowerShell or to run an
-> "All-in-One" installer.** The mod is only `winmm.dll` plus INI files. Only download from this repository's
-> releases or build it yourself from source.
+Settings: Pause › Settings › **MODS** (rows starting with *Keyboard*, *Traffic*, *Cockpit* and *Gripline*), saved to
+`Gripline.ini` and `FH2_Keyboard.ini`.
 
-> ⚠️ **Unofficial.** Neither the Extra Options author nor the Azimuth developer supports this fork.
-> Please do **not** report issues with this fork to them – report them here instead, see
-> [Reporting problems](#reporting-problems). Report Azimuth bugs to its developer only without mods.
+**Not in Gripline any more (V6) – the others do it:**
+
+| What | Where now |
+|---|---|
+| Wheel, pedals, buttons, rotation, force feedback | Azimuth 1.0.3 launcher (wheel settings) |
+| Weather, time of day | Extra Options (Weather Control) |
+| Hide the HUD | Extra Options, **F1** |
+| Autodrive | Extra Options, **F2** |
+| List of installed mods | the platform's MODS tab |
+
+> 🚨 **Security:** scammers spread keyloggers using the names of FH2 mods. **Gripline never asks you to paste commands into
+> PowerShell or to run an "All-in-One" installer.** It is only `Gripline.dll`. Download it only from this repository's
+> releases or build it yourself.
+
+> ⚠️ **Unofficial.** Neither the Extra Options author, the FH2MP team nor the Azimuth developer supports Gripline.
+> Report problems here ([Reporting problems](#reporting-problems)).
 
 ## Compatibility
-Tested only with this combination – other versions may not work:
+Built for what FH2MP 1.1.2 installs (October 2026):
 
 | Part | Version |
 |---|---|
-| Azimuth | **0.9.10** |
-| Extra Options (base) | **0.2.98** |
+| Azimuth | **1.0.3** |
+| Extra Options (official, `winmm.dll`) | **0.3.9** |
+| FH2 Mod Platform | **2.7.4** |
+| FH2MP | **1.1.2** (optional) |
 | Forza Horizon 2 | Xbox One version 1.0.0.64 (`forza_durango_release_final.exe`) |
-| Wheel | Logitech G920 (other wheels untested) |
 
-A new Azimuth release may break this mod. If Extra Options detects a mismatch it disables itself.
-Updates will follow when possible.
+## Installation
+1. Install Azimuth and FH2MP with the FH2MP launcher (it brings the official Extra Options and the FH2 Mod Platform).
+   Start the game once.
+2. Copy `fh2-mods\Gripline.dll` from the release ZIP's `Azimuth` folder next to `azimuth.exe`.
+3. **Do not** replace `winmm.dll` – it stays the official Extra Options.
+4. Start the game. Settings: Pause › Settings › MODS. Wheel: set it up in the Azimuth launcher.
+
+Updating from V5: let the FH2MP launcher put the official `winmm.dll` back and delete `mods\Gripline\plugins\GriplineTick.dll`
+if you have it. Your `[Traffic]` and `[Gripline]` settings move from `FH2_ExtraOptions.ini` to `Gripline.ini` on the first
+start (copy of the old INI: `FH2_ExtraOptions.ini.before-gripline`). `FH2_Wheel.ini` is not used any more.
+
+Uninstall: delete `fh2-mods\Gripline.dll` and the folder `mods\Gripline`.
 
 ## Keyboard bindings (default, editable in `FH2_Keyboard.ini`)
 
 | Key | Function | Key | Function |
 |---|---|---|---|
 | W | Throttle | Arrow keys | Camera while driving, scroll in menus |
-| S | Brake / reverse | Tab | Change camera |
+| S | Brake / reverse | Tab | Change camera (incl. cockpit 2) |
 | A / D | Steer | C / Num2 | Look back |
 | Space | Handbrake | Num4 / Num6 | Look left / right |
 | E / Q | Shift up / down | R | Rewind |
@@ -60,106 +79,35 @@ Updates will follow when possible.
 | Backspace | Back (B) | L | Headlights |
 | Esc | Pause / menu | M | Map |
 | X / Y | Buttons X / Y | Minus / Plus | Radio previous / next |
-| Page Up / Page Down | Tabs left / right (LB / RB) | | |
-
-The same list is in `Keybindings.txt` in the release ZIP.
-
-Driving functions follow the controller layout chosen in the game. Several keys per function are possible
-(comma-separated); key names are listed at the top of `FH2_Keyboard.ini`.
+| Page Up / Page Down | Tabs left / right (LB / RB) | N | Nitro (NitroSystem) |
+| V | Cockpit view 2 | F5 | Key list |
 
 ## Reporting problems
-Please report problems on GitHub: [**Issues → New issue**](../../issues/new/choose). Attach these files from your
-Azimuth folder (next to `azimuth.exe`) so we can help:
+GitHub: [**Issues → New issue**](../../issues/new/choose). Pause › Settings › MODS › *Gripline: Create Problem Report*,
+then attach `Gripline_Report.zip` (next to `azimuth.exe`). It contains `Gripline.log/.ini`, `FH2_Keyboard.ini`,
+`FH2_ExtraOptions.log/.ini`, `fh2-mods\platform.log`, `data\logs\azimuth.log` and the Extra Options load order.
+Wheel problems belong to Azimuth (report them there without mods).
 
-| File | When |
-|---|---|
-| `FH2_ExtraOptions.log` | always |
-| `FH2_Wheel.log` | wheel problems |
-| `FH2_Wheel.ini`, `FH2_Keyboard.ini` | your settings (wheel / keyboard) |
-| `fh2-mods\platform.log` | with FH2MP / the FH2 Mod Platform |
-
-Start the game, reproduce the problem, close the game, then attach the files (drag them into the issue text box).
-Also tell us your device (controller, keyboard or wheel) and your Azimuth version.
+## Known limits
+- Traffic, steering animation and keyboard on/off need a restart of Azimuth.
+- Online, traffic comes from the session and nitro is off.
+- The steering animation turns as far as the rotation in the Azimuth launcher (900° when none is set).
 
 ## Credits
-- **[RokkuDayo](https://github.com/RokkuDayo)** – [Extra Options](https://github.com/RokkuDayo/ForzaHorizon2_ExtraOptions), the base of this fork
-- **[Almost There Games](https://almost-there-games.itch.io/azimuth)** – Azimuth wrapper (not included)
-- **[Flenkii](https://github.com/Flenkii)** – idea, testing, maintainer of this fork
-- **Claude (Anthropic)** – wrote most of the new code in this fork together with Flenkii
-- **Lancaster** (Discord) – tested on a game copy without the Wheel DLL and had the idea "clutch pedal as brake"
+- **[RokkuDayo](https://github.com/RokkuDayo)** – [Extra Options](https://github.com/RokkuDayo/ForzaHorizon2_ExtraOptions) (GPL-3.0); Gripline's code started as a fork of it
+- **[Almost There Games](https://almost-there-games.itch.io/azimuth)** – Azimuth (not included)
 - **[Trinculo54](https://github.com/Trinculo54/fh2-mod-platform)** – FH2 Mod Platform; Gripline uses its MIT API header (`third_party/fh2mod`)
-- Works well with: **[NitroSystem](https://github.com/qiangqiang101/NitroSystem)** by qiangqiang101 (nitro) – not included, install it yourself. **[fh2wheels](https://github.com/conner-mcvay/fh2-mods)** by conner-mcvay (wheels & suspension) should work next to Gripline (checked in the code, not tested in game yet)
-
-## Known issues
-- **Traffic settings need an Azimuth restart.** `Traffic: Preset` and `Traffic: Amount` in the in-game menu are
-  written to the INI immediately, but the game only reads traffic density when it loads the world. Change the
-  values, then fully close and restart Azimuth (not just go back to a menu) for the new traffic amount to show
-  up on the road. Wheel and weather settings are not affected.
-- **Fog only on Storm Island.** Outside Storm Island the "Fog" weather setting shows sunny weather.
-- **The keyboard needs Azimuth's gamepad input.** It is passed to the game as a gamepad; turning it on or
-  off needs a restart.
-- **With a wheel connected the game drives with the wheel.** To drive with keyboard or controller while the wheel
-  is plugged in, set `Wheel: Use Wheel In Game` to Off and restart the game.
-- **No H-pattern shifter.** FH2 only knows shift up / shift down, it ignores the gear of a shifter. Use the paddles
-  (or E/Q on the keyboard).
-
-## Not included
-- No Forza Horizon 2 game files (no EXE, no database, no graphics/XAML).
-- No Azimuth – get it from the developer: <https://almost-there-games.itch.io/azimuth>
-- The scripts in `tools/` create their files **on your PC from your own game files**.
-
-## Installation (Azimuth)
-1. Install Azimuth and start the game once normally.
-2. From the [release](../../releases) ZIP, copy everything from the `Azimuth` folder (`winmm.dll`, `FH2_ExtraOptions.ini`,
-   `fh2-mods\Gripline.dll`) into the Azimuth folder (next to `azimuth.exe`). Back up your old `winmm.dll` first.
-3. Done – controller, keyboard and a wheel are detected automatically. Settings are in-game on the GRIPLINE tile
-   (with the Mod Platform) or under Options › HUD › bottom, or in `FH2_Wheel.ini` / `FH2_Keyboard.ini` (created on first start).
-   Wheel: keep 900° in G HUB.
-
-**Online with [FH2MP](https://github.com/Charelene/FH2MP):** install FH2MP with its launcher (it brings the FH2 Mod Platform)
-and turn **off** "Install FH2 Extra Options if it is missing" in its settings – otherwise it moves Gripline into
-`fh2extra` and puts the original Extra Options back. Gripline's `winmm.dll` stays next to `azimuth.exe`.
-Online, traffic and weather come from the session and nitro is off.
-
-Optional parts of the ZIP:
-
-| Folder | What it is |
-|---|---|
-| `Optional/Profiles/Controller` | controller only (wheel and keyboard off) |
-| `Optional/Profiles/Keyboard` | keyboard (+ controller), wheel off |
-| `Optional/Profiles/Wheel` | wheel with the game's force feedback (= default) |
-| `Optional/Profiles/Wheel_ClutchAsBrake` | like Wheel, but the clutch pedal brakes (the G920 brake pedal is stiff) |
-
-A profile is a pair `FH2_Wheel.ini` + `FH2_Keyboard.ini`; copy both next to `azimuth.exe` (replaces yours).
-
-New INI keys of this fork in `FH2_ExtraOptions.ini`, section `[Traffic]`:
-`TrafficLevel` (0–5), `RushHourAllDay` (0/1), `Weather` (0 original, 1 sunny, 2 cloudy, 3 storm clouds, 4 rain, 5 fog;
-the old name `Wetter` is still understood); section `[Gripline]` (V5): `Notifications` (0/1, default 1),
-`SteeringAnimation` (0/1, default 0). `FH2_Keyboard.ini`: `Nitro=N`. `FH2_Wheel.ini`: `ExtraFunction1-3=14` = nitro.
-The wheel INI (`FH2_Wheel.ini`) and the keyboard INI (`FH2_Keyboard.ini`) are in English (since fork4). The German files
-of fork1-fork3 (`FH2_Lenkrad.ini`, `FH2_Tastatur.ini`) are taken over automatically on the first start; the old files
-are moved into `FH2_Settings_Backup`. Clutch pedal as brake: in the game (Options › HUD › "Wheel: Clutch Pedal as Brake") or `ClutchAsBrake=1` in
-`FH2_Wheel.ini` – idea by Lancaster.
-The old tuning keys of the fork1 FFB (`Damping`, `Friction` …) are only used as a fallback if the game's wheel
-programs are not available.
+- **[Flenkii](https://github.com/Flenkii)** – idea, testing, maintainer
+- **Claude (Anthropic)** – wrote most of the code together with Flenkii
+- **Lancaster** (Discord) – testing and ideas
+- A YouTube viewer – idea for cockpit view 2
+- Works well with: **[NitroSystem](https://github.com/qiangqiang101/NitroSystem)** by qiangqiang101, **Azimuth Mapper** by bigdamnhero6
 
 ## Building
-Same as the original (see [BUILD.md](BUILD.md)): `python build.py /path/to/zig --azimuth`.
-Tests (emulator, need `unicorn` and `pefile` plus locally extracted game files in `FH2_GAME`):
-```
-python build.py /path/to/zig --azimuth --test --output tests/winmm_test.dll
-cd tests && python test_menu.py winmm_test.dll && python test_buttons.py winmm_test.dll && python test_weather.py winmm_test.dll
-python test_keyboard.py winmm_test.dll && python test_game_ffb.py winmm_test.dll && python test_ffb_vm.py <exe image>
-python test_soft_wheel.py winmm_test.dll && python test_ini_migrate.py winmm_test.dll && python test_nitro.py winmm_test.dll
-python test_platform.py winmm_test.dll && FH2_COCKPIT_DATA=<folder with media/...> python test_cockpit.py winmm_test.dll
-```
-The build also makes `Gripline.dll` (the Mod Platform module) next to the output.
-Release ZIP: `python tools/make_release.py winmm.dll out.zip` (takes `Gripline.dll` from beside `winmm.dll`).
+See [BUILD.md](BUILD.md): `python build.py /path/to/zig --output out` makes `out/fh2-mods/Gripline.dll` (Zig 0.15.2).
 
 ## License
-GPL-3.0 like the original (see [LICENSE](LICENSE)). Changes compared to the original are listed in
-[CHANGES_FORK.md](CHANGES_FORK.md).
+GPL-3.0 (see [LICENSE](LICENSE)). History: [CHANGES_FORK.md](CHANGES_FORK.md).
 
 ## AI disclosure
-Like the original: the code of this fork was written with the help of an AI (Claude by Anthropic) and tested
-in an emulator and in the game.
+The code of Gripline was written with the help of an AI (Claude by Anthropic) and tested in an emulator and in the game.

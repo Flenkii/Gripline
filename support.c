@@ -201,3 +201,52 @@ __declspec(dllexport) uint64_t Fh2TestMemoryBenchmark(const void *address, unsig
     return sum;
 }
 #endif
+
+/* free memory within reach of rip-relative code in the game image (+-2 GB) */
+unsigned char *memory_alloc_near(unsigned char *base, size_t size) {
+    SYSTEM_INFO info;
+    GetSystemInfo(&info);
+    uintptr_t step = info.dwAllocationGranularity ? info.dwAllocationGranularity : 0x10000;
+    uintptr_t start = (uintptr_t)base, end = start + GAME_IMAGE_SIZE;
+    const uintptr_t reach = 0x60000000; /* well inside +-2 GB of every patch site */
+    for (int direction = 0; direction < 2; ++direction) {
+        uintptr_t address = direction == 0 ? ((start - step) & ~(step - 1))
+                                           : ((end + step - 1) & ~(step - 1));
+        for (unsigned tries = 0; tries < 0x8000; ++tries) {
+            if (direction == 0 ? (address < 0x10000 || start - address > reach)
+                               : (address - end > reach)) {
+                break;
+            }
+            MEMORY_BASIC_INFORMATION region;
+            if (VirtualQuery((void *)address, &region, sizeof(region)) == sizeof(region) &&
+                region.State == MEM_FREE) {
+                void *memory = VirtualAlloc((void *)address, size, MEM_RESERVE | MEM_COMMIT,
+                                            PAGE_READWRITE);
+                if (memory) {
+                    return memory;
+                }
+            }
+            address = direction == 0 ? address - step : address + step;
+        }
+    }
+    return NULL;
+}
+
+/* the compiler calls these for struct copies and zeroing (no C runtime in this DLL) */
+void *memset(void *destination, int value, size_t size);
+void *memcpy(void *destination, const void *source, size_t size);
+__attribute__((used)) void *memset(void *destination, int value, size_t size) {
+    volatile unsigned char *d = destination;
+    while (size--) {
+        *d++ = (unsigned char)value;
+    }
+    return destination;
+}
+__attribute__((used)) void *memcpy(void *destination, const void *source, size_t size) {
+    volatile unsigned char *d = destination;
+    const unsigned char *s = source;
+    while (size--) {
+        *d++ = *s++;
+    }
+    return destination;
+}

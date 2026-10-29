@@ -5,7 +5,7 @@ and media/cars/MER_SLR_05.zip (they are not in the repository)."""
 import importlib.util, math, os, struct, sys, zipfile, zlib
 from emu import Emu
 
-DLL = sys.argv[1] if len(sys.argv) > 1 else 'winmm_test.dll'
+DLL = sys.argv[1] if len(sys.argv) > 1 else '../../gripline-plugin/fh2-mods/Gripline.dll'
 DATA = os.environ.get('FH2_COCKPIT_DATA', '')
 fails = []
 checks = [0]
@@ -16,6 +16,132 @@ def check(cond, text):
     print(('  ok   ' if cond else '  FAIL ') + text)
     if not cond:
         fails.append(text)
+
+
+def spindle_curves(data):
+    """quaternions of the steering wheel curve, knots and the scale curve (knots, diagonal) of a GR2"""
+    g = L.GR2(data)
+    P = g.P
+    rtd = g.base[g.root_type[0]] + g.root_type[1]
+    rob = g.base[g.root_obj[0]] + g.root_obj[1]
+    o, _, tg_td = g.member(rtd, 'TrackGroups')
+    tg = g.p(g.p(rob + o + 4))
+    oo, _, ss = g.member(tg_td, 'TransformTracks')
+    count, array, es = struct.unpack_from('<I', g.buf, tg + oo)[0], g.p(tg + oo + 4), g.size_of(ss)
+    result = {}
+    for k in range(count):
+        at = array + k * es
+        name = g.cstr(g.p(at))
+        for curve in ('OrientationCurve', 'ScaleShearCurve'):
+            co, _, _ = g.member(ss, curve)
+            vt, obj = g.p(at + co), g.p(at + co + P)
+            kind = g.typedef(vt)[0][1]
+            if kind != 'CurveDataHeader_DaK32fC32f':
+                result[(name, curve)] = (kind, None, None)
+                continue
+            ko, _, _ = g.member(vt, 'Knots')
+            cc, _, _ = g.member(vt, 'Controls')
+            nk, nc = struct.unpack_from('<I', g.buf, obj + ko)[0], struct.unpack_from('<I', g.buf, obj + cc)[0]
+            knots = struct.unpack_from('<%df' % nk, g.buf, g.p(obj + ko + 4))
+            controls = struct.unpack_from('<%df' % nc, g.buf, g.p(obj + cc + 4))
+            result[(name, curve)] = (kind, knots, controls)
+    return result
+
+
+def warp(t):
+    """features/cockpit.c turn_warp: the middle as in the game, the outer parts pressed by 0.6"""
+    return 0.3 - (0.3 - t) * 0.6 if t < 0.3 else (0.7 + (t - 0.7) * 0.6 if t > 0.7 else t)
+
+
+def curve_ends(data):
+    """(track, curve) -> knot times, for every keyed curve of a GR2"""
+    g = L.GR2(data)
+    P = g.P
+    rtd = g.base[g.root_type[0]] + g.root_type[1]
+    rob = g.base[g.root_obj[0]] + g.root_obj[1]
+    o, _, tg_td = g.member(rtd, 'TrackGroups')
+    tg = g.p(g.p(rob + o + 4))
+    oo, _, ss = g.member(tg_td, 'TransformTracks')
+    count, array, es = struct.unpack_from('<I', g.buf, tg + oo)[0], g.p(tg + oo + 4), g.size_of(ss)
+    result = {}
+    for k in range(count):
+        at = array + k * es
+        name = g.cstr(g.p(at))
+        for curve in ('OrientationCurve', 'PositionCurve', 'ScaleShearCurve'):
+            co, _, _ = g.member(ss, curve)
+            vt, obj = g.p(at + co), g.p(at + co + P)
+            if vt is None or obj is None:
+                continue
+            kind = g.typedef(vt)[0][1]
+            names = [m[1] for m in g.typedef(vt)]
+            if 'Knots' in names:
+                ko, _, _ = g.member(vt, 'Knots')
+                n = struct.unpack_from('<I', g.buf, obj + ko)[0]
+                if n:
+                    knots = struct.unpack_from('<%df' % n, g.buf, g.p(obj + ko + 4))
+                    result[(name, curve)] = list(knots)
+            elif 'KnotsControls' in names:
+                if 'OneOverKnotScaleTrunc' in names:
+                    so, _, _ = g.member(vt, 'OneOverKnotScaleTrunc')
+                    scale = struct.unpack('<f', struct.pack('<I', struct.unpack_from('<H', g.buf, obj + so)[0] << 16))[0]
+                else:
+                    so, _, _ = g.member(vt, 'OneOverKnotScale')
+                    scale = struct.unpack_from('<f', g.buf, obj + so)[0]
+                ko, _, _ = g.member(vt, 'KnotsControls')
+                n = struct.unpack_from('<I', g.buf, obj + ko)[0]
+                fmt, size = ('<H', 2) if 'K16u' in kind else ('<B', 1)
+                per = 2 if 'I1' in kind else 4
+                knots = [struct.unpack_from(fmt, g.buf, g.p(obj + ko + 4) + size * i)[0] for i in range(n // per)]
+                if knots and scale:
+                    result[(name, curve)] = [k / scale for k in knots]
+    return result
+
+
+def check_driver_reach(got, src, label):
+    """the driver's curves are moved with warp and cover every time the game plays (Turn 0.0005..0.9995):
+    past their end Granny runs on and the hands vanished"""
+    old, new = curve_ends(src), curve_ends(got)
+    dur = max(v[-1] for v in old.values())
+    keys = [k for k in old if k in new and k[0] != 'boneSteeringWheelSpindle' and old[k][-1] > old[k][0]]
+    worst = 0
+    middle = all(abs(n - o) < 1e-6 for k in keys for o, n in zip(old[k], new[k]) if 0.3 * dur < o < 0.7 * dur)
+    check(middle, f'{label}: Fahrer-Knoten in der Mitte (0.3..0.7) unverändert')
+    for key in keys:
+        (o0, o1), (n0, n1) = (old[key][0], old[key][-1]), (new[key][0], new[key][-1])
+        worst = max(worst, abs(n1 - warp(o1 / dur) * dur), abs(n0 - warp(o0 / dur) * dur))
+        if o1 >= 0.999 * dur and n1 < warp(0.9995) * dur:
+            worst = max(worst, 9)
+        if o0 <= 0.0005 * dur and n0 > warp(0.0005) * dur:
+            worst = max(worst, 9)
+    check(len(keys) > 10 and worst < 0.02 * dur,
+          f'{label}: Fahrer-Kurven verschoben, decken Vollausschlag ab ({len(keys)} Kurven, Abw. {worst:.4f}s)')
+
+
+def check_two_parts(got, ref, label):
+    """the new file: the script's curve (every second sample) at the times warp(Turn), held to 0 and the
+    end; the scale ~0 for the second view (until 0.06), 1 from 0.10 on"""
+    if not got:
+        check(False, label + ': keine Datei')
+        return
+    ours, script = spindle_curves(got), spindle_curves(ref)
+    key = ('boneSteeringWheelSpindle', 'OrientationCurve')
+    _, knots, q = ours[key]
+    _, rknots, rq = script[key]
+    dur = rknots[-1]
+    half = len(knots) - 2
+    worst = max(abs(q[4 * (j + 1) + c] - rq[8 * j + c]) for j in range(half) for c in range(4))
+    held = all(abs(q[c] - q[4 + c]) < 1e-6 and abs(q[4 * (half + 1) + c] - q[4 * half + c]) < 1e-6 for c in range(4))
+    times = all(abs(knots[j + 1] - warp(j / (half - 1)) * dur) < 1e-4 for j in range(half))
+    check(len(knots) == 123 and knots[0] == 0 and abs(knots[-1] - dur) < 1e-4 and times,
+          f'{label}: Lenkrad-Kurve mit der Mitte wie im Spiel (0.3..0.7), außen gestaucht')
+    check(worst < 1e-5 and held, f'{label}: dreht wie das Skript, Enden gehalten (Abw. {worst:.2e})')
+    kind, sk, sc = ours[('boneSteeringWheelSpindle', 'ScaleShearCurve')]
+    check(kind == 'CurveDataHeader_DaK32fC32f' and sc[0::9][2:] == (1.0, 1.0) and max(sc[0::9][:2]) < 0.001 and
+          abs(sk[1] - 0.06 * dur) < 1e-4 and abs(sk[2] - 0.10 * dur) < 1e-4,
+          f'{label}: Lenkrad-Größe ~0 für Cockpit 2 (bis 0.06), 1 ab 0.10')
+    hips = ours[('Hips', 'ScaleShearCurve')]
+    check(hips[0] == 'CurveDataHeader_DaK32fC32f' and max(hips[2][0::9][:2]) < 0.001,
+          f'{label}: Fahrer für Cockpit 2 auch geschrumpft (keine Füße mehr)')
 
 
 here = os.path.dirname(os.path.abspath(__file__))
@@ -67,22 +193,13 @@ if not DATA:
 else:
     print('Lenkrad-Animation (MER_SLR_05):')
     src = zipfile.ZipFile(os.path.join(DATA, 'media/cars/MER_SLR_05.zip')).read('scene/Drivers/default/leftRightTurn.gr2')
-    for deg, curve in ((450, 1.0), (450, 2.5), (1260, 1.0)):
-        ref, info = L.steering_gr2(src, deg, curve=curve)
-        out = e.alloc(len(ref) * 2)
-        n = e.call('Fh2TestCockpitGr2', put(src), len(src), deg, int(curve * 10), out, len(ref) * 2)
+    for deg, curve in ((450, 1.0), (450, 2.5), (1260, 1.0), (0, 1.0)):
+        ref, info = L.steering_gr2(src, deg or 90, curve=curve)
+        out = e.alloc(len(ref) * 3)
+        n = e.call('Fh2TestCockpitGr2', put(src), len(src), deg, int(curve * 10), out, len(ref) * 3)
         got = bytes(e.mu.mem_read(out, n)) if n else b''
-        same_len = n == len(ref)
-        diff = 0
-        if same_len:
-            for i in range(0, len(ref) - 3, 4):
-                if got[i:i + 4] != ref[i:i + 4] and i not in (0x28,):
-                    a, b = struct.unpack('<f', got[i:i + 4])[0], struct.unpack('<f', ref[i:i + 4])[0]
-                    if not (math.isfinite(a) and abs(a - b) < 1e-6):
-                        diff += 1
-        check(same_len and diff == 0, f'{deg} Grad, Kurve {curve}: {n} Bytes wie das Skript ({len(ref)}), {diff} echte Abweichungen')
-        g = L.GR2(got) if same_len else None
-        check(g is not None, '  Ergebnis lässt sich als GR2 wieder lesen')
+        check_two_parts(got, ref, f'{deg or "Original"} Grad, Kurve {curve}')
+        check_driver_reach(got, src, f'{deg or "Original"} Grad')
     print('Hände ausblenden:')
     for dm in ('default', 'unsuited'):
         m = zipfile.ZipFile(os.path.join(DATA, f'media/drivers/{dm}.zip')).read('driver.modelbin')
@@ -140,13 +257,18 @@ if DATA:
                     'drivers/unsuited/driver.modelbin', 'gripline_cockpit.txt'], f'Dateien: {files}')
     ref, _ = L.steering_gr2(src, 450, curve=1.0)
     got = open(os.path.join(out, 'cars/MER_SLR_05/scene/Drivers/default/leftRightTurn.gr2'), 'rb').read()
-    check(len(got) == len(ref), 'SLR-Animation wie das Skript (900 Grad)')
+    check_two_parts(got, ref, 'make_files SLR (900 Grad)')
     check('Rotation=900' in open(os.path.join(out, 'gripline_cockpit.txt')).read(), 'Manifest mit Drehwinkel')
     t0 = os.path.getmtime(os.path.join(out, 'drivers/unsuited/driver.modelbin'))
     check(c.call('Fh2TestCockpitMake', c.put_wstr('C:\\test\\Mount'), 900, 10) == 1 and
           os.path.getmtime(os.path.join(out, 'drivers/unsuited/driver.modelbin')) == t0, 'zweiter Start: nichts neu erzeugt')
     check(c.call('Fh2TestCockpitMake', c.put_wstr('C:\\test\\Mount'), 540, 10) == 1 and
           'Rotation=540' in open(os.path.join(out, 'gripline_cockpit.txt')).read(), 'anderer Drehwinkel: neu erzeugt')
+    check(c.call('Fh2TestCockpitMake', c.put_wstr('C:\\test\\Mount'), 0, 10) == 1 and
+          'Rotation=0' in open(os.path.join(out, 'gripline_cockpit.txt')).read() and
+          not os.path.exists(os.path.join(out, 'drivers/unsuited/driver.modelbin')) and
+          os.path.exists(os.path.join(out, 'cars/MER_SLR_05/scene/Drivers/default/leftRightTurn.gr2')),
+          'ohne volle Lenkrad-Animation: Lenkrad-Dateien trotzdem, alte Fahrer ohne Hände gelöscht')
 
 print('%d checks, %d failed' % (checks[0], len(fails)))
 sys.exit(1 if fails else 0)

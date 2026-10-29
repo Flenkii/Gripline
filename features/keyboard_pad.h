@@ -14,7 +14,7 @@
    follow the controller layout chosen in the game (A/B/X/Y layouts), menu keys are fixed
    buttons (Enter = A, Backspace = B, Esc = Menu). The arrow keys move the left stick in menus
    and the camera (right stick) while driving. */
-#include "extra_options.h"
+#include "gripline.h"
 
 enum {
     KEY_SETTING_ENABLED,     /* Aktiv                0/1 (next game start) */
@@ -27,6 +27,7 @@ enum {
 /* Process start (Azimuth adapter): hooks Azimuth's import. settings_directory holds
    FH2_Keyboard.ini. Returns 1 when the hook is in place. */
 int keyboard_pad_arm(unsigned char *host_image, const wchar_t *settings_directory);
+int keyboard_pad_late(void); /* after Azimuth already asked for its gamepads (plugin build) */
 /* Game image mapped: controller layouts are followed from now on. */
 void keyboard_pad_game_start(unsigned char *game_image, const wchar_t *settings_directory);
 

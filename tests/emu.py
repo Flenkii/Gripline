@@ -291,11 +291,23 @@ class Emu:
         return getattr(self, 'modules', {}).get(name, 0)
 
     def k_GetTickCount64(self): return self.tick
+
+    # wall clock: 2026-10-25 14:30:10 (FILETIME, 100 ns since 1601); local = UTC here
+    def k_GetSystemTimeAsFileTime(self):
+        self.wq(self.arg(0), 134374122100000000)
+        return 0
+    def k_FileTimeToLocalFileTime(self):
+        self.wq(self.arg(1), struct.unpack('<Q', self.mu.mem_read(self.arg(0), 8))[0])
+        return 1
     def k_Sleep(self): self.tick += self.arg(0)
 
     def k_CreateThread(self):
         self.threads.append(self.arg(2))
         return 0x9999
+
+    # the Azimuth Mapper's named event (set e.mapper_running = True)
+    def k_OpenEventW(self):
+        return 0x778 if getattr(self, 'mapper_running', False) else 0
 
     def k_AcquireSRWLockExclusive(self): pass
     def k_ReleaseSRWLockExclusive(self): pass
