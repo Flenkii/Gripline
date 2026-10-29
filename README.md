@@ -55,11 +55,22 @@ Built for what FH2MP 1.1.2 installs (October 2026):
 | Forza Horizon 2 | Xbox One version 1.0.0.64 (`forza_durango_release_final.exe`) |
 
 ## Installation
+
+Gripline is a mod for the [FH2 Mod Platform](https://github.com/Trinculo54/fh2-mod-platform) (by Trinculo54). It needs **Azimuth** and the Platform. It does **not** need Extra Options and not the FH2MP multiplayer.
+
+### A) With the FH2MP launcher (easiest)
 1. Install Azimuth and FH2MP with the FH2MP launcher (it brings the official Extra Options and the FH2 Mod Platform).
    Start the game once.
 2. Copy `fh2-mods\Gripline.dll` from the release ZIP's `Azimuth` folder next to `azimuth.exe`.
 3. **Do not** replace `winmm.dll` – it stays the official Extra Options.
 4. Start the game. Settings: Pause › Settings › MODS. Wheel: set it up in the Azimuth launcher.
+
+### B) Azimuth only (no FH2MP, no Extra Options)
+1. Install Azimuth 1.0.3 and start the game once.
+2. Get the FH2 Mod Platform: download the ZIP from its [releases](https://github.com/Trinculo54/fh2-mod-platform/releases) (version 2.7.4 or newer) and copy **`DWrite.dll`** next to `azimuth.exe`. (Any other mod's ZIP that ships platform 2.7.4+ has this file too.)
+3. Copy `fh2-mods\Gripline.dll` from the release ZIP's `Azimuth` folder next to `azimuth.exe` (so it ends up in `fh2-mods`).
+4. Start the game. Check: `fh2-mods\platform.log` lists Gripline, and Pause › Settings › MODS shows it.
+   Nothing there? Send `platform.log` (or the problem report) on [Discord](https://discord.gg/FEnY2nvc) or as an issue.
 
 Updating from V5: let the FH2MP launcher put the official `winmm.dll` back and delete `mods\Gripline\plugins\GriplineTick.dll`
 if you have it. Your `[Traffic]` and `[Gripline]` settings move from `FH2_ExtraOptions.ini` to `Gripline.ini` on the first
