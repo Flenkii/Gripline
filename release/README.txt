@@ -34,7 +34,8 @@ Gripline:
   - Keyboard driving (WASD, arrows = camera), works together with a controller.
   - Cockpit: the steering wheel turns 1:1 with your real wheel (rotation from the Azimuth
     launcher), cockpit view 2 like in FH5 (Tab or V).
-  - More Traffic: presets by name (MODS > Installed mods > Gripline > Traffic), up to 200 cars, rush hour all day (restart needed).
+  - More Traffic: Original, Much More Traffic, No Traffic or Drivatars Only, picked by name
+    (MODS > Installed mods > Gripline > Traffic), 30-200 cars, rush hour all day (restart needed).
   - Nitro key N for the mod NitroSystem (off online), key list F5, Gripline cards,
     problem report (Gripline_Report.zip).
 Azimuth (its launcher): wheel, pedals, buttons, rotation and force feedback.
@@ -47,7 +48,7 @@ Extra Options: weather, time of day, hiding the HUD (F1), autodrive (F2).
   - Only what the others don't have: Gripline's own wheel, force feedback, weather,
     time of day and creator mode are gone - Azimuth and Extra Options do those now.
   - Cockpit wheel turns 1:1, cockpit view 2, More Traffic with real traffic data,
-    key list (F5), problem report, Azimuth Mapper detection.
+    key list (F5), problem report, Azimuth Mapper detection, cards in a window over the game.
 
 
 PROBLEMS? https://github.com/Flenkii/Gripline/issues

@@ -56,3 +56,14 @@ Kept and changed:
   key list, cards, Azimuth Mapper check, problem report (adds `azimuth.log` and `mods\loadorder.txt`)
 - settings: `Gripline.ini` ([Traffic], [Gripline]; old `Weather`/`TimeOfDay` keys are ignored) and `FH2_Keyboard.ini`
 - `build.py` builds only `Gripline.dll`; tests run against its `--test` build
+
+Plugin build on Azimuth 1.0.3 (October 29, 2026, tested in the game by Flenkii):
+- the platform loads Gripline after Azimuth set up its picture and gamepads, so the early import hooks are not enough:
+  - keyboard: Azimuth asks for the gamepad list once; Gripline finds that function by its code pattern, runs it again
+    with `get_Gamepads` pointed at the Gripline pad, then puts `get_Gamepads` back (`keyboard_pad.c`)
+  - cards and key list: Azimuth drops its D3D12 device when anything else draws into its back buffers, so the cards
+    are drawn by the CPU into a transparent, click-through window over the game window (`notify.c`)
+  - cockpit view 2: the driver camera's FOV slot (game+0x2e78120, slot 0x70) is chained in front of Extra Options' own
+- start card "Gripline V6 active"
+- traffic: amounts 30/45/70/100/200 cars, faster spawning; presets Original / Much More Traffic / No Traffic /
+  Drivatars Only, chosen by name on the platform page *Traffic* (MODS > Installed mods > Gripline)
