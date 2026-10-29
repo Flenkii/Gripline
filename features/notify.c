@@ -927,6 +927,239 @@ static void render(IDXGISwapChain *swapchain) {
     ID3D12Resource_Release(back);
 }
 
+/* ------------------------------------------------------------------ window overlay */
+/* Azimuth 1.0.3 removes its D3D12 device when anything else draws into its back buffers. In the
+   plugin build the cards therefore go into a small transparent, click-through window that lies on
+   top of the game window (same pixels, drawn by the CPU, put on screen by Windows). */
+typedef ATOM(WINAPI *RegisterClassExWFn)(const WNDCLASSEXW *);
+typedef HWND(WINAPI *CreateWindowExWFn)(DWORD, LPCWSTR, LPCWSTR, DWORD, int, int, int, int, HWND, HMENU, HINSTANCE,
+                                        LPVOID);
+typedef LRESULT(WINAPI *DefWindowProcWFn)(HWND, UINT, WPARAM, LPARAM);
+typedef BOOL(WINAPI *PeekMessageWFn)(MSG *, HWND, UINT, UINT, UINT);
+typedef LRESULT(WINAPI *DispatchMessageWFn)(const MSG *);
+typedef BOOL(WINAPI *UpdateLayeredWindowFn)(HWND, HDC, POINT *, SIZE *, HDC, POINT *, COLORREF, BLENDFUNCTION *,
+                                           DWORD);
+typedef BOOL(WINAPI *ShowWindowFn)(HWND, int);
+typedef BOOL(WINAPI *GetClientRectFn)(HWND, RECT *);
+typedef BOOL(WINAPI *ClientToScreenFn)(HWND, POINT *);
+typedef BOOL(WINAPI *IsWindowFn)(HWND);
+typedef BOOL(WINAPI *IsIconicFn)(HWND);
+typedef HWND(WINAPI *GetForegroundWindowFn)(void);
+typedef HWND(WINAPI *GetAncestorFn)(HWND, UINT);
+
+static struct {
+    RegisterClassExWFn RegisterClassExW;
+    CreateWindowExWFn CreateWindowExW;
+    DefWindowProcWFn DefWindowProcW;
+    PeekMessageWFn PeekMessageW;
+    DispatchMessageWFn DispatchMessageW;
+    UpdateLayeredWindowFn UpdateLayeredWindow;
+    ShowWindowFn ShowWindow;
+    GetClientRectFn GetClientRect;
+    ClientToScreenFn ClientToScreen;
+    IsWindowFn IsWindow;
+    IsIconicFn IsIconic;
+    GetForegroundWindowFn GetForegroundWindow;
+    GetAncestorFn GetAncestor;
+} win;
+
+static HWND game_window;
+static volatile LONG overlay_started;
+
+static int win_ready(void) {
+    HMODULE m = LoadLibraryExW(L"user32.dll", NULL, LOAD_LIBRARY_SEARCH_SYSTEM32);
+    if (!m) return 0;
+#define LOAD(name) win.name = (name##Fn)(uintptr_t)GetProcAddress(m, #name)
+    LOAD(RegisterClassExW);
+    LOAD(CreateWindowExW);
+    LOAD(DefWindowProcW);
+    LOAD(PeekMessageW);
+    LOAD(DispatchMessageW);
+    LOAD(UpdateLayeredWindow);
+    LOAD(ShowWindow);
+    LOAD(GetClientRect);
+    LOAD(ClientToScreen);
+    LOAD(IsWindow);
+    LOAD(IsIconic);
+    LOAD(GetForegroundWindow);
+    LOAD(GetAncestor);
+#undef LOAD
+    return win.RegisterClassExW && win.CreateWindowExW && win.DefWindowProcW && win.PeekMessageW &&
+           win.DispatchMessageW && win.UpdateLayeredWindow && win.ShowWindow && win.GetClientRect &&
+           win.ClientToScreen && win.IsWindow && win.IsIconic && win.GetForegroundWindow && win.GetAncestor &&
+           gdi_ready();
+}
+
+static LRESULT WINAPI overlay_proc(HWND window, UINT message, WPARAM w, LPARAM l) {
+    return win.DefWindowProcW(window, message, w, l);
+}
+
+/* premultiplied BGRA: copy a w x h block, scaled by alpha, into the frame at (x, y) */
+static void blend_block(unsigned char *frame, int frame_w, int frame_h, int x, int y, const unsigned char *src,
+                        int src_pitch, int w, int h, float alpha) {
+    unsigned scale = (unsigned)(alpha * 256.0f);
+    if (scale > 256) scale = 256;
+    for (int row = 0; row < h; ++row) {
+        int fy = y + row;
+        if (fy < 0 || fy >= frame_h) continue;
+        const unsigned char *s = src + (size_t)row * src_pitch;
+        unsigned char *d = frame + ((size_t)fy * frame_w) * 4;
+        for (int col = 0; col < w; ++col) {
+            int fx = x + col;
+            if (fx < 0 || fx >= frame_w) continue;
+            for (int c = 0; c < 4; ++c) d[fx * 4 + c] = (unsigned char)((s[col * 4 + c] * scale) >> 8);
+        }
+    }
+}
+
+static DWORD WINAPI overlay_thread(void *unused) {
+    (void)unused;
+    HINSTANCE instance = GetModuleHandleW(NULL);
+    WNDCLASSEXW wc;
+    memset(&wc, 0, sizeof(wc));
+    wc.cbSize = sizeof(wc);
+    wc.lpfnWndProc = overlay_proc;
+    wc.hInstance = instance;
+    wc.lpszClassName = L"GriplineCards";
+    win.RegisterClassExW(&wc);
+    HWND window = win.CreateWindowExW(WS_EX_LAYERED | WS_EX_TRANSPARENT | WS_EX_TOPMOST | WS_EX_TOOLWINDOW |
+                                          WS_EX_NOACTIVATE,
+                                      L"GriplineCards", L"Gripline", WS_POPUP, 0, 0, 1, 1, NULL, NULL, instance, NULL);
+    if (!window) {
+        log_append("NOTIFY: could not create the card window; no Gripline cards.\r\n");
+        return 0;
+    }
+    log_append("NOTIFY: in-game cards ready (window over the game picture).\r\n");
+    static unsigned char scratch_cards[1200 * 88 * 3 * 4 * 3]; /* up to 2.5x scale, see layout_for */
+    static unsigned char scratch_panel[1200 * 1200 * 4];
+    unsigned char *frame = NULL;
+    size_t frame_bytes = 0;
+    HDC dc = gdi.CreateCompatibleDC(NULL);
+    HBITMAP bitmap = NULL;
+    int visible = 0, frame_w = 0, frame_h = 0, drawn_screen = 0;
+    unsigned drawn_count = (unsigned)-1, drawn_panel = (unsigned)-1, drawn_ids[MAX_CARDS];
+    static wchar_t title[TEXT_CAPACITY];
+    static NotifyPanelRow rows[NOTIFY_PANEL_ROWS];
+    for (;;) {
+        MSG msg;
+        while (win.PeekMessageW(&msg, NULL, 0, 0, PM_REMOVE)) win.DispatchMessageW(&msg);
+        Sleep(16);
+        if (!win.IsWindow(game_window)) break;
+        Card list[MAX_CARDS];
+        ULONGLONG now = GetTickCount64();
+        AcquireSRWLockExclusive(&lock);
+        for (unsigned i = 0; i < card_count; ++i)
+            if (!cards[i].shown) cards[i].shown = now;
+        while (card_count && cards[card_count - 1].shown &&
+               now - cards[card_count - 1].shown >= cards[card_count - 1].hold + FADE_OUT_MS)
+            --card_count;
+        unsigned count = card_count;
+        for (unsigned i = 0; i < count; ++i) list[i] = cards[i];
+        unsigned panel = (unsigned)panel_count, shown_panel = panel_id;
+        if (panel) {
+            memory_copy(title, panel_title, sizeof(title));
+            memory_copy(rows, panel_rows, sizeof(rows[0]) * panel);
+        }
+        ReleaseSRWLockExclusive(&lock);
+        HWND top = win.GetForegroundWindow();
+        int focused = top && (top == game_window || win.GetAncestor(game_window, GA_ROOT) == top);
+        if ((!count && !panel) || !enabled || !focused || win.IsIconic(game_window)) {
+            if (visible) win.ShowWindow(window, SW_HIDE);
+            visible = 0;
+            continue;
+        }
+        RECT client;
+        POINT origin = {0, 0};
+        if (!win.GetClientRect(game_window, &client) || !win.ClientToScreen(game_window, &origin)) continue;
+        int screen_w = client.right - client.left, screen_h = client.bottom - client.top;
+        if (screen_w < 320 || screen_h < 240) continue;
+        Layout l = layout_for((UINT)screen_h);
+        if ((size_t)l.width * l.height * MAX_CARDS * 4 > sizeof(scratch_cards) ||
+            (size_t)l.width * l.panel_height * 4 > sizeof(scratch_panel))
+            continue;
+        int want_w = l.margin + 2 * l.width + l.gap + (int)(40.0f * l.height / 88.0f) + 4;
+        if (want_w > screen_w) want_w = screen_w;
+        if (want_w != frame_w || screen_h != frame_h) {
+            if (bitmap) gdi.DeleteObject(bitmap);
+            BITMAPINFO info;
+            memset(&info, 0, sizeof(info));
+            info.bmiHeader.biSize = sizeof(info.bmiHeader);
+            info.bmiHeader.biWidth = want_w;
+            info.bmiHeader.biHeight = -screen_h;
+            info.bmiHeader.biPlanes = 1;
+            info.bmiHeader.biBitCount = 32;
+            info.bmiHeader.biCompression = BI_RGB;
+            void *bits = NULL;
+            bitmap = gdi.CreateDIBSection(dc, &info, DIB_RGB_COLORS, &bits, NULL, 0);
+            if (!bitmap || !bits) {
+                bitmap = NULL;
+                frame_w = 0;
+                continue;
+            }
+            gdi.SelectObject(dc, bitmap);
+            frame = (unsigned char *)bits;
+            frame_w = want_w;
+            frame_h = screen_h;
+            frame_bytes = (size_t)frame_w * frame_h * 4;
+            drawn_count = (unsigned)-1;
+        }
+        int redraw = drawn_screen != screen_h || drawn_count != count || drawn_panel != shown_panel;
+        for (unsigned i = 0; !redraw && i < count; ++i) redraw = drawn_ids[i] != list[i].id;
+        if (redraw) {
+            if (!draw_cards(list, count, &l, scratch_cards, l.width * 4) ||
+                (panel && !draw_panel(title, rows, panel, &l, scratch_panel, l.width * 4))) {
+                fail("could not draw the cards");
+                break;
+            }
+            drawn_screen = screen_h;
+            drawn_count = count;
+            drawn_panel = shown_panel;
+            for (unsigned i = 0; i < count; ++i) drawn_ids[i] = list[i].id;
+        }
+        memset(frame, 0, frame_bytes);
+        int shift = 0;
+        if (panel) {
+            int ph = panel_pixels(&l, panel);
+            int y0 = (screen_h - ph) / 2;
+            if (y0 < l.margin) y0 = l.margin;
+            blend_block(frame, frame_w, frame_h, frame_w - l.margin - l.width, y0, scratch_panel, l.width * 4, l.width,
+                        ph, 1.0f);
+            shift = l.width + l.gap;
+        }
+        int y = l.margin;
+        for (unsigned i = 0; i < count; ++i) {
+            float slide;
+            float a = card_alpha(now - list[i].shown, list[i].hold, &slide);
+            int x0 = frame_w - l.margin - l.width - shift + (int)(slide * 40.0f * l.height / 88.0f);
+            if (a > 0.0f)
+                blend_block(frame, frame_w, frame_h, x0, y, scratch_cards + (size_t)i * l.height * l.width * 4,
+                            l.width * 4, l.width, l.height, a);
+            y += l.height + l.gap;
+        }
+        gdi.GdiFlush();
+        POINT position = {origin.x + screen_w - frame_w, origin.y}, source = {0, 0};
+        SIZE size = {frame_w, frame_h};
+        BLENDFUNCTION blend = {AC_SRC_OVER, 0, 255, AC_SRC_ALPHA};
+        win.UpdateLayeredWindow(window, NULL, &position, &size, dc, &source, 0, &blend, ULW_ALPHA);
+        if (!visible) win.ShowWindow(window, SW_SHOWNOACTIVATE);
+        visible = 1;
+    }
+    win.ShowWindow(window, SW_HIDE);
+    return 0;
+}
+
+static void start_window_overlay(HWND window) {
+    if (!window || InterlockedExchange(&overlay_started, 1)) return;
+    game_window = window;
+    if (!win_ready()) {
+        fail("user32/gdi32 not available");
+        return;
+    }
+    HANDLE thread = CreateThread(NULL, 0, overlay_thread, NULL, 0, NULL);
+    if (thread) CloseHandle(thread);
+    else fail("could not start the card window");
+}
+
 /* ------------------------------------------------------------------ hooks */
 
 typedef HRESULT(STDMETHODCALLTYPE *PresentFn)(IDXGISwapChain *, UINT, UINT);
@@ -979,7 +1212,7 @@ typedef void(STDMETHODCALLTYPE *ExecuteFn)(ID3D12CommandQueue *, UINT, ID3D12Com
 static ExecuteFn original_execute;
 
 static void STDMETHODCALLTYPE hook_execute(ID3D12CommandQueue *self, UINT count, ID3D12CommandList *const *lists) {
-    if (late_adopt && !broken && self != queue) {
+    if (late_adopt && !broken && !swapchain_seen && self != queue) {
         int known = 0;
         AcquireSRWLockShared(&game_queue_lock);
         for (unsigned i = 0; i < game_queue_count; ++i) known |= game_queues[i] == self;
@@ -1007,50 +1240,19 @@ static void STDMETHODCALLTYPE hook_execute(ID3D12CommandQueue *self, UINT count,
 
 static void adopt_swapchain(IDXGISwapChain *swapchain) {
     if (swapchain_seen || !late_adopt || broken) return;
-    static volatile LONG first, no_device;
+    static volatile LONG first;
     if (!InterlockedExchange(&first, 1)) log_append("NOTIFY: first Present through the late hook.\r\n");
-    ID3D12Device *device = NULL;
-    ID3D12CommandQueue *q = NULL;
     __try {
-        if (FAILED(IDXGISwapChain_GetDevice(swapchain, &IID_ID3D12Device, (void **)&device)) || !device) {
-            if (!InterlockedExchange(&no_device, 1)) log_append("NOTIFY: the presented swap chain is no D3D12 swap chain.\r\n");
-        } else {
-            D3D12_COMMAND_QUEUE_DESC qd = {D3D12_COMMAND_LIST_TYPE_DIRECT, 0, D3D12_COMMAND_QUEUE_FLAG_NONE, 0};
-            DXGI_SWAP_CHAIN_DESC sd;
-            if (SUCCEEDED(IDXGISwapChain_GetDesc(swapchain, &sd))) {
-                log_append_value("NOTIFY: game swap chain format ", (int)sd.BufferDesc.Format);
-                log_append_value("NOTIFY: game swap chain usage ", (int)sd.BufferUsage);
-                log_append_value("NOTIFY: game swap chain buffers ", (int)sd.BufferCount);
-                log_append_value("NOTIFY: game swap chain flags ", (int)sd.Flags);
-                log_append_value("NOTIFY: game swap chain effect ", (int)sd.SwapEffect);
-                log_append_value("NOTIFY: game swap chain width ", (int)sd.BufferDesc.Width);
-                ID3D12Resource *buffer = NULL;
-                int target_ok = 1;
-                if (SUCCEEDED(IDXGISwapChain_GetBuffer(swapchain, 0, &IID_ID3D12Resource, (void **)&buffer)) && buffer) {
-                    D3D12_RESOURCE_DESC rd = ID3D12Resource_GetDesc(buffer);
-                    log_append_value("NOTIFY: game back buffer flags ", (int)rd.Flags);
-                    log_append_value("NOTIFY: game back buffer format ", (int)rd.Format);
-                    target_ok = (rd.Flags & D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET) != 0;
-                    ID3D12Resource_Release(buffer);
-                }
-                if (!target_ok || !(sd.BufferUsage & DXGI_USAGE_RENDER_TARGET_OUTPUT)) {
-                    fail("the game's back buffers are no render targets");
-                    ID3D12Device_Release(device);
-                    return;
-                }
-            }
-            if (SUCCEEDED(ID3D12Device_CreateCommandQueue(device, &qd, &IID_ID3D12CommandQueue, (void **)&q))) {
-                own_queue = 1;
-                hook_swapchain((IUnknown *)q, swapchain);
-            } else {
-                fail("could not create a queue on the game's device");
-            }
-        }
+        DXGI_SWAP_CHAIN_DESC sd;
+        if (FAILED(IDXGISwapChain_GetDesc(swapchain, &sd)) || !sd.OutputWindow) return;
+        log_append_value("NOTIFY: game swap chain format ", (int)sd.BufferDesc.Format);
+        log_append_value("NOTIFY: game swap chain width ", (int)sd.BufferDesc.Width);
+        swapchain_seen = swapchain;
+        log_append("NOTIFY: game swap chain found; cards go into a window over the game.\r\n");
+        start_window_overlay(sd.OutputWindow);
     } __except (EXCEPTION_EXECUTE_HANDLER) {
         fail("an exception while adopting the swap chain");
     }
-    if (q) ID3D12CommandQueue_Release(q);
-    if (device) ID3D12Device_Release(device);
 }
 
 static void before_present(IDXGISwapChain *swapchain) {

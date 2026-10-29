@@ -81,12 +81,16 @@ static DWORD state_hook(DWORD user, void *device, unsigned char *state) {
     unsigned wheel_before = wheel_buttons_wheel_reads();
     DWORD result = get_state(user, device, state);
     if (result != 0 || !state) return result;
+    static volatile LONG seen;
+    if (!InterlockedExchange(&seen, 1)) log_append("COCKPIT VIEW: the game reads a controller through the camera hook.\r\n");
     int wheel = wheel_buttons_wheel_reads() != wheel_before;
     int input = wheel ? wheel_buttons_action_input(ACTION_SWITCH_CAMERA)
                       : controller_action_input(ACTION_SWITCH_CAMERA);
     if (input < 0 || input > 15 || input == 10 || input == 11) return result; /* 10/11 are triggers */
     unsigned short buttons, mask = (unsigned short)(1u << input);
     memory_copy(&buttons, state + 4, sizeof(buttons));
+    static volatile LONG pressed_seen;
+    if ((buttons & mask) && !InterlockedExchange(&pressed_seen, 1)) log_append_value("COCKPIT VIEW: camera button seen, input ", input);
     if (camera_button(user, (buttons & mask) != 0)) {
         buttons &= (unsigned short)~mask;
         memory_copy(state + 4, &buttons, sizeof(buttons));
