@@ -5,6 +5,8 @@ Works offline and online with [FH2MP](https://github.com/Charelene/FH2MP).
 
 **[⬇ Download the latest version](../../releases/latest)** · current version: **V6**
 
+**[Join the Gripline Discord](https://discord.gg/FEnY2nvc)** · help, bug reports, ideas for V7 and showcase
+
 Gripline is an add-on next to Azimuth, the official [Extra Options](https://github.com/RokkuDayo/ForzaHorizon2_ExtraOptions)
 by RokkuDayo and FH2MP. It is one file, `fh2-mods\Gripline.dll`, a [FH2 Mod Platform](https://github.com/Trinculo54/fh2-mod-platform)
 mod. Since V6 Gripline only does what the others don't:
