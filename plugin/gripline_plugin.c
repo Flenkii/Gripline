@@ -301,14 +301,12 @@ static char page_labels[PAGE_ROWS][64];
 static char page_keys[PAGE_ROWS][8];
 
 static const char *const preset_help_en[RIG_DENSITY_COUNT] = {
-    "", "The game's own traffic.", "A little more than the game: about 30 cars, rush hour 7:00-19:00.",
-    "Clearly more cars on every road: about 70.", "100 cars at any time of day.",
-    "Use at your own risk: 200 cars at any time of day, as many as the game will spawn. May cost frame rate.",
+    "", "The game's own traffic.",
+    "As much traffic as the game spawns, at any time of day, coming from further away.",
     "Nobody drives (offline).", "Drivatars instead of civilian traffic."};
 static const char *const preset_help_de[RIG_DENSITY_COUNT] = {
-    "", "Der Verkehr des Spiels.", "Etwas mehr als im Spiel: etwa 30 Autos, Rushhour 7 bis 19 Uhr.",
-    "Deutlich mehr Autos auf jeder Straße: etwa 70.", "100 Autos zu jeder Uhrzeit.",
-    "Auf eigene Gefahr: 200 Autos zu jeder Uhrzeit, so viele wie das Spiel erzeugt. Kann Bildrate kosten.",
+    "", "Der Verkehr des Spiels.",
+    "So viel Verkehr, wie das Spiel erzeugt, zu jeder Uhrzeit und aus größerer Entfernung.",
     "Offline fährt niemand.", "Drivatare statt normalem Verkehr."};
 
 static void build_traffic_page(void) {
@@ -336,7 +334,6 @@ static void build_traffic_page(void) {
         rows[n].value = preset == (int)p ? picked : NULL;
         rows[n].description = german ? preset_help_de[p] : preset_help_en[p];
         rows[n].footer = restart;
-        rows[n].value_alert = p == 5 && preset == 5;
     }
     rows[n].size = sizeof(FH2PageRow);
     rows[n].label = german ? "Menge (eigene Werte)" : "Amount (custom)";
@@ -385,7 +382,7 @@ static void add_traffic_page(void) {
     page.key = TRAFFIC_PAGE;
     page.title = "Gripline Traffic";
     page.label = "Traffic: Preset and Amount";
-    page.description = "Original, Calm, Busy, Rush Hour, Chaos, No Traffic or Drivatars Only - by name. "
+    page.description = "Original, Much More Traffic, No Traffic or Drivatars Only - by name. "
                        "Press A on one. Applies after restarting Azimuth.";
     page.on_open = on_page_open;
     page.on_select = on_page_select;

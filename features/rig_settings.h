@@ -39,7 +39,7 @@ enum {
 int rig_kind_is_choice(unsigned kind);
 const char *rig_kind_collection(unsigned kind);
 
-#define RIG_DENSITY_COUNT 8
+#define RIG_DENSITY_COUNT 5 /* own values, Original, Much More Traffic, No Traffic, Drivatars Only */
 #define RIG_TRAFFIC_COUNT 8 /* TrafficLevel 0..5, 6 = no traffic, 7 = Drivatars only */
 
 typedef struct {

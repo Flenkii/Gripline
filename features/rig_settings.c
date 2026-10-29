@@ -79,12 +79,9 @@ unsigned rig_setting_order(unsigned position) {
 static const unsigned char density_presets[RIG_DENSITY_COUNT][2] = {
     {0, 0}, /* 0 = own values (not a preset) */
     {0, 0}, /* 1 = Original */
-    {1, 0}, /* 2 = Ruhig */
-    {3, 0}, /* 3 = Lebhaft */
-    {4, 1}, /* 4 = Rushhour */
-    {5, 1}, /* 5 = Chaos */
-    {6, 0}, /* 6 = Kein Verkehr */
-    {7, 1}, /* 7 = Nur Drivatare */
+    {5, 1}, /* 2 = Deutlich mehr Verkehr (the most the game spawns), all day */
+    {6, 0}, /* 3 = Kein Verkehr */
+    {7, 1}, /* 4 = Nur Drivatare */
 };
 
 static int density_current(void) {
@@ -115,9 +112,8 @@ static const RigText german[RIG_SETTING_COUNT] = {
                              "Volle Verkehrsdichte zu jeder Uhrzeit statt nur von 7 bis 19 Uhr. "
                              "Wirkt sofort."},
     [RIG_TRAFFIC_PRESET] = {"Verkehr: Voreinstellung",
-                            "Stellt Menge und Rushhour mit einem Klick ein: Original, Ruhig (30), "
-                            "Lebhaft (70), Rushhour (100, rund um die Uhr), Chaos (200, rund "
-                            "um die Uhr, auf eigene Gefahr), Kein Verkehr oder Nur Drivatare. Änderst du danach Menge oder Rushhour, steht hier Eigene "
+                            "Stellt Menge und Rushhour mit einem Klick ein: Original, Deutlich mehr "
+                            "Verkehr (so viel das Spiel erzeugt, rund um die Uhr), Kein Verkehr oder Nur Drivatare. Änderst du danach Menge oder Rushhour, steht hier Eigene "
                             "Werte. Wird sofort gespeichert, die Menge wirkt aber erst nach einem "
                             "Neustart von Azimuth."},
     [RIG_KEY_ENABLED] = {"Tastatur: Tastatur",
@@ -165,8 +161,8 @@ static const RigText english[RIG_SETTING_COUNT] = {
                              "Full traffic density at any time of day instead of 7:00-19:00 only. "
                              "Applies immediately."},
     [RIG_TRAFFIC_PRESET] = {"Traffic: Preset",
-                            "Sets amount and rush hour in one go: Original, Calm (30), Busy (70), "
-                            "Rush Hour (100, all day), Chaos (200, all day, use at your own risk), No Traffic or Drivatars Only. Changing amount or "
+                            "Sets amount and rush hour in one go: Original, Much More Traffic (as "
+                            "much as the game spawns, all day), No Traffic or Drivatars Only. Changing amount or "
                             "rush hour afterwards shows Custom. Saved immediately, the amount only "
                             "applies after restarting Azimuth."},
     [RIG_KEY_ENABLED] = {"Keyboard: Keyboard",
@@ -207,9 +203,9 @@ static const RigText english[RIG_SETTING_COUNT] = {
 };
 
 static const wchar_t *const density_german[RIG_DENSITY_COUNT] = {
-    L"Eigene Werte", L"Original", L"Ruhig", L"Lebhaft", L"Rushhour", L"Chaos", L"Kein Verkehr", L"Nur Drivatare"};
+    L"Eigene Werte", L"Original", L"Deutlich mehr Verkehr", L"Kein Verkehr", L"Nur Drivatare"};
 static const wchar_t *const density_english[RIG_DENSITY_COUNT] = {
-    L"Custom", L"Original", L"Calm", L"Busy", L"Rush Hour", L"Chaos", L"No Traffic", L"Drivatars Only"};
+    L"Custom", L"Original", L"Much More Traffic", L"No Traffic", L"Drivatars Only"};
 
 const wchar_t *rig_density_choice(unsigned char *game_image, unsigned index) {
     if (index >= RIG_DENSITY_COUNT) {
