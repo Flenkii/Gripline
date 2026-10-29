@@ -18,21 +18,26 @@
 
 #define TRAFFIC_FOLDER L"gripline_traffic"
 
+enum { ROADS_NORMAL, ROADS_EMPTY, ROADS_DRIVATARS };
+
 typedef struct {
-    int max_active, types, type_mult, fill, empty;
+    int max_active, types, type_mult, fill, roads, max_festival;
     double traffic, festival, cap, distance;
 } Level;
 
-/* TrafficLevel 0..5; MaxActiveTraffic follows the menu ("24 cars" .. "150 cars"). Higher levels also spawn
-   farther away, so a larger area is filled evenly instead of a convoy right in front of the player. */
-static const Level levels[7] = {
-    {18, 8, 1, 0, 0, 1.0, 1.0, 1.0, 1.0},   /* original */
-    {24, 8, 1, 0, 0, 1.5, 1.5, 1.0, 1.0},   /* light */
-    {36, 10, 1, 1, 0, 2.0, 2.0, 1.0, 1.25}, /* busy */
-    {48, 10, 2, 1, 0, 3.0, 2.5, 1.5, 1.25}, /* strong */
-    {64, 12, 2, 1, 0, 4.0, 3.0, 1.5, 2.0},  /* rush hour */
-    {150, 16, 4, 1, 0, 8.0, 5.0, 3.0, 2.5}, /* chaos */
-    {18, 8, 1, 0, 1, 1.0, 1.0, 1.0, 1.0},   /* no traffic: density 0 for traffic and festival cars */
+/* TrafficLevel 0..5; MaxActiveTraffic follows the menu ("24 cars" .. "150 cars"). spawnIn/OutDistance only
+   exists for town roads (200/250 m), so the distance factor stays small: a larger circle with the same
+   number of cars only thins them out. 6 = no traffic, 7 = Drivatars only (the festival cars, which the game
+   caps at 11 in CarLoadingSettings, instead of civilian traffic). */
+static const Level levels[8] = {
+    {18, 8, 1, 0, ROADS_NORMAL, 11, 1.0, 1.0, 1.0, 1.0},     /* original */
+    {24, 8, 1, 0, ROADS_NORMAL, 14, 1.5, 1.5, 1.0, 1.0},     /* light */
+    {36, 10, 1, 1, ROADS_NORMAL, 18, 2.0, 2.0, 1.0, 1.0},    /* busy */
+    {48, 10, 2, 1, ROADS_NORMAL, 24, 3.0, 2.5, 1.5, 1.25},   /* strong */
+    {64, 12, 2, 1, ROADS_NORMAL, 32, 4.0, 3.0, 2.0, 1.25},   /* rush hour */
+    {150, 16, 4, 1, ROADS_NORMAL, 60, 10.0, 5.0, 4.0, 1.5},  /* chaos */
+    {18, 8, 1, 0, ROADS_EMPTY, 11, 1.0, 1.0, 1.0, 1.0},      /* no traffic: density 0 for traffic and festival cars */
+    {18, 8, 1, 0, ROADS_DRIVATARS, 80, 1.0, 8.0, 3.0, 1.0},  /* Drivatars only, at the road's traffic speed */
 };
 
 static const char *const density_files[] = {
@@ -262,6 +267,10 @@ static double rule_max_active(double v, const Level *l) {
     return v > l->max_active ? v : l->max_active;
 }
 
+static double rule_max_festival(double v, const Level *l) {
+    return v > l->max_festival ? v : l->max_festival;
+}
+
 static double rule_types(double v, const Level *l) {
     return v > l->types ? v : l->types;
 }
@@ -273,9 +282,52 @@ static double rule_type_mult(double v, const Level *l) {
 
 /* ------------------------------------------------------------------ files */
 
+/* Drivatars only: the festival entries get the speed of the traffic entry of the same road type (the
+   festival list has none), so the Drivatars may drive like traffic instead of racing - if the game uses it. */
+typedef struct {
+    char name[32], speed[16];
+} RoadSpeed;
+static RoadSpeed speeds[32];
+static unsigned speed_count;
+
+static void remember_speed(const char *tag, const char *end) {
+    size_t name_length, speed_length;
+    const char *name = attribute(tag, end, "densityNameTagValue", &name_length);
+    const char *speed = attribute(tag, end, "speed", &speed_length);
+    if (!name || !speed || name_length >= 32 || speed_length >= 16 || speed_count >= ARRAY_COUNT(speeds)) return;
+    RoadSpeed *r = &speeds[speed_count++];
+    memory_copy(r->name, name, name_length);
+    r->name[name_length] = 0;
+    memory_copy(r->speed, speed, speed_length);
+    r->speed[speed_length] = 0;
+}
+
+static void give_speed(Tag *tag) {
+    size_t length;
+    const char *end = tag->data + tag->length;
+    if (attribute(tag->data, end, "speed", &length)) return;
+    for (unsigned i = 0; i < speed_count; ++i) {
+        if (!attribute_is(tag->data, end, "densityNameTagValue", speeds[i].name)) continue;
+        /* insert ' speed="x"' before the closing "/>" */
+        size_t n = text_length(speeds[i].speed), insert = 9 + n;
+        if (tag->length < 2 || tag->length + insert >= sizeof(tag->data)) return;
+        char *close = tag->data + tag->length - 2;
+        while (close > tag->data && is_space(close[-1])) --close;
+        size_t tail = (size_t)(tag->data + tag->length - close);
+        for (size_t k = tail; k-- > 0;) close[k + insert] = close[k];
+        memory_copy(close, " speed=\"", 8);
+        memory_copy(close + 8, speeds[i].speed, n);
+        close[8 + n] = '"';
+        tag->length += insert;
+        ++changes;
+        return;
+    }
+}
+
 /* <DensityList cartype="traffic|festival"> ... <Density densityNameTagValue=".." min max spawnInDistance ../> */
 static void patch_densities(const char *in, size_t size, Text *out, const Level *l) {
     const char *end = in + size, *p = in;
+    speed_count = 0;
     while (p < end) {
         const char *list = find(p, end, "<DensityList");
         const char *open_end = list ? find(list, end, ">") : NULL;
@@ -327,10 +379,20 @@ static void patch_densities(const char *in, size_t size, Text *out, const Level 
                     ++changes;
                     tag = copy;
                 }
-            } else if (l->empty) {
+            } else if (l->roads == ROADS_EMPTY) {
                 if (traffic || festival) {
                     tag_set(&tag, "min", rule_zero, l);
                     tag_set(&tag, "max", rule_zero, l);
+                }
+            } else if (l->roads == ROADS_DRIVATARS) {
+                if (traffic) {
+                    remember_speed(d, e);
+                    tag_set(&tag, "min", rule_zero, l);
+                    tag_set(&tag, "max", rule_zero, l);
+                } else if (festival) {
+                    tag_set(&tag, "min", rule_festival, l);
+                    tag_set(&tag, "max", rule_festival, l);
+                    give_speed(&tag);
                 }
             } else {
                 if (traffic && l->traffic != 1.0) {
@@ -363,7 +425,9 @@ static int patch_car_loading(const char *in, size_t size, Text *out, const Level
     while (p < end) {
         const char *a = find(p, end, "<TrafficSettings");
         const char *b = l->type_mult > 1 ? find(p, end, "<CarType") : NULL;
+        const char *c = find(p, end, "<FestivalSettings");
         const char *t = a && (!b || a < b) ? a : b;
+        if (c && (!t || c < t)) t = c;
         const char *t_end = t ? find(t, end, ">") : NULL;
         if (!t_end) break;
         put(out, p, (size_t)(t - p));
@@ -371,7 +435,9 @@ static int patch_car_loading(const char *in, size_t size, Text *out, const Level
         if (!tag_load(&tag, t, t_end + 1)) {
             put(out, t, (size_t)(t_end + 1 - t));
         } else {
-            if (t == a) {
+            if (t == c) {
+                tag_set(&tag, "MaxActiveFestival", rule_max_festival, l);
+            } else if (t == a) {
                 tag_set(&tag, "MaxActiveTraffic", rule_max_active, l);
                 tag_set(&tag, "MaxActiveTypes", rule_types, l);
             } else if (is_space(t[8])) {
@@ -456,12 +522,12 @@ static int make_files(const wchar_t *mount_dir, const Level *l) {
     log_append_value("TRAFFIC: traffic files written to Mount\\gripline_traffic: ", written);
     log_append_value("TRAFFIC: car loading values changed: ", car_loading_changes);
     log_append_value("TRAFFIC: density values changed: ", changes - car_loading_changes);
-    return written > 0 && (car_loading_changes > 0 || l->empty);
+    return written > 0 && (car_loading_changes > 0 || l->roads == ROADS_EMPTY);
 }
 
 void traffic_files_start(const wchar_t *mount_dir, int traffic_level) {
     if (state != 0) return;
-    if (!mount_dir || traffic_level <= 0 || traffic_level > 6) {
+    if (!mount_dir || traffic_level <= 0 || traffic_level > 7) {
         InterlockedExchange(&state, 3);
         return;
     }
@@ -471,7 +537,9 @@ void traffic_files_start(const wchar_t *mount_dir, int traffic_level) {
     } __except (EXCEPTION_EXECUTE_HANDLER) {
         ok = 0;
     }
-    if (ok && traffic_level == 6) {
+    if (ok && traffic_level == 7) {
+        log_append("TRAFFIC: Drivatars only - no civilian traffic, more Drivatars at traffic speed.\r\n");
+    } else if (ok && traffic_level == 6) {
         log_append("TRAFFIC: no traffic - traffic and festival density 0.\r\n");
     } else if (ok) {
         log_append_value("TRAFFIC: game traffic data raised (more cars on the roads), TrafficLevel=", traffic_level);
@@ -496,7 +564,7 @@ int traffic_files_wait_ready(void) {
 /* tests: runs the rules on one file in memory (kind 0 = CarLoadingSettings, 1 = Densities) */
 __declspec(dllexport) size_t Fh2TestTrafficPatch(int kind, int level, const char *in, size_t size, char *out,
                                                 size_t capacity) {
-    if (level < 0 || level > 6) return 0;
+    if (level < 0 || level > 7) return 0;
     Text text = {0};
     changes = 0;
     if (kind == 0) {

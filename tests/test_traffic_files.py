@@ -31,8 +31,8 @@ DENSITIES = '''<?xml version="1.0" encoding="utf-8"?>
     <Density id="12" densityNameTagValue="open_world" min="0" max="0" speed="15" spawnInDistance="200" spawnOutDistance="250"/>
   </DensityList>
   <DensityList cartype="festival">
-    <Density id="1" densityNameTagValue="a" min="0.1" max="0.25" speed="25" spawnInDistance="300" spawnOutDistance="350"/>
-    <Density id="12" densityNameTagValue="open_world" min="0.05" max="0.1" speed="15" spawnInDistance="200" spawnOutDistance="250"/>
+    <Density id="1" densityNameTagValue="a" min="0.1" max="0.25" spawnAwayChance="0.75"/>
+    <Density id="12" densityNameTagValue="open_world" min="0.05" max="0.1" spawnAwayChance="0.7" />
   </DensityList>
   <DensityList cartype="police">
     <Density id="1" densityNameTagValue="a" min="0.1" max="0.2" speed="25" spawnInDistance="300" spawnOutDistance="350"/>
@@ -41,6 +41,7 @@ DENSITIES = '''<?xml version="1.0" encoding="utf-8"?>
 '''
 CAR_LOADING = '''<?xml version="1.0" encoding="utf-8"?>
 <CarLoadingSettings>
+  <FestivalSettings MaxActiveFestival="11" InitialNumFestival="3" />
   <TrafficSettings MaxActiveTraffic="18" InitialNumTraffic="6" MaxActiveTypes="8">
     <CarType ModelID="bus" MaxActive="1"/>
     <CarType ModelID="hatch" MaxActive="3"/>
@@ -49,11 +50,11 @@ CAR_LOADING = '''<?xml version="1.0" encoding="utf-8"?>
 '''
 # TrafficLevel -> the same values as the Python tool (see levels[] in traffic_files.c)
 LEVELS = {
-    1: dict(mult=1.5, festival=1.5, cap=1.0, dist=1.0, fill=0, max_active=24, types=8, type_mult=1),
-    2: dict(mult=2.0, festival=2.0, cap=1.0, dist=1.25, fill=1, max_active=36, types=10, type_mult=1),
-    3: dict(mult=3.0, festival=2.5, cap=1.5, dist=1.25, fill=1, max_active=48, types=10, type_mult=2),
-    4: dict(mult=4.0, festival=3.0, cap=1.5, dist=2.0, fill=1, max_active=64, types=12, type_mult=2),
-    5: dict(mult=8.0, festival=5.0, cap=3.0, dist=2.5, fill=1, max_active=150, types=16, type_mult=4),
+    1: dict(max_festival=14, mult=1.5, festival=1.5, cap=1.0, dist=1.0, fill=0, max_active=24, types=8, type_mult=1),
+    2: dict(max_festival=18, mult=2.0, festival=2.0, cap=1.0, dist=1.0, fill=1, max_active=36, types=10, type_mult=1),
+    3: dict(max_festival=24, mult=3.0, festival=2.5, cap=1.5, dist=1.25, fill=1, max_active=48, types=10, type_mult=2),
+    4: dict(max_festival=32, mult=4.0, festival=3.0, cap=2.0, dist=1.25, fill=1, max_active=64, types=12, type_mult=2),
+    5: dict(max_festival=60, mult=10.0, festival=5.0, cap=4.0, dist=1.5, fill=1, max_active=150, types=16, type_mult=4),
 }
 
 e = Emu(DLL, tempfile.mkdtemp(prefix='eo-traffic-'))
@@ -74,10 +75,16 @@ for level, c in LEVELS.items():
     check(run(1, level, DENSITIES) == ref, f'Densities.xml, TrafficLevel={level}')
     ref = MT.patch_car_loading(CAR_LOADING, dict(max_active=c['max_active'], initial=6, types=c['types'],
                                                  type_mult=c['type_mult']), [])
+    ref = ref.replace('MaxActiveFestival="11"', 'MaxActiveFestival="%d"' % c['max_festival'])
     check(run(0, level, CAR_LOADING) == ref, f'CarLoadingSettings.xml, TrafficLevel={level}')
 got = run(1, 6, DENSITIES)
 check(got.count('min="0" max="0"') == 6 and 'min="0.1" max="0.2"' in got, 'Kein Verkehr: Verkehr + Festival 0, Polizei bleibt')
 check(run(0, 6, CAR_LOADING) == CAR_LOADING, 'Kein Verkehr: CarLoadingSettings unverändert')
+got = run(1, 7, DENSITIES)
+check('densityNameTagValue="a" min="0" max="0" speed="25"' in got, 'Nur Drivatare: kein Zivilverkehr')
+check('densityNameTagValue="a" min="0.8" max="2" spawnAwayChance="0.75" speed="25"/>' in got, 'Nur Drivatare: Drivatare x8 mit Tempo der Straße')
+check('densityNameTagValue="open_world" min="0.4" max="0.8" spawnAwayChance="0.7" speed="15" />' in got, 'Nur Drivatare: Tempo auch vor " />"')
+check('MaxActiveFestival="80"' in run(0, 7, CAR_LOADING) and 'MaxActiveTraffic="18"' in run(0, 7, CAR_LOADING), 'Nur Drivatare: 80 Drivatare, Verkehr wie im Spiel')
 check(run(1, 0, DENSITIES) == DENSITIES and run(0, 0, CAR_LOADING) == CAR_LOADING, 'TrafficLevel=0: unverändert')
 got = run(1, 4, DENSITIES)
 check('densityNameTagValue="open_world" min="0.8" max="1.4"' in got, 'open_world bekommt Zivilverkehr (wie "b")')
