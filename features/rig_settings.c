@@ -48,7 +48,7 @@ static const RigSettingInfo infos[RIG_SETTING_COUNT] = {
 /* Rows of the menu. */
 static const unsigned char order[] = {
     RIG_KEY_ENABLED,     RIG_KEY_STEER,     RIG_KEY_RETURN,     RIG_KEY_PEDAL,
-    RIG_TRAFFIC_PRESET,  RIG_TRAFFIC_LEVEL, RIG_TRAFFIC_ALL_DAY,
+    RIG_TRAFFIC_ALL_DAY, /* preset and amount: the Traffic page (plugin), with names instead of numbers */
     RIG_GRIP_STEERING,   RIG_GRIP_VIEW_FORWARD, RIG_GRIP_VIEW_UP, RIG_GRIP_NOTIFICATIONS, RIG_GRIP_REPORT,
 };
 _Static_assert(sizeof(order) <= RIG_SETTING_COUNT, "menu rows");
@@ -115,9 +115,9 @@ static const RigText german[RIG_SETTING_COUNT] = {
                              "Volle Verkehrsdichte zu jeder Uhrzeit statt nur von 7 bis 19 Uhr. "
                              "Wirkt sofort."},
     [RIG_TRAFFIC_PRESET] = {"Verkehr: Voreinstellung",
-                            "Stellt Menge und Rushhour mit einem Klick ein: Original, Ruhig (24), "
-                            "Lebhaft (48), Rushhour (64, rund um die Uhr), Chaos (150, rund "
-                            "um die Uhr), Kein Verkehr oder Nur Drivatare. Änderst du danach Menge oder Rushhour, steht hier Eigene "
+                            "Stellt Menge und Rushhour mit einem Klick ein: Original, Ruhig (30), "
+                            "Lebhaft (70), Rushhour (100, rund um die Uhr), Chaos (200, rund "
+                            "um die Uhr, auf eigene Gefahr), Kein Verkehr oder Nur Drivatare. Änderst du danach Menge oder Rushhour, steht hier Eigene "
                             "Werte. Wird sofort gespeichert, die Menge wirkt aber erst nach einem "
                             "Neustart von Azimuth."},
     [RIG_KEY_ENABLED] = {"Tastatur: Tastatur",
@@ -165,8 +165,8 @@ static const RigText english[RIG_SETTING_COUNT] = {
                              "Full traffic density at any time of day instead of 7:00-19:00 only. "
                              "Applies immediately."},
     [RIG_TRAFFIC_PRESET] = {"Traffic: Preset",
-                            "Sets amount and rush hour in one go: Original, Calm (24), Busy (48), "
-                            "Rush Hour (64, all day), Chaos (150, all day), No Traffic or Drivatars Only. Changing amount or "
+                            "Sets amount and rush hour in one go: Original, Calm (30), Busy (70), "
+                            "Rush Hour (100, all day), Chaos (200, all day, use at your own risk), No Traffic or Drivatars Only. Changing amount or "
                             "rush hour afterwards shows Custom. Saved immediately, the amount only "
                             "applies after restarting Azimuth."},
     [RIG_KEY_ENABLED] = {"Keyboard: Keyboard",
@@ -219,10 +219,10 @@ const wchar_t *rig_density_choice(unsigned char *game_image, unsigned index) {
                                                      : density_english[index];
 }
 
-static const wchar_t *const traffic_german[RIG_TRAFFIC_COUNT] = {L"Original (~14)", L"24 Autos", L"36 Autos",
-                                                  L"48 Autos",       L"64 Autos", L"150 Autos", L"Kein Verkehr", L"Nur Drivatare"};
-static const wchar_t *const traffic_english[RIG_TRAFFIC_COUNT] = {L"Original (~14)", L"24 Cars", L"36 Cars",
-                                                   L"48 Cars",        L"64 Cars", L"150 Cars", L"No Traffic", L"Drivatars Only"};
+static const wchar_t *const traffic_german[RIG_TRAFFIC_COUNT] = {L"Original (~14)", L"30 Autos", L"45 Autos",
+                                                  L"70 Autos",       L"100 Autos", L"200 Autos", L"Kein Verkehr", L"Nur Drivatare"};
+static const wchar_t *const traffic_english[RIG_TRAFFIC_COUNT] = {L"Original (~14)", L"30 Cars", L"45 Cars",
+                                                   L"70 Cars",        L"100 Cars", L"200 Cars", L"No Traffic", L"Drivatars Only"};
 
 static const RigText *texts(unsigned char *game_image) {
     return game_language_is_german(game_image) ? german : english;

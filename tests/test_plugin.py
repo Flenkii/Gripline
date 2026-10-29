@@ -73,7 +73,7 @@ e.wd(api, API_SIZE)
 e.wd(api + 4, 8)
 e.wq(api + 16, e.put_wstr('C:\\test'))
 e.wq(api + 24, e.put_wstr('C:\\test\\Mount'))
-seen = {'log': [], 'rows': [], 'info': None}
+seen = {'log': [], 'rows': [], 'info': None, 'pages': []}
 
 
 def register_mod():
@@ -91,7 +91,14 @@ def add_setting():
     return 1
 
 
+def add_page():
+    pg = e.arg(1)
+    seen['pages'].append((cstr(e.rq(pg + 8)), cstr(e.rq(pg + 16))))
+    return 1
+
+
 stubs = {
+    'add_page': add_page,
     'register_mod': register_mod,
     'log': lambda: seen['log'].append(cstr(e.arg(1))),
     'add_setting': add_setting,
@@ -119,16 +126,16 @@ check(os.path.isdir(os.path.join(root, 'mods', 'Gripline', 'media')), 'mods\\Gri
 
 print('Mods page rows:')
 rows = seen['rows']
-check(len(rows) == 12, '%d rows (keyboard, traffic, cockpit, Gripline)' % len(rows))
+check(len(rows) == 10, '%d rows (keyboard, traffic, cockpit, Gripline)' % len(rows))
 check(not any(w in r['label'] for r in rows for w in ('Wheel', 'Weather', 'Time of Day', 'Profile')),
       'no wheel, weather, time of day or profile rows (Azimuth / Extra Options do those)')
 keys = [r['key'] for r in rows]
 check(len(set(keys)) == len(keys), 'keys unique')
 check(all(re.fullmatch(r'[A-Za-z0-9_]+', k) for k in keys), 'keys letters/digits')
 check(all(r['label'] for r in rows), 'every row has a label')
-preset = [r for r in rows if r['label'] == 'Traffic: Preset']
-check(preset and preset[0]['kind'] == 1 and preset[0]['step'] == 1.0 and '0 = ' in preset[0]['description'],
-      'traffic preset: slider in steps of 1 with the choices named')
+check(not any(r['label'] in ('Traffic: Preset', 'Traffic: Amount') for r in rows),
+      'traffic preset and amount are not numbered sliders any more')
+check(seen['pages'] == [('Traffic', 'Gripline Traffic')], 'Traffic page with the presets by name: %r' % (seen['pages'],))
 check(any(r['kind'] == 0 for r in rows), 'on/off rows')
 check(any(r['restart'] for r in rows), 'restart rows marked')
 for r in rows[:6]:

@@ -50,11 +50,11 @@ CAR_LOADING = '''<?xml version="1.0" encoding="utf-8"?>
 '''
 # TrafficLevel -> the same values as the Python tool (see levels[] in traffic_files.c)
 LEVELS = {
-    1: dict(max_festival=14, mult=1.5, festival=1.5, cap=1.0, dist=1.0, fill=0, max_active=24, types=8, type_mult=1),
-    2: dict(max_festival=18, mult=2.0, festival=2.0, cap=1.0, dist=1.0, fill=1, max_active=36, types=10, type_mult=1),
-    3: dict(max_festival=24, mult=3.0, festival=2.5, cap=1.5, dist=1.25, fill=1, max_active=48, types=10, type_mult=2),
-    4: dict(max_festival=32, mult=4.0, festival=3.0, cap=2.0, dist=1.25, fill=1, max_active=64, types=12, type_mult=2),
-    5: dict(max_festival=60, mult=10.0, festival=5.0, cap=4.0, dist=1.5, fill=1, max_active=150, types=16, type_mult=4),
+    1: dict(max_festival=16, mult=2.0, festival=1.5, cap=1.5, dist=1.0, fill=1, max_active=30, types=10, type_mult=1),
+    2: dict(max_festival=22, mult=3.0, festival=2.0, cap=2.0, dist=1.25, fill=1, max_active=45, types=10, type_mult=2),
+    3: dict(max_festival=30, mult=5.0, festival=3.0, cap=3.0, dist=1.25, fill=1, max_active=70, types=12, type_mult=2),
+    4: dict(max_festival=40, mult=8.0, festival=4.0, cap=4.0, dist=1.5, fill=1, max_active=100, types=14, type_mult=3),
+    5: dict(max_festival=80, mult=20.0, festival=6.0, cap=8.0, dist=2.0, fill=1, max_active=200, types=20, type_mult=6),
 }
 
 e = Emu(DLL, tempfile.mkdtemp(prefix='eo-traffic-'))
@@ -87,7 +87,7 @@ check('densityNameTagValue="open_world" min="0.4" max="0.8" spawnAwayChance="0.7
 check('MaxActiveFestival="80"' in run(0, 7, CAR_LOADING) and 'MaxActiveTraffic="18"' in run(0, 7, CAR_LOADING), 'Nur Drivatare: 80 Drivatare, Verkehr wie im Spiel')
 check(run(1, 0, DENSITIES) == DENSITIES and run(0, 0, CAR_LOADING) == CAR_LOADING, 'TrafficLevel=0: unverändert')
 got = run(1, 4, DENSITIES)
-check('densityNameTagValue="open_world" min="0.8" max="1.4"' in got, 'open_world bekommt Zivilverkehr (wie "b")')
+check('densityNameTagValue="open_world" min="1.6" max="2.8"' in got, 'open_world bekommt Zivilverkehr (wie "b")')
 check('cartype="police">\n    <Density id="1" densityNameTagValue="a" min="0.1" max="0.2"' in got, 'Polizei bleibt')
 
 print('Ganzer Start (EntityModel.zip -> Mount\\gripline_traffic)')
@@ -113,8 +113,8 @@ files = sorted(os.path.relpath(os.path.join(d, n), out).replace(os.sep, '/') for
 check(files == ['AI/CarLoadingSettings.xml', 'AI/Densities.xml', 'EntityModel/AI/CarLoadingSettings.xml',
                 'EntityModel/AI/Densities.xml'], f'Dateien: {files} (keine Renn-Dichte)')
 check(open(os.path.join(out, 'EntityModel', 'AI', 'Densities.xml')).read() == run(1, 4, DENSITIES), 'Densities.xml wie oben')
-check('MaxActiveTraffic="64"' in open(os.path.join(out, 'EntityModel', 'AI', 'CarLoadingSettings.xml')).read(),
-      'MaxActiveTraffic 18 -> 64')
+check('MaxActiveTraffic="100"' in open(os.path.join(out, 'EntityModel', 'AI', 'CarLoadingSettings.xml')).read(),
+      'MaxActiveTraffic 18 -> 100')
 check(f.call('Fh2TestTrafficFilesStart', f.put_wstr('C:\\test\\Mount'), 6) == 2, 'Kein Verkehr: Ordner wird eingebunden')
 check(f.call('Fh2TestTrafficFilesStart', f.put_wstr('C:\\test\\Mount'), 0) == 3, 'TrafficLevel=0: Ordner wird nicht eingebunden')
 

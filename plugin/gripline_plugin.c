@@ -29,6 +29,7 @@
 #include "features/report.h"
 #include "features/rig_settings.h"
 #include "features/traffic_files.h"
+#include "features/game_language.h"
 
 void keyboard_pad_game_start(unsigned char *game_image, const wchar_t *settings_directory);
 void report_init(const wchar_t *settings_directory);
@@ -290,6 +291,107 @@ static void add_rows(void) {
     }
 }
 
+/* ------------------------------------------------------------------ Traffic page */
+
+/* Preset and amount as a list of names (MODS > Installed mods > Gripline > Traffic): A picks one.
+   The Mods page itself only knows On/Off rows and numbered sliders. */
+#define TRAFFIC_PAGE "Traffic"
+#define PAGE_ROWS (2 + RIG_DENSITY_COUNT + RIG_TRAFFIC_COUNT)
+static char page_labels[PAGE_ROWS][64];
+static char page_keys[PAGE_ROWS][8];
+
+static const char *const preset_help_en[RIG_DENSITY_COUNT] = {
+    "", "The game's own traffic.", "A little more than the game: about 30 cars, rush hour 7:00-19:00.",
+    "Clearly more cars on every road: about 70.", "100 cars at any time of day.",
+    "Use at your own risk: 200 cars at any time of day, as many as the game will spawn. May cost frame rate.",
+    "Nobody drives (offline).", "Drivatars instead of civilian traffic."};
+static const char *const preset_help_de[RIG_DENSITY_COUNT] = {
+    "", "Der Verkehr des Spiels.", "Etwas mehr als im Spiel: etwa 30 Autos, Rushhour 7 bis 19 Uhr.",
+    "Deutlich mehr Autos auf jeder Straße: etwa 70.", "100 Autos zu jeder Uhrzeit.",
+    "Auf eigene Gefahr: 200 Autos zu jeder Uhrzeit, so viele wie das Spiel erzeugt. Kann Bildrate kosten.",
+    "Offline fährt niemand.", "Drivatare statt normalem Verkehr."};
+
+static void build_traffic_page(void) {
+    if (!api || api->api_version < 8 || !api->set_page_rows) return;
+    int german = game && game_language_is_german(game);
+    static FH2PageRow rows[PAGE_ROWS];
+    unsigned n = 0;
+    int preset = rig_setting_get(RIG_TRAFFIC_PRESET), level = rig_setting_get(RIG_TRAFFIC_LEVEL);
+    const char *picked = german ? "Ausgewählt" : "Selected";
+    const char *restart = german ? "Wirkt nach einem Neustart von Azimuth." : "Applies after restarting Azimuth.";
+    memset(rows, 0, sizeof(rows));
+    rows[n].size = sizeof(FH2PageRow);
+    rows[n].label = german ? "Voreinstellung" : "Preset";
+    rows[n++].style = FH2_ROW_HEADING;
+    for (unsigned p = 1; p < RIG_DENSITY_COUNT; ++p, ++n) {
+        size_t used = 0;
+        page_labels[n][0] = 0;
+        append_wide(page_labels[n], sizeof(page_labels[n]), &used, rig_density_choice(game, p));
+        page_keys[n][0] = 'P';
+        page_keys[n][1] = (char)('0' + p);
+        page_keys[n][2] = 0;
+        rows[n].size = sizeof(FH2PageRow);
+        rows[n].key = page_keys[n];
+        rows[n].label = page_labels[n];
+        rows[n].value = preset == (int)p ? picked : NULL;
+        rows[n].description = german ? preset_help_de[p] : preset_help_en[p];
+        rows[n].footer = restart;
+        rows[n].value_alert = p == 5 && preset == 5;
+    }
+    rows[n].size = sizeof(FH2PageRow);
+    rows[n].label = german ? "Menge (eigene Werte)" : "Amount (custom)";
+    rows[n++].style = FH2_ROW_HEADING;
+    for (unsigned v = 0; v < RIG_TRAFFIC_COUNT; ++v, ++n) {
+        size_t used = 0;
+        page_labels[n][0] = 0;
+        append_wide(page_labels[n], sizeof(page_labels[n]), &used, rig_traffic_choice(game, v));
+        page_keys[n][0] = 'A';
+        page_keys[n][1] = (char)('0' + v);
+        page_keys[n][2] = 0;
+        rows[n].size = sizeof(FH2PageRow);
+        rows[n].key = page_keys[n];
+        rows[n].label = page_labels[n];
+        rows[n].value = level == (int)v ? picked : NULL;
+        rows[n].description = rig_setting_description(game, RIG_TRAFFIC_LEVEL);
+        rows[n].footer = restart;
+    }
+    api->set_page_rows(mod, TRAFFIC_PAGE, rows, n);
+}
+
+static void on_page_open(void *user, const char *page_key) {
+    (void)user;
+    (void)page_key;
+    build_traffic_page();
+}
+
+static void on_page_select(void *user, const char *page_key, const char *row_key) {
+    (void)user;
+    (void)page_key;
+    if (!started || !row_key || !row_key[0] || row_key[1] < '0' || row_key[1] > '9') return;
+    unsigned value = (unsigned)(row_key[1] - '0');
+    if (row_key[0] == 'P' && value < RIG_DENSITY_COUNT) rig_setting_set(RIG_TRAFFIC_PRESET, (int)value);
+    if (row_key[0] == 'A' && value < RIG_TRAFFIC_COUNT) rig_setting_set(RIG_TRAFFIC_LEVEL, (int)value);
+    build_traffic_page();
+    sync_rows();
+}
+
+static void add_traffic_page(void) {
+    if (api->api_version < 8 || !api->add_page || !api->set_page_rows) {
+        platform_log("platform older than 2.7.0: traffic preset only in Gripline.ini");
+        return;
+    }
+    static FH2Page page;
+    page.size = sizeof(page);
+    page.key = TRAFFIC_PAGE;
+    page.title = "Gripline Traffic";
+    page.label = "Traffic: Preset and Amount";
+    page.description = "Original, Calm, Busy, Rush Hour, Chaos, No Traffic or Drivatars Only - by name. "
+                       "Press A on one. Applies after restarting Azimuth.";
+    page.on_open = on_page_open;
+    page.on_select = on_page_select;
+    if (!api->add_page(mod, &page)) platform_log("could not add the Traffic page");
+}
+
 /* ------------------------------------------------------------------ start */
 
 /* Azimuth 1.0.3 drives the wheel (launcher, data\azimuth.ini [launcher] wheel_rotation); the cockpit
@@ -379,6 +481,7 @@ FH2MOD_EXPORT int fh2mod_init(const FH2ModApi *platform) {
         platform_log(cards ? "early card hook: yes" : "early card hook: no");
     }
     add_rows();
+    add_traffic_page();
     HANDLE thread = CreateThread(NULL, 0, start_thread, NULL, 0, NULL);
     if (!thread) {
         platform_log("could not start - no thread");

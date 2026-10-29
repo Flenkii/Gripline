@@ -14,7 +14,7 @@ mod. Since V6 Gripline only does what the others don't:
 | **Keyboard** | Drive with WASD, arrow keys move the camera while driving and scroll in menus, Enter/Backspace/Esc in menus. Works together with a controller (one merged pad). Bindings in `FH2_Keyboard.ini`. |
 | **Steering animation** *(off by default)* | Cockpit: hands hidden, the in-game steering wheel turns 1:1 with your real wheel, as far as the rotation set in the Azimuth launcher. Files are made once into `mods\Gripline\media`, game files stay untouched. Applies after a restart. |
 | **Cockpit view 2** | A second interior camera like in FH5: Tab goes cockpit → cockpit 2 → next camera (also **V**). Distance: *Cockpit View 2: Forward / Up*. |
-| **More traffic** | Presets Original/Calm/Busy/Rush Hour/Chaos/No Traffic/Drivatars Only, up to 150 cars, rush hour all day. Gripline raises the game's own traffic data (copies, game files unchanged). Applies after a restart; offline only. |
+| **More traffic** | Presets Original/Calm/Busy/Rush Hour/Chaos/No Traffic/Drivatars Only, up to 200 cars (Chaos, at your own risk), rush hour all day, picked by name on the *Traffic* page (MODS › Installed mods › Gripline). Gripline raises the game's own traffic data (copies, game files unchanged). Applies after a restart; offline only. |
 | **Nitro key** | For [NitroSystem](https://github.com/qiangqiang101/NitroSystem) by qiangqiang101: **N** presses its nitro button. Off in online sessions. |
 | **Key list** | **F5** shows all your key bindings at the right of the picture; F5 again hides it. |
 | **Cards** | Small Gripline cards at the top right of the picture (also in fullscreen). Can be switched off. |
