@@ -29,17 +29,24 @@ typedef struct FH2PluginVehicleFrame {
 
 typedef void (*GriplineUpdate)(void *car, unsigned input_enabled);
 static GriplineUpdate update;
+static unsigned tries;
+
+/* Gripline.dll may load after Extra Options starts its plugins, so a miss is tried again later */
+static GriplineUpdate link_gripline(void) {
+    HMODULE gripline = GetModuleHandleW(L"Gripline.dll");
+    return gripline ? (GriplineUpdate)(void *)GetProcAddress(gripline, "GriplineVehicleUpdate") : NULL;
+}
 
 __declspec(dllexport) BOOL WINAPI FH2PluginInitialize(const FH2PluginContext *context) {
-    HMODULE gripline = GetModuleHandleW(L"Gripline.dll");
-    update = gripline ? (GriplineUpdate)(void *)GetProcAddress(gripline, "GriplineVehicleUpdate") : NULL;
+    update = link_gripline();
     if (context && context->log_utf8)
         context->log_utf8(update ? "GriplineTick: linked to Gripline (weather and time of day tick)."
-                                 : "GriplineTick: fh2-mods\\Gripline.dll not loaded - nothing to tick.");
-    return update != NULL;
+                                 : "GriplineTick: fh2-mods\\Gripline.dll not loaded yet - trying again in the game.");
+    return TRUE;
 }
 
 __declspec(dllexport) void WINAPI FH2PluginVehicleUpdate(const FH2PluginVehicleFrame *frame) {
+    if (!update && (tries++ & 255) == 0) update = link_gripline();
     if (update && frame) update(frame->car, frame->input_enabled);
 }
 

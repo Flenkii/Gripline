@@ -32,6 +32,9 @@ static const struct {
     {L"fh2-mods\\platform.log", "fh2-mods/platform.log"},
     {L"fh2-mods\\platform-mods.txt", "fh2-mods/platform-mods.txt"},
     {L"data\\bin\\fh2wheels.log", "fh2wheels.log"},
+    {L"data\\logs\\azimuth.log", "azimuth.log"}, /* Azimuth 1.0.3: wheel and force feedback */
+    {L"mods\\loadorder.txt", "mods/loadorder.txt"},
+    {L"mods\\Extra Options - Weather Control\\plugins\\EO_WeatherControl.ini", "mods/EO_WeatherControl.ini"},
 };
 
 typedef struct {

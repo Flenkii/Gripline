@@ -16,6 +16,8 @@ enum {
 
 int time_of_day_setting(void);
 void time_of_day_set_setting(int value);
+/* 1 while Extra Options' Weather Control locks the clock: Gripline hands it back. */
+void time_of_day_set_yield(int yield);
 /* Called once per frame on the game thread (from the local car's update). */
 void time_of_day_tick(void);
 #endif

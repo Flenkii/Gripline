@@ -67,6 +67,7 @@ static const WeatherChoice choices[WEATHER_COUNT] = {
 
 static unsigned char *game;
 static volatile LONG wanted, generation;
+static volatile LONG yielding; /* 1 = Extra Options' Weather Control sets the weather */
 static LONG seen_generation = -1;
 static int loaded;
 
@@ -78,6 +79,12 @@ static ULONGLONG checked_at;
 
 int weather_setting(void) {
     return (int)wanted;
+}
+
+void weather_set_yield(int yield) {
+    if (InterlockedExchange(&yielding, yield != 0) != (yield != 0)) {
+        InterlockedIncrement(&generation);
+    }
 }
 
 void weather_set_setting(int value) {
@@ -268,7 +275,17 @@ void weather_tick(void) {
     }
     checked_at = now;
     seen_generation = current_generation;
-    int choice = (int)wanted;
+    int yield = (int)yielding;
+    int choice = yield ? WEATHER_ORIGINAL : (int)wanted;
+    static int yield_logged;
+    if (yield != yield_logged) {
+        if (yield && wanted != WEATHER_ORIGINAL) {
+            log_weather("Extra Options' Weather Control sets the weather - Gripline's weather waits.", "");
+        } else if (!yield && yield_logged) {
+            log_weather("Weather Control is on Dynamic again - Gripline's weather applies.", "");
+        }
+        yield_logged = yield;
+    }
     WeatherControl control;
     if (!read_control(manager, &control)) {
         return;

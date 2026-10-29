@@ -56,6 +56,7 @@ typedef struct {
 
 static unsigned char *game;
 static volatile LONG wanted, generation;
+static volatile LONG yielding; /* 1 = Extra Options' Weather Control locks the clock */
 static LONG seen_generation = -1;
 static int loaded;
 static int (*in_free_roam)(void) = autodrive_game_is_freeroam;
@@ -70,6 +71,12 @@ static ULONGLONG checked_at;
 
 int time_of_day_setting(void) {
     return (int)wanted;
+}
+
+void time_of_day_set_yield(int yield) {
+    if (InterlockedExchange(&yielding, yield != 0) != (yield != 0)) {
+        InterlockedIncrement(&generation);
+    }
 }
 
 void time_of_day_set_setting(int value) {
@@ -252,7 +259,17 @@ void time_of_day_tick(void) {
         else if (online_logged == 1) log_time("offline again.", "");
         online_logged = online;
     }
-    int choice = (int)wanted;
+    int yield = (int)yielding;
+    int choice = yield ? TIME_OF_DAY_ORIGINAL : (int)wanted;
+    static int yield_logged;
+    if (yield != yield_logged) {
+        if (yield && wanted != TIME_OF_DAY_ORIGINAL) {
+            log_time("Extra Options' Weather Control locks the clock - Gripline's time of day waits.", "");
+        } else if (!yield && yield_logged) {
+            log_time("Weather Control's time lock is off again - Gripline's time of day applies.", "");
+        }
+        yield_logged = yield;
+    }
     if (held_clock && held_choice != choice) {
         release(choice == TIME_OF_DAY_ORIGINAL ? "back to the game's normal day and night." : NULL);
     }

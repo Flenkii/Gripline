@@ -16,6 +16,8 @@ enum {
 
 int weather_setting(void);
 void weather_set_setting(int value);
+/* 1 while another mod (Extra Options' Weather Control) fixes the weather: Gripline hands it back. */
+void weather_set_yield(int yield);
 /* Called once per frame on the game thread (from the local car's update). */
 void weather_tick(void);
 #endif

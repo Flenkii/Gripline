@@ -157,9 +157,9 @@ def compiler_arguments(compiler, options):
     return arguments
 
 
-def version_resource(filename):
-    version = re.search(r'#define MOD_VERSION "([\d.]+)"',
-                        (SOURCE / "extra_options.h").read_text()).group(1)
+def version_resource(filename, plugin=False):
+    version = "6.0.0" if plugin else re.search(r'#define MOD_VERSION "([\d.]+)"',
+                                               (SOURCE / "extra_options.h").read_text()).group(1)
     numbers = [int(part) for part in version.split(".")]
     numbers += [0] * (4 - len(numbers))
 
@@ -180,6 +180,12 @@ def version_resource(filename):
                "FileVersion": version, "InternalName": "FH2_ExtraOptions",
                "OriginalFilename": filename, "ProductName": "Forza Horizon 2 Extra Options",
                "ProductVersion": version, "LegalCopyright": "Arthur (RokkuDayo)"}
+    if plugin:
+        strings = {"FileDescription": "Gripline V6 - FH2 Mod Platform mod",
+                   "FileVersion": version, "InternalName": "Gripline",
+                   "OriginalFilename": filename, "ProductName": "Gripline",
+                   "ProductVersion": "V6",
+                   "LegalCopyright": "Flenkii, GPL-3.0; based on Extra Options by Arthur (RokkuDayo)"}
     entries = b"".join(padded(block(key, wide(value), text=True)) for key, value in strings.items())
     string_info = block("StringFileInfo", children=block("040904b0", children=entries))
     variable_info = block("VarFileInfo", children=block("Translation", struct.pack("<HH", 0x409, 1200)))
@@ -267,7 +273,7 @@ def build_plugin(compiler, output, directory, options):
     mods.mkdir(parents=True, exist_ok=True)
     plugins.mkdir(parents=True, exist_ok=True)
     resource = directory / "version.res"
-    resource.write_bytes(version_resource("Gripline.dll"))
+    resource.write_bytes(version_resource("Gripline.dll", plugin=True))
     link = [str(compiler), "lld-link", "/dll", "/entry:DllMain", "/machine:x64", "/nodefaultlib",
             "/dynamicbase", "/nxcompat", "/Brepro"]
     subprocess.run([*link, "/out:" + str(mods / "Gripline.dll"), "/implib:" + str(directory / "gripline.lib"),

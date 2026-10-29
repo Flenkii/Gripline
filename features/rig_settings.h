@@ -108,6 +108,8 @@ unsigned rig_setting_order(unsigned position);
 
 /* Provided by the wheel bridge and the traffic watcher. */
 int wheel_bridge_setting(unsigned id);
+/* > 0 while Azimuth drives the wheel itself (FH2_Wheel.ini AzimuthWheel=1): Azimuth's rotation */
+int wheel_bridge_azimuth_rotation(void);
 void wheel_bridge_set_setting(unsigned id, int value);
 const wchar_t *wheel_bridge_ini_path(void);
 /* Starts the setup assistant (cards ask for steering, pedals, buttons). 0 = no wheel running. */

@@ -277,6 +277,7 @@ typedef struct {
     int ffb_mode; /* 0 = the game's own wheel programs (like on the Xbox), 1 = own FFB (old) */
     int wheel_dll; /* 1 = use Microsoft.Xbox.Input.Wheel.dll if it exists, 0 = always our own */
     int clutch_brake; /* 1 = the clutch pedal brakes, the clutch is off */
+    int azimuth_wheel; /* 1 = Azimuth (1.0.3+) drives the wheel itself, Gripline's bridge stays off */
     int extra_button[WHEEL_EXTRA_BUTTONS], extra_function[WHEEL_EXTRA_BUTTONS];
     wchar_t device[128];
 } WheelConfig;
@@ -332,6 +333,9 @@ static const char default_ini[] =
     "[Wheel]\r\n"
     "; 1 = pass the wheel to the game, 0 = off (then keyboard/controller drive)\r\n"
     "Enabled=1\r\n"
+    "; Azimuth 1.0.3 can drive the wheel itself (its launcher's wheel settings).\r\n"
+    "; 0 = Gripline drives the wheel (game's own force feedback), 1 = leave the wheel to Azimuth\r\n"
+    "AzimuthWheel=0\r\n"
     "; Part of the device name (empty = automatic, e.g. G920)\r\n"
     "Device=\r\n"
     "; Steering rotation in degrees (as set in G HUB)\r\n"
@@ -441,6 +445,7 @@ static void config_load(void) {
     cfg.log = read_int(L"Log", 1);
     cfg.wheel_dll = read_int(L"WheelDll", 1);
     cfg.clutch_brake = read_int(L"ClutchAsBrake", 0) == 1;
+    cfg.azimuth_wheel = read_int(L"AzimuthWheel", 0) == 1;
     /* free wheel buttons: G920 RSB = 8, LSB = 9, Xbox button = 10 (DirectInput numbers) */
     static const wchar_t *const extra_keys[WHEEL_EXTRA_BUTTONS] = {L"ExtraButton1", L"ExtraButton2",
                                                                    L"ExtraButton3"};
@@ -2846,6 +2851,29 @@ static DWORD WINAPI install_thread(LPVOID unused) {
     }
 }
 
+/* Azimuth 1.0.3 maps a DirectInput wheel itself (data\\azimuth.ini [launcher] wheel_steering=...,
+   wheel_rotation=...) and drives its force feedback. Both on at once = two drivers for one wheel. */
+static int azimuth_rotation, azimuth_owns;
+
+static int azimuth_wheel_mapped(const wchar_t *settings_directory) {
+    static wchar_t path[PATH_CAPACITY];
+    wchar_t value[64];
+    if (!path_join(path, settings_directory, L"data\\azimuth.ini")) return 0;
+    if (GetFileAttributesW(path) == INVALID_FILE_ATTRIBUTES) return 0;
+    GetPrivateProfileStringW(L"launcher", L"wheel_steering", L"", value, 64, path);
+    if (!value[0]) return 0;
+    GetPrivateProfileStringW(L"launcher", L"wheel_rotation", L"", value, 64, path);
+    int rotation = 0;
+    for (int i = 0; value[i] >= L'0' && value[i] <= L'9' && i < 6; ++i) rotation = rotation * 10 + (value[i] - L'0');
+    azimuth_rotation = rotation >= 180 && rotation <= 2520 ? rotation : 0;
+    return 1;
+}
+
+/* > 0 while Azimuth drives the wheel (AzimuthWheel=1): its rotation, for the cockpit animation */
+int wheel_bridge_azimuth_rotation(void) {
+    return azimuth_owns ? (azimuth_rotation ? azimuth_rotation : 900) : 0;
+}
+
 void wheel_bridge_start(unsigned char *game_image, const wchar_t *executable_path,
                         const wchar_t *settings_directory) {
     if (!game_image || !settings_directory) return;
@@ -2874,6 +2902,20 @@ void wheel_bridge_start(unsigned char *game_image, const wchar_t *executable_pat
         wlog("Azimuth Mapper is running - Gripline wheel off (the Mapper provides the controller).");
         mod_scan_announce_mapper();
         return;
+    }
+    if (azimuth_wheel_mapped(settings_directory)) {
+        if (cfg.azimuth_wheel) {
+            azimuth_owns = 1;
+            wlog("Azimuth drives the wheel (AzimuthWheel=1, Azimuth rotation %d) - Gripline wheel bridge off.",
+                 azimuth_rotation);
+            log_append("WHEEL: Azimuth drives the wheel (AzimuthWheel=1 in FH2_Wheel.ini) - Gripline wheel bridge off.\r\n");
+            notify_show_deferred("Wheel: Azimuth\nAzimuth drives the wheel - Gripline's wheel bridge is off");
+            return;
+        }
+        wlog("WARNING: Azimuth has its own wheel mapping too (data\\azimuth.ini wheel_steering) - both drive the wheel. "
+             "AzimuthWheel=1 in FH2_Wheel.ini leaves it to Azimuth.");
+        log_append("WHEEL: Azimuth's own wheel mapping is on too (data\\azimuth.ini) - AzimuthWheel=1 in FH2_Wheel.ini leaves the wheel to Azimuth.\r\n");
+        notify_show_deferred("Wheel: Azimuth and Gripline both on\nAzimuthWheel=1 in FH2_Wheel.ini = Azimuth only");
     }
     wlog("Zusatztasten: Taste %d -> Funktion %d, Taste %d -> Funktion %d, Taste %d -> Funktion %d.",
          cfg.extra_button[0], cfg.extra_function[0], cfg.extra_button[1], cfg.extra_function[1],
