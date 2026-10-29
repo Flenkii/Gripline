@@ -626,6 +626,7 @@ static void keyboard_reading(PadReading *r) {
 /* ------------------------------------------------------------------ virtual gamepad */
 
 static void *real_statics;
+static GetPadsFn real_get_pads; /* set when the late hook patched the real statics' vtable */
 static void *real_pads[MAX_PADS];
 static unsigned real_count;
 static ULONGLONG pads_refreshed;
@@ -670,7 +671,7 @@ static void refresh_pads(ULONGLONG now) {
     void *view = NULL;
     void *fresh[MAX_PADS];
     unsigned count = 0;
-    if (((GetPadsFn)VT(real_statics)[10])(real_statics, &view) >= 0 && view) {
+    if ((real_get_pads ? real_get_pads : (GetPadsFn)VT(real_statics)[10])(real_statics, &view) >= 0 && view) {
         UINT32 n = 0;
         ((SizeFn)VT(view)[7])(view, &n);
         for (UINT32 i = 0; i < n && count < MAX_PADS; ++i) {
@@ -979,6 +980,40 @@ int keyboard_pad_arm(unsigned char *host_image, const wchar_t *settings_director
     void *previous = InterlockedCompareExchangePointer(slot, (void *)(uintptr_t)hook_get_factory, current);
     VirtualProtect((void *)slot, sizeof(void *), protection, &ignored);
     return previous == current;
+}
+
+/* plugin build: the platform may load Gripline after Azimuth asked for its gamepads, so the import
+   swap above comes too late. Then the real IGamepadStatics (a cached singleton, the same object
+   Azimuth holds) gets its get_Gamepads entry pointed at the merged list instead. */
+int keyboard_pad_late(void) {
+    if (wrapped) return 1;
+    if (!ini_path[0]) return 0;
+    if (!loaded) settings_load();
+    if (!values[KEY_SETTING_ENABLED] || mod_scan_mapper_running()) return 0;
+    HMODULE combase = LoadLibraryExW(L"combase.dll", NULL, LOAD_LIBRARY_SEARCH_SYSTEM32);
+    if (!combase) return 0;
+    GetFactoryFn get_factory = original_get_factory ? original_get_factory
+                                                    : (GetFactoryFn)(uintptr_t)GetProcAddress(combase, "RoGetActivationFactory");
+    if (!create_string) create_string = (CreateStringFn)(uintptr_t)GetProcAddress(combase, "WindowsCreateString");
+    if (!get_factory || !create_string) return 0;
+    void *name = NULL, *real = NULL;
+    if (create_string(L"Windows.Gaming.Input.Gamepad", 28, &name) < 0) return 0;
+    HRESULT hr = get_factory(name, &IID_GamepadStatics, &real);
+    typedef HRESULT(WINAPI * DeleteStringFn)(void *);
+    DeleteStringFn delete_string = (DeleteStringFn)(uintptr_t)GetProcAddress(combase, "WindowsDeleteString");
+    if (delete_string) delete_string(name);
+    if (hr < 0 || !real) return 0;
+    void **slot = &VT(real)[10];
+    DWORD protection, ignored;
+    if (!VirtualProtect((void *)slot, sizeof(void *), PAGE_READWRITE, &protection)) return 0;
+    real_statics = real;
+    real_get_pads = (GetPadsFn)*slot;
+    pad.vtbl = pad_vtbl;
+    InterlockedExchangePointer(slot, (void *)(uintptr_t)statics_get_gamepads);
+    VirtualProtect((void *)slot, sizeof(void *), protection, &ignored);
+    InterlockedExchange(&wrapped, 1);
+    log_append("KEYBOARD: keyboard active (late hook); real gamepads are merged into one controller.\r\n");
+    return 1;
 }
 
 void keyboard_pad_game_start(unsigned char *game_image, const wchar_t *settings_directory) {

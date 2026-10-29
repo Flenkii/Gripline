@@ -331,6 +331,9 @@ static void start_features(void) {
     rig_settings_gripline(options.notifications, options.steering_animation, options.cockpit_view_forward,
                           options.cockpit_view_up);
     rig_settings_start(directory);
+    /* the platform may have loaded Gripline after Azimuth set up gamepads and swap chain */
+    if (!keyboard_pad_late()) platform_log("keyboard: not active (off in FH2_Keyboard.ini, Mapper running, or no hook)");
+    if (options.notifications && !notify_install_late()) platform_log("cards: could not hook the game picture");
     InterlockedExchange(&started, 1);
     if (row_count) sync_rows();
     /* Extra Options mounts mods\Gripline\media; the game's steering angle follows once the files are there */
@@ -388,8 +391,10 @@ FH2MOD_EXPORT int fh2mod_init(const FH2ModApi *platform) {
     log_set_directory(directory);
     unsigned char *host = (unsigned char *)GetModuleHandleW(NULL);
     if (host) {
-        keyboard_pad_arm(host, directory); /* before Azimuth sets up its gamepads */
-        notify_install(host);              /* game picture cards */
+        int keys = keyboard_pad_arm(host, directory); /* before Azimuth sets up its gamepads */
+        int cards = notify_install(host);             /* game picture cards */
+        platform_log(keys ? "early keyboard hook: yes" : "early keyboard hook: no");
+        platform_log(cards ? "early card hook: yes" : "early card hook: no");
     }
     add_rows();
     HANDLE thread = CreateThread(NULL, 0, start_thread, NULL, 0, NULL);

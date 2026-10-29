@@ -27,6 +27,7 @@ enum {
 /* Process start (Azimuth adapter): hooks Azimuth's import. settings_directory holds
    FH2_Keyboard.ini. Returns 1 when the hook is in place. */
 int keyboard_pad_arm(unsigned char *host_image, const wchar_t *settings_directory);
+int keyboard_pad_late(void); /* after Azimuth already asked for its gamepads (plugin build) */
 /* Game image mapped: controller layouts are followed from now on. */
 void keyboard_pad_game_start(unsigned char *game_image, const wchar_t *settings_directory);
 

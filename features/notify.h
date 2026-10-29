@@ -27,6 +27,7 @@ void notify_show_deferred_call(NotifyTextFn make);
 /* Installs the swap-chain hook (from the Azimuth loader, before the game creates its
    swap chain). host = azimuth.exe image. Returns 1 when hooked. */
 int notify_install(unsigned char *host);
+int notify_install_late(void); /* after the game made its swap chain (plugin build) */
 
 /* On/off (menu, INI). Off hides cards at once; messages are still logged. */
 void notify_set_enabled(int enabled);

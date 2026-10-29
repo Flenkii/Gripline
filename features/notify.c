@@ -941,7 +941,27 @@ static int swap_slot(void **slot, void *hook, void **original) {
     return 1;
 }
 
+static void hook_swapchain(IUnknown *device, IDXGISwapChain *swapchain);
+static volatile LONG late_adopt;
+static volatile LONG making_helper; /* the helper swap chain must not count as the game's */
+
+/* late hook: Present was hooked through a helper swap chain, so the game's swap chain is only met
+   here; for D3D12 its GetDevice returns the command queue */
+static void adopt_swapchain(IDXGISwapChain *swapchain) {
+    if (swapchain_seen || !late_adopt || broken) return;
+    IUnknown *queue_object = NULL;
+    __try {
+        if (SUCCEEDED(IDXGISwapChain_GetDevice(swapchain, &IID_IUnknown, (void **)&queue_object)) && queue_object) {
+            hook_swapchain(queue_object, swapchain);
+            IUnknown_Release(queue_object);
+        }
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        fail("an exception while adopting the swap chain");
+    }
+}
+
 static void before_present(IDXGISwapChain *swapchain) {
+    adopt_swapchain(swapchain);
     if (pending_count && enabled && !broken && swapchain == swapchain_seen) {
         ULONGLONG now = GetTickCount64();
         if (!first_present) first_present = now;
@@ -990,7 +1010,7 @@ static HRESULT STDMETHODCALLTYPE hook_resize1(IDXGISwapChain3 *swapchain, UINT c
 
 static void hook_swapchain(IUnknown *device, IDXGISwapChain *swapchain) {
     ID3D12CommandQueue *q = NULL;
-    if (!swapchain || !device ||
+    if (making_helper || !swapchain || !device ||
         FAILED(IUnknown_QueryInterface(device, &IID_ID3D12CommandQueue, (void **)&q)))
         return; /* not a D3D12 swap chain (or a helper window) */
     idle_gpu();
@@ -1123,6 +1143,65 @@ int notify_install(unsigned char *host) {
     if (slot1 && swap_slot(slot1, (void *)hook_factory1, (void **)&original_factory1)) ++hooked;
     if (slot2 && swap_slot(slot2, (void *)hook_factory2, (void **)&original_factory2)) ++hooked;
     return hooked > 0;
+}
+
+/* plugin build: the platform may load Gripline after Azimuth made its swap chain. A hidden helper
+   swap chain of the same kind shares the game's vtable, so Present is hooked through it. */
+typedef HRESULT(WINAPI *CreateDeviceFn)(IUnknown *, D3D_FEATURE_LEVEL, REFIID, void **);
+typedef HRESULT(WINAPI *CreateFactory2Fn)(UINT, REFIID, void **);
+typedef HWND(WINAPI *CreateWindowFn)(DWORD, LPCWSTR, LPCWSTR, DWORD, int, int, int, int, HWND, HMENU, HINSTANCE, LPVOID);
+typedef BOOL(WINAPI *DestroyWindowFn)(HWND);
+int notify_install_late(void) {
+    if (swapchain_seen) return 1;
+    HMODULE d3d12 = LoadLibraryExW(L"d3d12.dll", NULL, LOAD_LIBRARY_SEARCH_SYSTEM32);
+    HMODULE dxgi = LoadLibraryExW(L"dxgi.dll", NULL, LOAD_LIBRARY_SEARCH_SYSTEM32);
+    CreateDeviceFn create_device = d3d12 ? (CreateDeviceFn)(uintptr_t)GetProcAddress(d3d12, "D3D12CreateDevice") : NULL;
+    CreateFactory2Fn create_factory =
+        dxgi ? (CreateFactory2Fn)(uintptr_t)GetProcAddress(dxgi, "CreateDXGIFactory2") : NULL;
+    HMODULE user32 = GetModuleHandleW(L"user32.dll");
+    CreateWindowFn create_window = user32 ? (CreateWindowFn)(uintptr_t)GetProcAddress(user32, "CreateWindowExW") : NULL;
+    DestroyWindowFn destroy_window =
+        user32 ? (DestroyWindowFn)(uintptr_t)GetProcAddress(user32, "DestroyWindow") : NULL;
+    if (!create_device || !create_factory || !create_window || !destroy_window) return 0;
+    ID3D12Device *device = NULL;
+    ID3D12CommandQueue *q = NULL;
+    IDXGIFactory2 *factory = NULL;
+    IDXGISwapChain1 *helper = NULL;
+    HWND window = NULL;
+    int ok = 0;
+    __try {
+        D3D12_COMMAND_QUEUE_DESC qd = {D3D12_COMMAND_LIST_TYPE_DIRECT, 0, D3D12_COMMAND_QUEUE_FLAG_NONE, 0};
+        DXGI_SWAP_CHAIN_DESC1 sd = {0};
+        sd.Width = 64;
+        sd.Height = 64;
+        sd.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+        sd.SampleDesc.Count = 1;
+        sd.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT;
+        sd.BufferCount = 2;
+        sd.SwapEffect = DXGI_SWAP_EFFECT_FLIP_DISCARD;
+        InterlockedExchange(&making_helper, 1);
+        window = create_window(0, L"STATIC", L"GriplineHelper", WS_POPUP, 0, 0, 64, 64, NULL, NULL, NULL, NULL);
+        if (window && SUCCEEDED(create_device(NULL, D3D_FEATURE_LEVEL_11_0, &IID_ID3D12Device, (void **)&device)) &&
+            SUCCEEDED(ID3D12Device_CreateCommandQueue(device, &qd, &IID_ID3D12CommandQueue, (void **)&q)) &&
+            SUCCEEDED(create_factory(0, &IID_IDXGIFactory2, (void **)&factory)) &&
+            SUCCEEDED(IDXGIFactory2_CreateSwapChainForHwnd(factory, (IUnknown *)q, window, &sd, NULL, NULL, &helper))) {
+            void **vtable = *(void ***)helper;
+            InterlockedExchange(&late_adopt, 1);
+            ok = swap_slot(&vtable[8], (void *)hook_present, (void **)&original_present) &&
+                 swap_slot(&vtable[22], (void *)hook_present1, (void **)&original_present1);
+        }
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        ok = 0;
+    }
+    InterlockedExchange(&making_helper, 0);
+    if (helper) IDXGISwapChain1_Release(helper);
+    if (factory) IDXGIFactory2_Release(factory);
+    if (q) ID3D12CommandQueue_Release(q);
+    if (device) ID3D12Device_Release(device);
+    if (window) destroy_window(window);
+    log_append(ok ? "NOTIFY: late hook on Present; waiting for the game's swap chain.\r\n"
+                  : "NOTIFY: late hook failed; no Gripline cards.\r\n");
+    return ok;
 }
 
 #ifdef FH2_TWEAKS_TEST
