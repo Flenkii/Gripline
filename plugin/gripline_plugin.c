@@ -329,6 +329,7 @@ static void start_features(void) {
     /* the platform may have loaded Gripline after Azimuth set up gamepads and swap chain */
     if (!keyboard_pad_late()) platform_log("keyboard: not active (off in FH2_Keyboard.ini, Mapper running, or no hook)");
     if (options.notifications && !notify_install_late()) platform_log("cards: could not hook the game picture");
+    notify_show_deferred("Gripline V6 active\nKeyboard, cockpit view 2 (V), key list (F5)");
     InterlockedExchange(&started, 1);
     if (row_count) sync_rows();
     /* Extra Options mounts mods\Gripline\media; the game's steering angle follows once the files are there */

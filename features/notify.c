@@ -520,6 +520,32 @@ static const char shader_source[] =
     "  o.pos = float4(lerp(rect.xy, rect.zw, c), 0, 1); o.uv = lerp(uv.xy, uv.zw, c); return o; }\n"
     "float4 ps(V i) : SV_Target { return tex.Sample(smp, i.uv) * alpha.x; }\n";
 
+/* late hook: Gripline draws on its own queue and first waits until the game's queues are done */
+static int own_queue;
+static ID3D12CommandQueue *game_queues[4];
+static unsigned game_queue_count;
+static SRWLOCK game_queue_lock = SRWLOCK_INIT;
+static ID3D12Fence *sync_fence;
+static UINT64 sync_value;
+
+static void wait_game_queues(void) {
+    if (!own_queue) return;
+    if (!sync_fence && FAILED(ID3D12Device_CreateFence(gpu.device, 0, D3D12_FENCE_FLAG_NONE, &IID_ID3D12Fence,
+                                                        (void **)&sync_fence)))
+        return;
+    AcquireSRWLockShared(&game_queue_lock);
+    for (unsigned i = 0; i < game_queue_count; ++i) {
+        ID3D12Device *d = NULL;
+        if (FAILED(ID3D12CommandQueue_GetDevice(game_queues[i], &IID_ID3D12Device, (void **)&d))) continue;
+        int same = d == gpu.device;
+        ID3D12Device_Release(d);
+        if (same) ID3D12CommandQueue_Signal(game_queues[i], sync_fence, ++sync_value);
+    }
+    ReleaseSRWLockShared(&game_queue_lock);
+    if (sync_value && ID3D12Fence_GetCompletedValue(sync_fence) < sync_value)
+        ID3D12Fence_SetEventOnCompletion(sync_fence, sync_value, NULL); /* blocks until the game's frame is done */
+}
+
 static void fail(const char *why) {
     if (InterlockedExchange(&broken, 1) == 0) {
         log_append("NOTIFY: in-game cards off for this session - ");
@@ -893,9 +919,11 @@ static void render(IDXGISwapChain *swapchain) {
     barrier(back, D3D12_RESOURCE_STATE_RENDER_TARGET, D3D12_RESOURCE_STATE_PRESENT);
     ID3D12GraphicsCommandList_Close(gpu.list);
     ID3D12CommandList *lists[1] = {(ID3D12CommandList *)gpu.list};
+    wait_game_queues();
     ID3D12CommandQueue_ExecuteCommandLists(queue, 1, lists);
     ID3D12CommandQueue_Signal(queue, gpu.fence, ++gpu.fence_value);
     gpu.allocator_fence[index] = gpu.fence_value;
+    if (own_queue) wait_fence(gpu.fence_value); /* done before the game presents */
     ID3D12Resource_Release(back);
 }
 
@@ -949,18 +977,29 @@ static volatile LONG making_helper; /* the helper swap chain must not count as t
    queue; the next Present takes it when it belongs to the swap chain's device */
 typedef void(STDMETHODCALLTYPE *ExecuteFn)(ID3D12CommandQueue *, UINT, ID3D12CommandList *const *);
 static ExecuteFn original_execute;
-static ID3D12CommandQueue *volatile last_queue;
 
 static void STDMETHODCALLTYPE hook_execute(ID3D12CommandQueue *self, UINT count, ID3D12CommandList *const *lists) {
-    if (!swapchain_seen && late_adopt && !broken && self != last_queue) {
-        __try {
-            D3D12_COMMAND_QUEUE_DESC qd = ID3D12CommandQueue_GetDesc(self);
-            if (qd.Type == D3D12_COMMAND_LIST_TYPE_DIRECT) {
-                ID3D12CommandQueue_AddRef(self);
-                ID3D12CommandQueue *old = InterlockedExchangePointer((void *volatile *)&last_queue, self);
-                if (old) ID3D12CommandQueue_Release(old);
+    if (late_adopt && !broken && self != queue) {
+        int known = 0;
+        AcquireSRWLockShared(&game_queue_lock);
+        for (unsigned i = 0; i < game_queue_count; ++i) known |= game_queues[i] == self;
+        ReleaseSRWLockShared(&game_queue_lock);
+        if (!known && game_queue_count < ARRAY_COUNT(game_queues)) {
+            __try {
+                D3D12_COMMAND_QUEUE_DESC qd = ID3D12CommandQueue_GetDesc(self);
+                if (qd.Type == D3D12_COMMAND_LIST_TYPE_DIRECT) {
+                    AcquireSRWLockExclusive(&game_queue_lock);
+                    known = 0;
+                    for (unsigned i = 0; i < game_queue_count; ++i) known |= game_queues[i] == self;
+                    if (!known && game_queue_count < ARRAY_COUNT(game_queues)) {
+                        ID3D12CommandQueue_AddRef(self);
+                        game_queues[game_queue_count++] = self;
+                        log_append("NOTIFY: a game D3D12 queue was seen.\r\n");
+                    }
+                    ReleaseSRWLockExclusive(&game_queue_lock);
+                }
+            } __except (EXCEPTION_EXECUTE_HANDLER) {
             }
-        } __except (EXCEPTION_EXECUTE_HANDLER) {
         }
     }
     original_execute(self, count, lists);
@@ -968,23 +1007,22 @@ static void STDMETHODCALLTYPE hook_execute(ID3D12CommandQueue *self, UINT count,
 
 static void adopt_swapchain(IDXGISwapChain *swapchain) {
     if (swapchain_seen || !late_adopt || broken) return;
-    static volatile LONG first, no_device, no_queue;
+    static volatile LONG first, no_device;
     if (!InterlockedExchange(&first, 1)) log_append("NOTIFY: first Present through the late hook.\r\n");
     ID3D12Device *device = NULL;
     ID3D12CommandQueue *q = NULL;
     __try {
         if (FAILED(IDXGISwapChain_GetDevice(swapchain, &IID_ID3D12Device, (void **)&device)) || !device) {
             if (!InterlockedExchange(&no_device, 1)) log_append("NOTIFY: the presented swap chain is no D3D12 swap chain.\r\n");
-            return;
+        } else {
+            D3D12_COMMAND_QUEUE_DESC qd = {D3D12_COMMAND_LIST_TYPE_DIRECT, 0, D3D12_COMMAND_QUEUE_FLAG_NONE, 0};
+            if (SUCCEEDED(ID3D12Device_CreateCommandQueue(device, &qd, &IID_ID3D12CommandQueue, (void **)&q))) {
+                own_queue = 1;
+                hook_swapchain((IUnknown *)q, swapchain);
+            } else {
+                fail("could not create a queue on the game's device");
+            }
         }
-        q = InterlockedExchangePointer((void *volatile *)&last_queue, NULL);
-        ID3D12Device *queue_device = NULL;
-        if (q && SUCCEEDED(ID3D12CommandQueue_GetDevice(q, &IID_ID3D12Device, (void **)&queue_device))) {
-            if (queue_device == device) hook_swapchain((IUnknown *)q, swapchain);
-            ID3D12Device_Release(queue_device);
-        }
-        if (!swapchain_seen && !InterlockedExchange(&no_queue, 1))
-            log_append("NOTIFY: waiting for the game's D3D12 queue.\r\n");
     } __except (EXCEPTION_EXECUTE_HANDLER) {
         fail("an exception while adopting the swap chain");
     }

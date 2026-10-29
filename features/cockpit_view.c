@@ -27,6 +27,8 @@ static int have_written;
 static volatile LONG64 driver_tick; /* GetTickCount64 of the last driver camera frame */
 static unsigned char button_held[4], button_taken[4];
 
+static void hook_driver_camera(unsigned char *game_image);
+
 void cockpit_view_set_offset(int forward_cm, int up_cm) {
     InterlockedExchange(&forward_mm, forward_cm * 10);
     InterlockedExchange(&up_mm, up_cm * 10);
@@ -95,6 +97,7 @@ static DWORD state_hook(DWORD user, void *device, unsigned char *state) {
 static const unsigned state_calls[2] = {0x106fae6u, 0x1075580u};
 
 void cockpit_view_start(unsigned char *game_image) {
+    if (game_image) hook_driver_camera(game_image);
     if (!game_image || get_state) return;
     unsigned char *target = game_image + RVA_GET_STATE;
     for (unsigned i = 0; i < ARRAY_COUNT(state_calls); ++i) {
@@ -127,6 +130,38 @@ void cockpit_view_start(unsigned char *game_image) {
         FlushInstructionCache(GetCurrentProcess(), site, 5);
     }
     log_append("COCKPIT VIEW: camera button step ready (cockpit -> cockpit 2 -> next camera).\r\n");
+}
+
+/* The driver camera's vtable (game+0x2e78120) asks for its field of view every frame (slot 0x70);
+   Extra Options may already have put its own FOV function there. Gripline chains in front of
+   whatever is there, moves the camera for the second view and lets it answer. */
+#define RVA_DRIVER_CAMERA_VTABLE 0x2e78120u
+#define FOV_SLOT 0x70
+typedef float (*GetFovFn)(void *);
+static GetFovFn previous_fov;
+
+static float driver_fov(void *camera) {
+    cockpit_view_frame(camera);
+    return previous_fov(camera);
+}
+
+static void hook_driver_camera(unsigned char *game_image) {
+    void **slot = (void **)(game_image + RVA_DRIVER_CAMERA_VTABLE + FOV_SLOT);
+    void *current = NULL;
+    if (!memory_read_pointer(slot, &current) || !current) {
+        log_append("COCKPIT VIEW: driver camera not found - cockpit view 2 cannot move the camera.\r\n");
+        return;
+    }
+    if (current == (void *)(uintptr_t)driver_fov) return;
+    DWORD old, ignored;
+    if (!VirtualProtect(slot, sizeof(void *), PAGE_READWRITE, &old)) {
+        log_append("COCKPIT VIEW: driver camera is write-protected - cockpit view 2 cannot move the camera.\r\n");
+        return;
+    }
+    previous_fov = (GetFovFn)current;
+    InterlockedExchangePointer(slot, (void *)(uintptr_t)driver_fov);
+    VirtualProtect(slot, sizeof(void *), old, &ignored);
+    log_append_module("COCKPIT VIEW: driver camera hooked in front of ", current);
 }
 
 void cockpit_view_frame(void *camera) {
