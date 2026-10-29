@@ -944,26 +944,52 @@ static volatile LONG making_helper; /* the helper swap chain must not count as t
 
 /* late hook: Present was hooked through a helper swap chain, so the game's swap chain is only met
    here; for D3D12 its GetDevice returns the command queue */
+/* late hook: the game's D3D12 queue is not reachable from its swap chain, so ExecuteCommandLists
+   (hooked through the helper queue, whose vtable the game's queue shares) remembers the last direct
+   queue; the next Present takes it when it belongs to the swap chain's device */
+typedef void(STDMETHODCALLTYPE *ExecuteFn)(ID3D12CommandQueue *, UINT, ID3D12CommandList *const *);
+static ExecuteFn original_execute;
+static ID3D12CommandQueue *volatile last_queue;
+
+static void STDMETHODCALLTYPE hook_execute(ID3D12CommandQueue *self, UINT count, ID3D12CommandList *const *lists) {
+    if (!swapchain_seen && late_adopt && !broken && self != last_queue) {
+        __try {
+            D3D12_COMMAND_QUEUE_DESC qd = ID3D12CommandQueue_GetDesc(self);
+            if (qd.Type == D3D12_COMMAND_LIST_TYPE_DIRECT) {
+                ID3D12CommandQueue_AddRef(self);
+                ID3D12CommandQueue *old = InterlockedExchangePointer((void *volatile *)&last_queue, self);
+                if (old) ID3D12CommandQueue_Release(old);
+            }
+        } __except (EXCEPTION_EXECUTE_HANDLER) {
+        }
+    }
+    original_execute(self, count, lists);
+}
+
 static void adopt_swapchain(IDXGISwapChain *swapchain) {
     if (swapchain_seen || !late_adopt || broken) return;
-    static volatile LONG reported;
-    if (!InterlockedExchange(&reported, 1)) log_append("NOTIFY: first Present through the late hook.\r\n");
-    IUnknown *queue_object = NULL;
+    static volatile LONG first, no_device, no_queue;
+    if (!InterlockedExchange(&first, 1)) log_append("NOTIFY: first Present through the late hook.\r\n");
+    ID3D12Device *device = NULL;
+    ID3D12CommandQueue *q = NULL;
     __try {
-        if (SUCCEEDED(IDXGISwapChain_GetDevice(swapchain, &IID_IUnknown, (void **)&queue_object)) && queue_object) {
-            hook_swapchain(queue_object, swapchain);
-            IUnknown_Release(queue_object);
-            if (!swapchain_seen && reported == 1) {
-                InterlockedExchange(&reported, 2);
-                log_append("NOTIFY: that swap chain's device is no D3D12 queue.\r\n");
-            }
-        } else if (reported == 1) {
-            InterlockedExchange(&reported, 2);
-            log_append("NOTIFY: GetDevice failed on the presented swap chain.\r\n");
+        if (FAILED(IDXGISwapChain_GetDevice(swapchain, &IID_ID3D12Device, (void **)&device)) || !device) {
+            if (!InterlockedExchange(&no_device, 1)) log_append("NOTIFY: the presented swap chain is no D3D12 swap chain.\r\n");
+            return;
         }
+        q = InterlockedExchangePointer((void *volatile *)&last_queue, NULL);
+        ID3D12Device *queue_device = NULL;
+        if (q && SUCCEEDED(ID3D12CommandQueue_GetDevice(q, &IID_ID3D12Device, (void **)&queue_device))) {
+            if (queue_device == device) hook_swapchain((IUnknown *)q, swapchain);
+            ID3D12Device_Release(queue_device);
+        }
+        if (!swapchain_seen && !InterlockedExchange(&no_queue, 1))
+            log_append("NOTIFY: waiting for the game's D3D12 queue.\r\n");
     } __except (EXCEPTION_EXECUTE_HANDLER) {
         fail("an exception while adopting the swap chain");
     }
+    if (q) ID3D12CommandQueue_Release(q);
+    if (device) ID3D12Device_Release(device);
 }
 
 static void before_present(IDXGISwapChain *swapchain) {
@@ -1197,7 +1223,10 @@ int notify_install_late(void) {
             log_append_module("NOTIFY: helper swap chain vtable ", vtable);
             log_append_module("NOTIFY: Present before the hook ", vtable[8]);
             InterlockedExchange(&late_adopt, 1);
-            ok = swap_slot(&vtable[8], (void *)hook_present, (void **)&original_present) &&
+            void **queue_vtable = *(void ***)q;
+            log_append_module("NOTIFY: helper queue ExecuteCommandLists ", queue_vtable[10]);
+            ok = swap_slot(&queue_vtable[10], (void *)hook_execute, (void **)&original_execute) &&
+                 swap_slot(&vtable[8], (void *)hook_present, (void **)&original_present) &&
                  swap_slot(&vtable[22], (void *)hook_present1, (void **)&original_present1);
         }
     } __except (EXCEPTION_EXECUTE_HANDLER) {

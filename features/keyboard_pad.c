@@ -616,6 +616,7 @@ static void keyboard_reading(PadReading *r) {
 /* ------------------------------------------------------------------ virtual gamepad */
 
 static void *real_statics;
+static int keyboard_only; /* late hook: Azimuth keeps its own real pads, ours is the keyboard */
 static GetPadsFn real_get_pads; /* set when the late hook patched the real statics' vtable */
 static void *real_pads[MAX_PADS];
 static unsigned real_count;
@@ -733,8 +734,10 @@ static HRESULT WINAPI pad_reading(void *self, PadReading *out) {
     QueryPerformanceCounter(&counter);
     QueryPerformanceFrequency(&frequency);
     UINT64 timestamp = (UINT64)((double)counter.QuadPart * 1000000.0 / (double)frequency.QuadPart);
+    static volatile LONG reported;
+    if (!InterlockedExchange(&reported, 1)) log_append("KEYBOARD: Azimuth reads the Gripline controller.\r\n");
     AcquireSRWLockExclusive(&pad_lock);
-    refresh_pads(GetTickCount64());
+    if (!keyboard_only) refresh_pads(GetTickCount64());
     for (unsigned i = 0; i < real_count; ++i) {
         PadReading p;
         if (((ReadingFn)VT(real_pads[i])[8])(real_pads[i], &p) < 0) continue;
@@ -974,6 +977,61 @@ int keyboard_pad_arm(unsigned char *host_image, const wchar_t *settings_director
     return previous == current;
 }
 
+static int32_t rel32(const unsigned char *at) {
+    return (int32_t)((uint32_t)at[0] | (uint32_t)at[1] << 8 | (uint32_t)at[2] << 16 | (uint32_t)at[3] << 24);
+}
+
+/* Azimuth (1.0.3) asks for the gamepad list once and then follows the added/removed events. Its
+   start-up code loads the Gamepad statics ("Windows.Gaming.Input.Gamepad"), stores them in a global
+   and calls a function that reads that global, calls get_Gamepads and adds every pad. That function
+   is found here so the late hook can run it once more; NULL when the code does not look like that. */
+typedef void (*EnumerateFn)(void);
+static EnumerateFn find_enumerate(unsigned char *host) {
+    IMAGE_DOS_HEADER *dos = (IMAGE_DOS_HEADER *)host;
+    if (dos->e_magic != IMAGE_DOS_SIGNATURE) return NULL;
+    IMAGE_NT_HEADERS64 *nt = (IMAGE_NT_HEADERS64 *)(host + dos->e_lfanew);
+    if (nt->Signature != IMAGE_NT_SIGNATURE) return NULL;
+    size_t size = nt->OptionalHeader.SizeOfImage;
+    static const wchar_t wanted[] = L"Windows.Gaming.Input.Gamepad";
+    const size_t bytes = sizeof(wanted) - sizeof(wchar_t);
+    IMAGE_SECTION_HEADER *sec = IMAGE_FIRST_SECTION(nt);
+    for (unsigned i = 0; i < nt->FileHeader.NumberOfSections; ++i) {
+        if (!(sec[i].Characteristics & IMAGE_SCN_MEM_EXECUTE)) continue;
+        unsigned char *code = host + sec[i].VirtualAddress;
+        size_t length = sec[i].Misc.VirtualSize;
+        for (size_t at = 0; at + 7 < length; ++at) {
+            /* lea rcx, [rip + string] */
+            if (code[at] != 0x48 || code[at + 1] != 0x8d || code[at + 2] != 0x0d) continue;
+            unsigned char *target = code + at + 7 + rel32(code + at + 3);
+            if (target < host || target + bytes > host + size) continue;
+            const unsigned char *w = (const unsigned char *)wanted;
+            size_t k = 0;
+            while (k < bytes && target[k] == w[k]) ++k;
+            if (k != bytes) continue;
+            /* mov [rip + global], rax followed by call enumerate */
+            for (size_t m = at + 7; m + 12 < at + 0x180 && m + 12 < length; ++m) {
+                if (code[m] != 0x48 || code[m + 1] != 0x89 || code[m + 2] != 0x05) continue;
+                unsigned char *global = code + m + 7 + rel32(code + m + 3);
+                for (size_t c = m + 7; c < m + 15 && c + 5 <= length; ++c) {
+                    if (code[c] != 0xe8) continue;
+                    unsigned char *fn = code + c + 5 + rel32(code + c + 1);
+                    if (fn < code || fn + 0x40 > code + length) continue;
+                    /* it must read the same global and call slot 10 (get_Gamepads) */
+                    int reads = 0, calls = 0;
+                    for (unsigned j = 0; j + 7 <= 0x40; ++j) {
+                        if (fn[j] == 0x48 && fn[j + 1] == 0x8b && fn[j + 2] == 0x0d &&
+                            fn + j + 7 + rel32(fn + j + 3) == global)
+                            reads = 1;
+                        if (reads && fn[j] == 0xff && fn[j + 1] == 0x50 && fn[j + 2] == 0x50) calls = 1;
+                    }
+                    if (reads && calls) return (EnumerateFn)(uintptr_t)fn;
+                }
+            }
+        }
+    }
+    return NULL;
+}
+
 /* plugin build: the platform may load Gripline after Azimuth asked for its gamepads, so the import
    swap above comes too late. Then the real IGamepadStatics (a cached singleton, the same object
    Azimuth holds) gets its get_Gamepads entry pointed at the merged list instead. */
@@ -1006,7 +1064,24 @@ int keyboard_pad_late(void) {
     InterlockedExchangePointer(slot, (void *)(uintptr_t)statics_get_gamepads);
     VirtualProtect((void *)slot, sizeof(void *), protection, &ignored);
     InterlockedExchange(&wrapped, 1);
-    log_append("KEYBOARD: keyboard active (late hook); real gamepads are merged into one controller.\r\n");
+    EnumerateFn enumerate = find_enumerate((unsigned char *)GetModuleHandleW(NULL));
+    if (!enumerate) {
+        log_append("KEYBOARD: Azimuth's gamepad list was not found; keyboard needs a newer Gripline.\r\n");
+        return 0;
+    }
+    log_append_module("KEYBOARD: Azimuth gamepad list ", (void *)(uintptr_t)enumerate);
+    keyboard_only = 1;
+    __try {
+        enumerate(); /* Azimuth asks again and adds the Gripline pad next to its own */
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        log_append("KEYBOARD: an exception while adding the Gripline pad.\r\n");
+    }
+    /* everyone else gets the real list again */
+    if (VirtualProtect((void *)slot, sizeof(void *), PAGE_READWRITE, &protection)) {
+        InterlockedExchangePointer(slot, (void *)(uintptr_t)real_get_pads);
+        VirtualProtect((void *)slot, sizeof(void *), protection, &ignored);
+    }
+    log_append("KEYBOARD: keyboard active (late hook); the Gripline pad was added to Azimuth's list.\r\n");
     return 1;
 }
 
