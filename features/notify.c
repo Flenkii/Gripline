@@ -946,11 +946,20 @@ static volatile LONG making_helper; /* the helper swap chain must not count as t
    here; for D3D12 its GetDevice returns the command queue */
 static void adopt_swapchain(IDXGISwapChain *swapchain) {
     if (swapchain_seen || !late_adopt || broken) return;
+    static volatile LONG reported;
+    if (!InterlockedExchange(&reported, 1)) log_append("NOTIFY: first Present through the late hook.\r\n");
     IUnknown *queue_object = NULL;
     __try {
         if (SUCCEEDED(IDXGISwapChain_GetDevice(swapchain, &IID_IUnknown, (void **)&queue_object)) && queue_object) {
             hook_swapchain(queue_object, swapchain);
             IUnknown_Release(queue_object);
+            if (!swapchain_seen && reported == 1) {
+                InterlockedExchange(&reported, 2);
+                log_append("NOTIFY: that swap chain's device is no D3D12 queue.\r\n");
+            }
+        } else if (reported == 1) {
+            InterlockedExchange(&reported, 2);
+            log_append("NOTIFY: GetDevice failed on the presented swap chain.\r\n");
         }
     } __except (EXCEPTION_EXECUTE_HANDLER) {
         fail("an exception while adopting the swap chain");
@@ -1092,12 +1101,14 @@ static void hook_factory(void *object) {
 }
 
 static HRESULT WINAPI hook_factory1(REFIID riid, void **out) {
+    log_append("NOTIFY: CreateDXGIFactory1 called after the early hook.\r\n");
     HRESULT hr = original_factory1(riid, out);
     if (SUCCEEDED(hr) && out && *out && !broken) hook_factory(*out);
     return hr;
 }
 
 static HRESULT WINAPI hook_factory2(UINT flags, REFIID riid, void **out) {
+    log_append("NOTIFY: CreateDXGIFactory2 called after the early hook.\r\n");
     HRESULT hr = original_factory2(flags, riid, out);
     if (SUCCEEDED(hr) && out && *out && !broken) hook_factory(*out);
     return hr;
@@ -1183,6 +1194,8 @@ int notify_install_late(void) {
             SUCCEEDED(create_factory(0, &IID_IDXGIFactory2, (void **)&factory)) &&
             SUCCEEDED(IDXGIFactory2_CreateSwapChainForHwnd(factory, (IUnknown *)q, window, &sd, NULL, NULL, &helper))) {
             void **vtable = *(void ***)helper;
+            log_append_module("NOTIFY: helper swap chain vtable ", vtable);
+            log_append_module("NOTIFY: Present before the hook ", vtable[8]);
             InterlockedExchange(&late_adopt, 1);
             ok = swap_slot(&vtable[8], (void *)hook_present, (void **)&original_present) &&
                  swap_slot(&vtable[22], (void *)hook_present1, (void **)&original_present1);

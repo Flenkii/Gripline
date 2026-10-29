@@ -861,6 +861,8 @@ static HRESULT WINAPI statics_add_removed(void *self, void *handler, INT64 *toke
 }
 static HRESULT WINAPI statics_get_gamepads(void *self, void **out) {
     (void)self;
+    static volatile LONG reported;
+    if (!InterlockedExchange(&reported, 1)) log_append("KEYBOARD: the game asked for the gamepad list (merged list given).\r\n");
     if (!out) return E_POINTER;
     *out = &view;
     return S_OK;
@@ -994,6 +996,8 @@ int keyboard_pad_late(void) {
     if (delete_string) delete_string(name);
     if (hr < 0 || !real) return 0;
     void **slot = &VT(real)[10];
+    log_append_module("KEYBOARD: gamepad statics vtable ", VT(real));
+    log_append_module("KEYBOARD: get_Gamepads before the hook ", *slot);
     DWORD protection, ignored;
     if (!VirtualProtect((void *)slot, sizeof(void *), PAGE_READWRITE, &protection)) return 0;
     real_statics = real;
