@@ -37,3 +37,18 @@ Fork of https://github.com/RokkuDayo/ForzaHorizon2_ExtraOptions – modified in 
 - `adapters/azimuth.c` – hooks Azimuth's gamepad import for the keyboard
 - `runtime.c`, `dllmain.c`, `features.h`, `build.py`, `kernel32.def`, `adapters/azimuth_host.h` – wiring for the new parts
 - `README.md` – new; the original README is kept unchanged in `README_ORIGINAL.md`
+
+## V6: plugin build (next to the official Extra Options)
+Since FH2MP 1.1.1 the launcher only accepts the official Extra Options `winmm.dll` (SHA-256 check), so Gripline V6 no
+longer replaces it:
+- `plugin/gripline_plugin.c` – `fh2-mods\Gripline.dll` as an FH2 Mod Platform mod: starts the Gripline features once the
+  game is mapped, settings rows on Pause › Settings › MODS, `Gripline.ini` (moves `[Traffic]`/`[Gripline]` out of
+  `FH2_ExtraOptions.ini`), detects the Extra Options "Weather Control" plugin and lets it win while it fixes weather
+  or clock, warns when `GriplineTick.dll` never ticks
+- `plugin/gripline_tick.c` – `mods\Gripline\plugins\GriplineTick.dll`, Extra Options plugin that passes the vehicle
+  update tick to Gripline (weather, time of day)
+- `features/wheel_bridge.c` – reads Azimuth 1.0.3's wheel mapping (`data\azimuth.ini`); `AzimuthWheel=1` in
+  `FH2_Wheel.ini` leaves the wheel to Azimuth, otherwise a card warns that both drive it
+- `features/weather.c`, `features/time_of_day.c` – `*_set_yield` to step back for the Weather Control plugin
+- `features/report.c` – problem report also packs `data\logs\azimuth.log`, `mods\loadorder.txt` and the Weather Control INI
+- `build.py --plugin`, `tools/make_release.py <plugin folder>` – plugin build and V6 ZIP layout with `SHA256SUMS.txt`
