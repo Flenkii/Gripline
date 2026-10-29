@@ -29,7 +29,7 @@ all features of Extra Options are included unchanged – see [README_ORIGINAL.md
 | **Key list** *(V6)* | Press **F5** to show all your key bindings at the right of the picture; it stays until you press F5 again and blocks nothing. Key names follow the game's language and your keyboard layout. |
 | **Time of day** *(V6)* | *Time of Day* in the Gripline menu: Morning, Midday, Sunset, Night or Slow Day (clock 4x slower). Only offline in free roam – races and FH2MP keep their own time. |
 | **In-game settings page** | Options › HUD › bottom (or the GRIPLINE tile). All values are saved instantly. Wheel values apply instantly (except "Use Wheel In Game", which needs a restart), weather applies after closing the menu, traffic only after restarting Azimuth (see Known issues). |
-| **More traffic** | Traffic limits up to 150 cars, rush hour all day, presets Original/Calm/Busy/Rush Hour/Chaos/No Traffic. Since V6 Gripline also raises the game's own traffic data (copies in `Mount\gripline_traffic`, game files unchanged), so there really are more cars. Applies after a restart. |
+| **More traffic** | Traffic limits up to 150 cars, rush hour all day, presets Original/Calm/Busy/Rush Hour/Chaos/No Traffic/Drivatars Only. Since V6 Gripline also raises the game's own traffic data (copies in `Mount\gripline_traffic`, game files unchanged), so there really are more cars. Applies after a restart. |
 | **Fixed weather** | Sunny, Cloudy, Storm Clouds, Rain or Fog (fog only on Storm Island, sunny elsewhere) – through the game's own weather control, no game files changed. |
 | **Tools** (`tools/`) | Python scripts (the V1 cockpit-wheel script, now built in), More Traffic files and "traffic variety" (20 extra traffic car models). Not part of the release download. |
 

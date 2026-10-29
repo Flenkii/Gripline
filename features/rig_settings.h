@@ -67,8 +67,8 @@ int rig_kind_is_choice(unsigned kind);
 const char *rig_kind_collection(unsigned kind);
 
 #define RIG_PROFILE_COUNT 6 /* the last one starts the wheel setup assistant */
-#define RIG_DENSITY_COUNT 7
-#define RIG_TRAFFIC_COUNT 7 /* TrafficLevel 0..5, 6 = no traffic */
+#define RIG_DENSITY_COUNT 8
+#define RIG_TRAFFIC_COUNT 8 /* TrafficLevel 0..5, 6 = no traffic, 7 = Drivatars only */
 #define RIG_WEATHER_COUNT 6
 #define RIG_TIME_COUNT 6
 #define RIG_FFB_MODE_COUNT 2
