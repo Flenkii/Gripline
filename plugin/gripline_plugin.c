@@ -7,19 +7,19 @@
      the picture cards (DXGI import) are taken over before Azimuth sets them up.
    - Once the game is mapped, the Gripline features start on their own thread, as in runtime.c.
    - Settings are Gripline.ini ([Traffic], [Gripline]); Extra Options refuses unknown keys in its
-     own INI. FH2_Wheel.ini and FH2_Keyboard.ini stay as they are.
-   - Weather and time of day need a tick on the game thread: Extra Options' plugin
-     mods\Gripline\plugins\GriplineTick.dll calls GriplineVehicleUpdate for the local car.
+     own INI. FH2_Keyboard.ini stays as it is.
+   - V6 leaves to the others what they already do: the wheel and its force feedback to Azimuth (its
+     launcher), weather, time of day and hiding the HUD to Extra Options. Gripline only reads Azimuth's
+     wheel rotation for the cockpit animation.
    - Steering animation and More Traffic files go to mods\Gripline\media, which Extra Options mounts
      over game:\media like any mod's media folder.
    - The in-game settings are rows on the game's Mods page (Pause > Settings > MODS). */
-#include "extra_options.h"
+#include "gripline.h"
 #include "../third_party/fh2mod/fh2mod.h"
 #include "logging.h"
 #include "settings.h"
 #include "support.h"
 #include "features.h"
-#include "features/autodrive_game.h"
 #include "features/cockpit.h"
 #include "features/cockpit_view.h"
 #include "features/keyboard_pad.h"
@@ -29,10 +29,7 @@
 #include "features/report.h"
 #include "features/rig_settings.h"
 #include "features/traffic_files.h"
-#include "features/weather.h"
-#include "features/time_of_day.h"
 
-void wheel_bridge_shutdown(void);
 void keyboard_pad_game_start(unsigned char *game_image, const wchar_t *settings_directory);
 void report_init(const wchar_t *settings_directory);
 
@@ -119,7 +116,7 @@ static void move_gripline_sections(void) {
         if (used) {
             write_whole(ini, ours, used, CREATE_NEW);
         } else {
-            static const char defaults[] = "[Traffic]\r\nTrafficLevel=4\r\nRushHourAllDay=1\r\nWeather=0\r\nTimeOfDay=0\r\n"
+            static const char defaults[] = "[Traffic]\r\nTrafficLevel=4\r\nRushHourAllDay=1\r\n"
                                            "[Gripline]\r\nNotifications=1\r\nSteeringAnimation=0\r\n"
                                            "CockpitViewForward=35\r\nCockpitViewUp=-5\r\n";
             write_whole(ini, defaults, sizeof(defaults) - 1, CREATE_NEW);
@@ -168,12 +165,7 @@ static void append_number(char *out, size_t capacity, size_t *used, int value) {
 static const wchar_t *choice_name(unsigned kind, unsigned index) {
     switch (kind) {
     case RIG_KIND_TRAFFIC: return rig_traffic_choice(game, index);
-    case RIG_KIND_PROFILE: return rig_profile_choice(game, index);
-    case RIG_KIND_FUNCTION: return rig_function_choice(game, index);
     case RIG_KIND_DENSITY: return rig_density_choice(game, index);
-    case RIG_KIND_WEATHER: return rig_weather_choice(game, index);
-    case RIG_KIND_FFB_MODE: return rig_ffb_mode_choice(game, index);
-    case RIG_KIND_TIME: return rig_time_choice(game, index);
     }
     return NULL;
 }
@@ -199,9 +191,8 @@ static void describe(unsigned row) {
 }
 
 static int needs_restart(unsigned id) {
-    return id == RIG_WHEEL_ENABLED || id == RIG_KEY_ENABLED || id == RIG_GRIP_STEERING ||
-           id == RIG_TRAFFIC_LEVEL || id == RIG_TRAFFIC_ALL_DAY || id == RIG_TRAFFIC_PRESET ||
-           id == RIG_WHEEL_PROFILE;
+    return id == RIG_KEY_ENABLED || id == RIG_GRIP_STEERING || id == RIG_TRAFFIC_LEVEL ||
+           id == RIG_TRAFFIC_ALL_DAY || id == RIG_TRAFFIC_PRESET;
 }
 
 static int row_of(const char *key) {
@@ -211,8 +202,6 @@ static int row_of(const char *key) {
 }
 
 static void sync_rows(void);
-static void control_init(void);
-static DWORD WINAPI tick_watch(LPVOID unused);
 
 static void on_change(void *user, const char *key, int value) {
     (void)user;
@@ -220,7 +209,7 @@ static void on_change(void *user, const char *key, int value) {
     if (row < 0 || !started) return;
     unsigned id = row_ids[row];
     rig_setting_set(id, value);
-    if (id == RIG_GRIP_REPORT || id == RIG_WHEEL_PROFILE || id == RIG_TRAFFIC_PRESET) sync_rows();
+    if (id == RIG_GRIP_REPORT || id == RIG_TRAFFIC_PRESET) sync_rows();
 }
 
 static void on_slide(void *user, const char *key, float value) {
@@ -232,7 +221,7 @@ static void on_slide(void *user, const char *key, float value) {
     float units = value / scale;
     int rounded = (int)(units < 0 ? units - 0.5f : units + 0.5f);
     rig_setting_set(row_ids[row], rounded);
-    if (row_ids[row] == RIG_WHEEL_PROFILE || row_ids[row] == RIG_TRAFFIC_PRESET) sync_rows();
+    if (row_ids[row] == RIG_TRAFFIC_PRESET) sync_rows();
 }
 
 /* values known once the features have read their INI files */
@@ -303,6 +292,15 @@ static void add_rows(void) {
 
 /* ------------------------------------------------------------------ start */
 
+/* Azimuth 1.0.3 drives the wheel (launcher, data\azimuth.ini [launcher] wheel_rotation); the cockpit
+   wheel turns as far as that. 900 when no wheel is set there. */
+static int azimuth_rotation(void) {
+    static wchar_t path[PATH_CAPACITY];
+    if (!path_join(path, directory, L"data\\azimuth.ini")) return 900;
+    int rotation = (int)GetPrivateProfileIntW(L"launcher", L"wheel_rotation", 900, path);
+    return rotation >= 180 && rotation <= 2520 ? rotation : 900;
+}
+
 static void start_features(void) {
     ModOptions options;
     settings_defaults(&options);
@@ -315,19 +313,13 @@ static void start_features(void) {
         log_append("GRIPLINE: Gripline.ini could not be read; defaults are used.\r\n");
         platform_log("Gripline.ini could not be read - defaults used (see Gripline.log)");
     }
-    autodrive_game_bind(game);
     traffic_tunables_start(game, &options);
-    weather_start(game, &options);
-    time_of_day_start(game, &options);
-    wheel_bridge_start(game, game_path, directory);
     keyboard_pad_game_start(game, directory);
     nitro_link_start(game);
     cockpit_view_start(game);
     gripline_set_output_root(media_dir);
     traffic_files_start(mount_dir, options.traffic_level);
-    int rotation = wheel_bridge_azimuth_rotation(); /* Azimuth drives the wheel: its rotation */
-    cockpit_start(game, mount_dir, options.steering_animation,
-                  rotation ? rotation : wheel_bridge_setting(RIG_WHEEL_ROTATION), wheel_bridge_setting(RIG_WHEEL_CURVE));
+    cockpit_start(game, mount_dir, options.steering_animation, azimuth_rotation(), 10 /* linear */);
     notify_set_enabled(options.notifications);
     mod_scan_start(directory);
     report_init(directory);
@@ -337,10 +329,7 @@ static void start_features(void) {
     /* the platform may have loaded Gripline after Azimuth set up gamepads and swap chain */
     if (!keyboard_pad_late()) platform_log("keyboard: not active (off in FH2_Keyboard.ini, Mapper running, or no hook)");
     if (options.notifications && !notify_install_late()) platform_log("cards: could not hook the game picture");
-    control_init();
     InterlockedExchange(&started, 1);
-    HANDLE watch = CreateThread(NULL, 0, tick_watch, NULL, 0, NULL);
-    if (watch) CloseHandle(watch);
     if (row_count) sync_rows();
     /* Extra Options mounts mods\Gripline\media; the game's steering angle follows once the files are there */
     if (cockpit_wait_ready()) cockpit_patch_game();
@@ -359,117 +348,6 @@ static DWORD WINAPI start_thread(LPVOID unused) {
     return 0;
 }
 
-/* ------------------------------------------------------------------ Extra Options' Weather Control */
-
-/* Extra Options' own plugin "Extra Options - Weather Control" (comes with the FH2MP setup) locks the
-   free-roam clock ([TimeLock] Enabled=1) and fixes the weather ([Weather] Mode other than Dynamic) from
-   the pause menu and saves that to its INI. While it does, Gripline's weather / time of day hand the
-   game back instead of fighting it every frame. Read again whenever the INI changes. */
-static wchar_t control_ini[PATH_CAPACITY], control_dll[PATH_CAPACITY], load_order[PATH_CAPACITY];
-static FILETIME control_written;
-static ULONGLONG control_checked;
-static int control_state = -1; /* bit 0 = weather fixed, bit 1 = clock locked */
-
-static int control_listed(void) {
-    /* a folder commented out in mods\loadorder.txt is not loaded */
-    HANDLE file = CreateFileW(load_order, GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE, NULL, OPEN_EXISTING,
-                              FILE_ATTRIBUTE_NORMAL, NULL);
-    if (file == INVALID_HANDLE_VALUE) return 1;
-    static char text[8192];
-    DWORD size = 0;
-    int ok = ReadFile(file, text, sizeof(text) - 1, &size, NULL);
-    CloseHandle(file);
-    if (!ok) return 1;
-    text[size] = 0;
-    static const char name[] = "Extra Options - Weather Control";
-    for (const char *line = text; *line;) {
-        const char *end = line;
-        while (*end && *end != '\n' && *end != '\r') ++end;
-        const char *p = line;
-        while (p < end && (*p == ' ' || *p == '\t')) ++p;
-        if (p < end && *p == '#') {
-            ++p;
-            while (p < end && (*p == ' ' || *p == '\t')) ++p;
-            if ((size_t)(end - p) >= sizeof(name) - 1 && memory_equal(p, name, sizeof(name) - 1)) return 0;
-        }
-        line = *end ? end + 1 : end;
-    }
-    return 1;
-}
-
-static int control_read(void) {
-    if (GetFileAttributesW(control_dll) == INVALID_FILE_ATTRIBUTES || !control_listed()) return 0;
-    wchar_t value[32];
-    int state = 0;
-    GetPrivateProfileStringW(L"Weather", L"Mode", L"Dynamic", value, 32, control_ini);
-    if (value[0] && lstrcmpiW(value, L"Dynamic") != 0) state |= 1;
-    GetPrivateProfileStringW(L"TimeLock", L"Enabled", L"0", value, 32, control_ini);
-    if (value[0] == L'1') state |= 2;
-    return state;
-}
-
-static void control_check(void) {
-    ULONGLONG now = GetTickCount64();
-    if (control_state >= 0 && now - control_checked < 2000) return;
-    control_checked = now;
-    WIN32_FILE_ATTRIBUTE_DATA data;
-    FILETIME written = {0, 0};
-    if (GetFileAttributesExW(control_ini, GetFileExInfoStandard, &data)) written = data.ftLastWriteTime;
-    if (control_state >= 0 && written.dwLowDateTime == control_written.dwLowDateTime &&
-        written.dwHighDateTime == control_written.dwHighDateTime) return;
-    control_written = written;
-    int state = control_read();
-    if (state == control_state) return;
-    control_state = state;
-    weather_set_yield(state & 1);
-    time_of_day_set_yield(state & 2);
-    log_append(state & 1 ? "WEATHER CONTROL: Extra Options fixes the weather - Gripline's weather waits.\r\n"
-                         : "WEATHER CONTROL: Extra Options' weather is Dynamic or off - Gripline's weather may apply.\r\n");
-    log_append(state & 2 ? "WEATHER CONTROL: Extra Options locks the clock - Gripline's time of day waits.\r\n"
-                         : "WEATHER CONTROL: Extra Options' time lock is off - Gripline's time of day may apply.\r\n");
-}
-
-static void control_init(void) {
-    if (!path_join(control_ini, directory, L"mods\\Extra Options - Weather Control\\plugins\\EO_WeatherControl.ini") ||
-        !path_join(control_dll, directory, L"mods\\Extra Options - Weather Control\\plugins\\EO_WeatherControl.dll") ||
-        !path_join(load_order, directory, L"mods\\loadorder.txt")) {
-        control_state = 0;
-        return;
-    }
-    control_check();
-}
-
-static volatile LONG ticked;
-
-/* Extra Options plugin GriplineTick.dll: the local car's update on the game thread */
-__declspec(dllexport) void GriplineVehicleUpdate(void *car, unsigned input_enabled) {
-    (void)car;
-    (void)input_enabled;
-    if (!started) return;
-    if (!ticked) InterlockedExchange(&ticked, 1);
-    control_check();
-    weather_tick();
-    time_of_day_tick();
-}
-
-/* Weather and time of day only run through GriplineTick.dll (an Extra Options plugin). Without it they
-   silently do nothing, so say so once when one of them is set and no tick came after a while. */
-static DWORD WINAPI tick_watch(LPVOID unused) {
-    (void)unused;
-    Sleep(90000);
-    if (ticked || (!weather_setting() && !time_of_day_setting())) return 0;
-    log_append("GRIPLINE: no tick from mods\\Gripline\\plugins\\GriplineTick.dll - weather and time of day are off. "
-               "Copy that file from the Gripline ZIP.\r\n");
-    notify_show("Gripline: GriplineTick.dll missing\nWeather and time of day need mods\\Gripline\\plugins\\GriplineTick.dll");
-    platform_log("GriplineTick.dll did not tick - weather and time of day off");
-    return 0;
-}
-
-/* creator mode hides Gripline's own cards here; the game's HUD stays (Extra Options owns those hooks) */
-void autodrive_ui_set_creator(int hidden) {
-    (void)hidden;
-}
-
 FH2MOD_EXPORT int fh2mod_init(const FH2ModApi *platform) {
     if (!platform || mod || !platform->register_mod || !platform->wait_for_game) return 1;
     api = platform;
@@ -480,8 +358,8 @@ FH2MOD_EXPORT int fh2mod_init(const FH2ModApi *platform) {
     info.github_repo = "Flenkii/Gripline";
     info.platform_version = "2.7.4";
     info.check_updates = 0;
-    info.description = "Wheel with the game's own force feedback, 1:1 cockpit wheel, cockpit view 2, keyboard driving "
-                       "and more traffic for Forza Horizon 2. Runs next to Extra Options. Settings: Pause > Settings > MODS.";
+    info.description = "Keyboard driving, 1:1 cockpit wheel, cockpit view 2, more traffic and nitro keys for "
+                       "Forza Horizon 2. Runs next to Extra Options and Azimuth's wheel. Settings: Pause > Settings > MODS.";
     mod = api->register_mod(&info);
     if (!mod) return 1;
     if (!find_folders()) {
@@ -515,7 +393,6 @@ BOOL WINAPI DllMain(HINSTANCE instance, DWORD reason, LPVOID reserved) {
     if (reason == DLL_PROCESS_ATTACH) {
         DisableThreadLibraryCalls(instance);
     } else if (reason == DLL_PROCESS_DETACH) {
-        wheel_bridge_shutdown();
         rig_settings_flush();
     }
     return TRUE;

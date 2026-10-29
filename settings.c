@@ -1,54 +1,16 @@
 #include "settings.h"
-#include "features.h"
 #include "support.h"
 
 #define INI_MAX_SIZE 8192
 #define SETTING(section, key, field, type) {section, key, key, offsetof(ModOptions, field), type}
 
 const SettingDefinition setting_definitions[] = {
-    SETTING("Global", "Enabled", enabled, SETTING_BOOLEAN),
-    SETTING("Content", "UnlockDLC", unlock_dlc, SETTING_BOOLEAN),
-    SETTING("Content", "OfflineVIP", offline_vip, SETTING_BOOLEAN),
-    SETTING("Frontend", "SkipIntro", skip_intro, SETTING_BOOLEAN),
-    SETTING("Frontend", "AllRimsCategory", all_rims_category, SETTING_BOOLEAN),
-    SETTING("Frontend", "EnableMarketplace", enable_marketplace, SETTING_BOOLEAN),
-    SETTING("Frontend", "EnableSocial", enable_social, SETTING_BOOLEAN),
-    SETTING("Frontend", "EnableClubs", enable_clubs, SETTING_BOOLEAN),
-    SETTING("Frontend", "EnableRivals", enable_rivals, SETTING_BOOLEAN),
-    SETTING("Frontend", "GetInCarFromPauseMenu", garage_from_pause, SETTING_BOOLEAN),
-    SETTING("Content", "UnlockStormIslandCars", unlock_storm_island_cars, SETTING_BOOLEAN),
-    SETTING("Content", "UnlockTreasureMap", unlock_treasure_map, SETTING_BOOLEAN),
-    SETTING("Compatibility", "DisableParentalLocks", disable_parental_locks, SETTING_BOOLEAN),
-    SETTING("Compatibility", "DisableAzimuthSaveChecksums", disable_azimuth_save_checksums,
-            SETTING_BOOLEAN),
-    SETTING("Profile", "CustomGamerpic", custom_gamerpic, SETTING_BOOLEAN),
-    SETTING("PhotoMode", "FreeCamera", free_photo_camera, SETTING_BOOLEAN),
-    SETTING("Files", "EnableMediaOverrides", media_overrides, SETTING_BOOLEAN),
-    {"Autodrive", "Enabled", "AutodriveEnabled", offsetof(ModOptions, autodrive), SETTING_BOOLEAN},
     SETTING("Traffic", "TrafficLevel", traffic_level, SETTING_TRAFFIC_LEVEL),
     SETTING("Traffic", "RushHourAllDay", traffic_all_day, SETTING_BOOLEAN),
-    SETTING("Traffic", "Weather", weather, SETTING_WEATHER),
-    SETTING("Traffic", "TimeOfDay", time_of_day, SETTING_TIME_OF_DAY),
     SETTING("Gripline", "Notifications", notifications, SETTING_BOOLEAN),
     SETTING("Gripline", "SteeringAnimation", steering_animation, SETTING_BOOLEAN),
     SETTING("Gripline", "CockpitViewForward", cockpit_view_forward, SETTING_CENTIMETERS),
     SETTING("Gripline", "CockpitViewUp", cockpit_view_up, SETTING_CENTIMETERS),
-};
-
-static const SettingDefinition legacy_settings[] = {
-    SETTING("Traffic", "Wetter", weather, SETTING_WEATHER), /* fork1/fork2 name of Weather */
-    SETTING("Livery", "Enable4K", enable_4k_liveries, SETTING_BOOLEAN),
-    SETTING("Livery", "IntermediateMSAA", livery_msaa, SETTING_MSAA),
-    SETTING("Livery", "ExtraSupersampling", livery_supersampling, SETTING_BOOLEAN),
-    SETTING("Frontend", "SnapToRoadOnCarChange", snap_car_to_road, SETTING_BOOLEAN),
-    SETTING("Frontend", "SkipCarMeetOnStartup", skip_car_meet_on_startup, SETTING_BOOLEAN),
-    SETTING("Frontend", "SpawnAtFestival", spawn_at_festival, SETTING_BOOLEAN),
-    SETTING("Frontend", "SkipIneligibleCarDialogue", skip_ineligible_car_dialogue, SETTING_BOOLEAN),
-    SETTING("Graphics", "SmoothSunShadows", smooth_sun_shadows, SETTING_BOOLEAN),
-    SETTING("HUD", "MinimapFollowsCamera", minimap_follows_camera, SETTING_BOOLEAN),
-    SETTING("PhotoMode", "Samples", photo_mode_samples, SETTING_PHOTO_SAMPLES),
-    {"Autodrive", "Cinematic", "AutodriveCinematic", offsetof(ModOptions, autodrive_cinematic),
-     SETTING_BOOLEAN},
 };
 
 const size_t setting_count = ARRAY_COUNT(setting_definitions);
@@ -57,36 +19,6 @@ static wchar_t ini_path[PATH_CAPACITY];
 
 void settings_defaults(ModOptions *options) {
     *options = (ModOptions){
-        .enabled = 1,
-        .unlock_dlc = 1,
-        .offline_vip = 1,
-        .skip_intro = 1,
-        .enable_marketplace = 1,
-        .enable_4k_liveries = 0,
-        .livery_msaa = 2,
-        .livery_supersampling = 0,
-        .garage_from_pause = 1,
-        .snap_car_to_road = 1,
-        .unlock_storm_island_cars = 1,
-        .disable_parental_locks = 1,
-        .custom_gamerpic = 1,
-        .free_photo_camera = 1,
-        .unlock_treasure_map = 0,
-        .autodrive = 0,
-        .autodrive_cinematic = 1,
-        .disable_azimuth_save_checksums = 1,
-        .smooth_sun_shadows = -1,
-        .skip_ineligible_car_dialogue = 0,
-        .minimap_follows_camera = 1,
-        .media_overrides = 0,
-        .spawn_at_festival = 0,
-        .skip_car_meet_on_startup = 0,
-        .all_rims_category = 0,
-        .drift_camera = 1,
-        .enable_social = 1,
-        .enable_clubs = 1,
-        .enable_rivals = 1,
-        .photo_mode_samples = 0,
         .traffic_level = 4,
         .traffic_all_day = 1,
         .notifications = 1,
@@ -113,11 +45,6 @@ static char *trim_whitespace(char *text) {
 }
 
 static int known_section(const char *name) {
-    if (text_equal_ignore_case(name, "Camera") || text_equal_ignore_case(name, "Graphics") ||
-        text_equal_ignore_case(name, "Livery") || text_equal_ignore_case(name, "HUD") ||
-        text_equal_ignore_case(name, "General") || text_equal_ignore_case(name, "Language")) {
-        return 1;
-    }
     for (size_t index = 0; index < setting_count; ++index) {
         if (text_equal_ignore_case(name, setting_definitions[index].section)) {
             return 1;
@@ -127,18 +54,8 @@ static int known_section(const char *name) {
 }
 
 static const SettingDefinition *find_setting(const char *section, const char *key) {
-    if (text_equal_ignore_case(section, "General")) {
-        section = "Global";
-    }
     for (size_t index = 0; index < setting_count; ++index) {
         const SettingDefinition *definition = &setting_definitions[index];
-        if (text_equal_ignore_case(section, definition->section) &&
-            text_equal_ignore_case(key, definition->key)) {
-            return definition;
-        }
-    }
-    for (unsigned index = 0; index < ARRAY_COUNT(legacy_settings); ++index) {
-        const SettingDefinition *definition = &legacy_settings[index];
         if (text_equal_ignore_case(section, definition->section) &&
             text_equal_ignore_case(key, definition->key)) {
             return definition;
@@ -148,30 +65,6 @@ static const SettingDefinition *find_setting(const char *section, const char *ke
 }
 
 static int parse_value(const SettingDefinition *definition, const char *text, int *value) {
-    if (definition->type == SETTING_PHOTO_SAMPLES) {
-        unsigned samples = 0;
-        if (!*text) {
-            return 0;
-        }
-        for (const char *digit = text; *digit; ++digit) {
-            if (*digit < '0' || *digit > '9' || samples > 4096) {
-                return 0;
-            }
-            samples = samples * 10 + (unsigned)(*digit - '0');
-        }
-        if (samples > 4096 || (samples && samples < 16)) {
-            return 0;
-        }
-        *value = (int)samples;
-        return 1;
-    }
-    if (definition->type == SETTING_WEATHER || definition->type == SETTING_TIME_OF_DAY) {
-        if (text[0] >= '0' && text[0] <= '5' && !text[1]) {
-            *value = text[0] - '0';
-            return 1;
-        }
-        return 0;
-    }
     if (definition->type == SETTING_CENTIMETERS) { /* -100 .. 100 */
         const char *digit = text[0] == '-' ? text + 1 : text;
         int number = 0;
@@ -193,17 +86,6 @@ static int parse_value(const SettingDefinition *definition, const char *text, in
     if (definition->type == SETTING_TRAFFIC_LEVEL) {
         if (text[0] >= '0' && text[0] <= '7' && !text[1]) {
             *value = text[0] - '0';
-            return 1;
-        }
-        return 0;
-    }
-    if (definition->type == SETTING_MSAA) {
-        if (text_equal_ignore_case(text, "2")) {
-            *value = 2;
-            return 1;
-        }
-        if (text_equal_ignore_case(text, "4")) {
-            *value = 4;
             return 1;
         }
         return 0;
@@ -270,27 +152,10 @@ static int parse_ini(char *text, ModOptions *options) {
         char *key = trim_whitespace(line);
         char *value = trim_whitespace(separator + 1);
 
-        if (text_equal_ignore_case(section, "Frontend") &&
-            text_equal_ignore_case(key, "HideOnlineTabs")) {
-            if (!text_equal_ignore_case(value, "0") && !text_equal_ignore_case(value, "1")) {
-                goto invalid;
-            }
-            continue;
-        }
-
-        // Retired keys are ignored so an older INI still loads.
-        if ((text_equal_ignore_case(section, "Language") &&
-             (text_equal_ignore_case(key, "Text") || text_equal_ignore_case(key, "Audio"))) ||
-            (text_equal_ignore_case(section, "Graphics") &&
-             (text_equal_ignore_case(key, "ForceAnisoFiltering") ||
-              text_equal_ignore_case(key, "MotionBlurSamples")))) {
-            continue;
-        }
-
-        if (text_equal_ignore_case(section, "Camera") &&
-            (text_equal_ignore_case(key, "DriftCamera") ||
-             text_equal_ignore_case(key, "DriftCameraStiffness") ||
-             text_equal_ignore_case(key, "FirstPersonDriftCameraStiffness"))) {
+        // Retired keys (V5: weather and time of day, now Extra Options) are ignored so an older INI still loads.
+        if (text_equal_ignore_case(section, "Traffic") &&
+            (text_equal_ignore_case(key, "Weather") || text_equal_ignore_case(key, "Wetter") ||
+             text_equal_ignore_case(key, "TimeOfDay"))) {
             continue;
         }
 
@@ -306,7 +171,7 @@ static int parse_ini(char *text, ModOptions *options) {
 
 invalid:
     status_set("REFUSED: invalid INI section, option, or value. See the supplied "
-               "FH2_ExtraOptions.ini.");
+               "Gripline.ini.");
     return 0;
 }
 
@@ -322,7 +187,7 @@ int settings_read(const wchar_t *directory, ModOptions *options) {
         if (GetLastError() == ERROR_FILE_NOT_FOUND) {
             return 1;
         }
-        status_set("REFUSED: cannot read FH2_ExtraOptions.ini.");
+        status_set("REFUSED: cannot read Gripline.ini.");
         return 0;
     }
     LARGE_INTEGER size;

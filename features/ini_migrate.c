@@ -13,33 +13,6 @@ typedef struct {
     const char *old_key, *new_key;
 } KeyName;
 
-static const KeyName wheel_keys[] = {
-    {"Aktiv", "Enabled"},           {"Geraet", "Device"},
-    {"Drehwinkel", "Rotation"},     {"LenkungUmkehren", "InvertSteering"},
-    {"AchseLenkung", "SteeringAxis"}, {"AchseGas", "ThrottleAxis"},
-    {"AchseBremse", "BrakeAxis"},   {"AchseKupplung", "ClutchAxis"},
-    {"TasteA", "ButtonA"},          {"TasteB", "ButtonB"},
-    {"TasteX", "ButtonX"},          {"TasteY", "ButtonY"},
-    {"WippeRechts", "PaddleRight"}, {"WippeLinks", "PaddleLeft"},
-    {"TasteMenu", "ButtonMenu"},    {"TasteView", "ButtonView"},
-    {"Schaltknauf", "Shifter"},     {"Gang1", "Gear1"},
-    {"Gang2", "Gear2"},             {"Gang3", "Gear3"},
-    {"Gang4", "Gear4"},             {"Gang5", "Gear5"},
-    {"Gang6", "Gear6"},             {"Rueckwaerts", "Reverse"},
-    {"RueckwaertsWert", "ReverseValue"}, {"ForceFeedback", "ForceFeedback"},
-    {"FFBStaerke", "FFBStrength"},  {"Vibration", "Rumble"},
-    {"ZusatzTaste1", "ExtraButton1"}, {"ZusatzTaste2", "ExtraButton2"},
-    {"ZusatzTaste3", "ExtraButton3"}, {"ZusatzFunktion1", "ExtraFunction1"},
-    {"ZusatzFunktion2", "ExtraFunction2"}, {"ZusatzFunktion3", "ExtraFunction3"},
-    {"Log", "Log"},                 {"Anschlag", "Lock"},
-    {"Zentrierung", "Centering"},   {"Daempfung", "Damping"},
-    {"FFBProtokoll", "FFBLog"},     {"FFBRichtung", "FFBDirection"},
-    {"Kurve", "Curve"},             {"KraftNachAussen", "OutwardForce"},
-    {"Glaettung", "Smoothing"},     {"Reibung", "Friction"},
-    {"Mindestkraft", "MinimumForce"}, {"FFBModus", "FFBMode"},
-    {"WheelDll", "WheelDll"},
-};
-
 /* the first four are numbers, the rest key bindings */
 #define KEYBOARD_NUMBERS 4
 static const KeyName keyboard_keys[] = {
@@ -132,27 +105,6 @@ static int write_new(const wchar_t *path, const char *data, size_t length) {
 }
 
 /* replaces an existing file through a temporary file */
-static int write_replace(const wchar_t *path, const char *data, size_t length) {
-    static wchar_t temp[PATH_CAPACITY];
-    unsigned n = 0;
-    while (path[n] && n < PATH_CAPACITY - 6) {
-        temp[n] = path[n];
-        ++n;
-    }
-    temp[n++] = L'.';
-    temp[n++] = L'n';
-    temp[n++] = L'e';
-    temp[n++] = L'w';
-    temp[n] = 0;
-    DeleteFileW(temp);
-    if (!write_new(temp, data, length)) return 0;
-    if (!MoveFileExW(temp, path, MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) {
-        DeleteFileW(temp);
-        return 0;
-    }
-    return 1;
-}
-
 static wchar_t backup_dir[PATH_CAPACITY];
 
 static int backup_path(wchar_t out[PATH_CAPACITY], const wchar_t *name) {
@@ -244,44 +196,13 @@ static void migrate_file(const wchar_t *directory, const wchar_t *old_name, cons
     }
 }
 
-/* FH2_ExtraOptions.ini: [Traffic] Wetter= -> Weather= (the old key is still understood) */
-static void migrate_weather(const wchar_t *directory) {
-    static wchar_t path[PATH_CAPACITY], copy[PATH_CAPACITY];
-    size_t length;
-    char value[16];
-    if (!path_join(path, directory, L"FH2_ExtraOptions.ini") || !exists(path) ||
-        !read_all(path, old_text, FILE_LIMIT, &length) ||
-        !ini_find_text(old_text, length, "Traffic", "Wetter", value, sizeof(value)) ||
-        ini_find_text(old_text, length, "Traffic", "Weather", value, sizeof(value)))
-        return;
-    size_t n = ini_rename_key(old_text, length, "Traffic", "Wetter", "Weather", edit[0], FILE_LIMIT + 1);
-    if (!n || !backup_path(copy, L"FH2_ExtraOptions.ini")) return;
-    if (!exists(copy) && !CopyFileW(path, copy, TRUE)) return;
-    if (write_replace(path, edit[0], n))
-        note("SETTINGS: FH2_ExtraOptions.ini [Traffic] Wetter= renamed to Weather= (copy of the old file in "
-             "FH2_Settings_Backup).", NULL);
-}
-
 void ini_migrate(const wchar_t *directory) {
     if (!directory || InterlockedExchange(&done, 1)) return;
     if (!path_join(backup_dir, directory, BACKUP_FOLDER)) return;
-    size_t wheel_length = 0;
-    const char *wheel_text = wheel_bridge_default_ini(&wheel_length);
-    static wchar_t wheel_old[PATH_CAPACITY], wheel_new[PATH_CAPACITY];
-    int wheel_moving = path_join(wheel_old, directory, L"FH2_Lenkrad.ini") &&
-                       path_join(wheel_new, directory, L"FH2_Wheel.ini") && exists(wheel_old) && !exists(wheel_new);
-    migrate_file(directory, L"FH2_Lenkrad.ini", L"FH2_Wheel.ini", "Lenkrad", "Wheel", wheel_keys,
-                 ARRAY_COUNT(wheel_keys), ARRAY_COUNT(wheel_keys), wheel_text, wheel_length, "FH2_Lenkrad.ini");
-    if (wheel_moving) { /* old wheel logs, so nobody sends the wrong one */
-        move_to_backup(directory, L"FH2_Lenkrad.log");
-        move_to_backup(directory, L"FH2_Lenkrad_vorher.log");
-        move_to_backup(directory, L"FH2_Lenkrad_ffb.csv");
-    }
     static char keyboard_text[4096];
     size_t keyboard_length = keyboard_default_ini(keyboard_text, sizeof(keyboard_text));
     migrate_file(directory, L"FH2_Tastatur.ini", L"FH2_Keyboard.ini", "Tastatur", "Keyboard", keyboard_keys,
                  ARRAY_COUNT(keyboard_keys), KEYBOARD_NUMBERS, keyboard_text, keyboard_length, "FH2_Tastatur.ini");
-    migrate_weather(directory);
 }
 
 void ini_migrate_log(void) {

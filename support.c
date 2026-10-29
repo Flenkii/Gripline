@@ -231,3 +231,22 @@ unsigned char *memory_alloc_near(unsigned char *base, size_t size) {
     }
     return NULL;
 }
+
+/* the compiler calls these for struct copies and zeroing (no C runtime in this DLL) */
+void *memset(void *destination, int value, size_t size);
+void *memcpy(void *destination, const void *source, size_t size);
+__attribute__((used)) void *memset(void *destination, int value, size_t size) {
+    volatile unsigned char *d = destination;
+    while (size--) {
+        *d++ = (unsigned char)value;
+    }
+    return destination;
+}
+__attribute__((used)) void *memcpy(void *destination, const void *source, size_t size) {
+    volatile unsigned char *d = destination;
+    const unsigned char *s = source;
+    while (size--) {
+        *d++ = *s++;
+    }
+    return destination;
+}

@@ -2,7 +2,7 @@
 import io, os, sys, tempfile, zipfile
 from emu import Emu
 
-DLL = sys.argv[1] if len(sys.argv) > 1 else 'winmm_test.dll'
+DLL = sys.argv[1] if len(sys.argv) > 1 else '../../gripline-plugin/fh2-mods/Gripline.dll'
 fails = []
 
 def check(cond, text):
@@ -15,13 +15,13 @@ os.makedirs(os.path.join(root, 'fh2-mods'))
 os.makedirs(os.path.join(root, 'data', 'bin'))
 content = {
     'FH2_ExtraOptions.log': b'Gripline V6 log\r\n' * 50,
-    'FH2_Wheel.ini': b'[Wheel]\r\nEnabled=1\r\n',
     'FH2_Keyboard.ini': b'[Keyboard]\r\nEnabled=1\r\n',
     'fh2-mods/platform-mods.txt': b'NitroSystem.dll\tNitroSystem\t1.0\r\nGripline.dll\tGripline\tV6\r\n',
-    'fh2wheels.log': b'fh2wheels loaded\r\n',
+    'azimuth.log': b'Azimuth 1.0.3\r\n',
 }
 for name, data in content.items():
-    host = os.path.join(root, 'data', 'bin', name) if name == 'fh2wheels.log' else os.path.join(root, *name.split('/'))
+    host = os.path.join(root, 'data', 'logs', name) if name == 'azimuth.log' else os.path.join(root, *name.split('/'))
+    os.makedirs(os.path.dirname(host), exist_ok=True)
     open(host, 'wb').write(data)
 
 e = Emu(DLL, root)

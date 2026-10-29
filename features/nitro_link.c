@@ -1,5 +1,5 @@
 /* Nitro key for NitroSystem - see nitro_link.h. Own code, no code from NitroSystem. */
-#include "extra_options.h"
+#include "gripline.h"
 #include "logging.h"
 #include "support.h"
 #include "nitro_link.h"

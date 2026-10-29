@@ -119,14 +119,16 @@ check(os.path.isdir(os.path.join(root, 'mods', 'Gripline', 'media')), 'mods\\Gri
 
 print('Mods page rows:')
 rows = seen['rows']
-check(len(rows) >= 20, '%d rows' % len(rows))
+check(len(rows) == 12, '%d rows (keyboard, traffic, cockpit, Gripline)' % len(rows))
+check(not any(w in r['label'] for r in rows for w in ('Wheel', 'Weather', 'Time of Day', 'Profile')),
+      'no wheel, weather, time of day or profile rows (Azimuth / Extra Options do those)')
 keys = [r['key'] for r in rows]
 check(len(set(keys)) == len(keys), 'keys unique')
 check(all(re.fullmatch(r'[A-Za-z0-9_]+', k) for k in keys), 'keys letters/digits')
 check(all(r['label'] for r in rows), 'every row has a label')
-weather = [r for r in rows if 'eather' in r['label']]
-check(weather and weather[0]['kind'] == 1 and weather[0]['step'] == 1.0 and '0 = ' in weather[0]['description'],
-      'weather: slider in steps of 1 with the choices named')
+preset = [r for r in rows if r['label'] == 'Traffic: Preset']
+check(preset and preset[0]['kind'] == 1 and preset[0]['step'] == 1.0 and '0 = ' in preset[0]['description'],
+      'traffic preset: slider in steps of 1 with the choices named')
 check(any(r['kind'] == 0 for r in rows), 'on/off rows')
 check(any(r['restart'] for r in rows), 'restart rows marked')
 for r in rows[:6]:

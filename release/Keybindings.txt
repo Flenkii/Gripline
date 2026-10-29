@@ -29,10 +29,7 @@ FUNKTIONEN / FUNCTIONS
   Minus / Plus       Radio zurück / weiter        Radio previous / next
 
 GRIPLINE
-  H                  Creator-Modus (Karten aus)   Creator mode (hide Gripline cards)
   F5                 Tastenliste ein/aus          Key list on/off
-  F1                 Spiel-HUD aus (Extra Opt.)   Hide game HUD (Extra Options)
-  F2                 Autodrive (Extra Options)    Autodrive (Extra Options)
 
 MENÜS / MENUS
   Pfeiltasten        Blättern                     Arrow keys: navigate
@@ -42,5 +39,4 @@ MENÜS / MENUS
   X / Y              Tasten X / Y                 Buttons X / Y
   Bild↑ / Bild↓      Reiter links / rechts        Page Up / Down: tabs left / right (LB / RB)
 
-Hinweis: Ist ein Lenkrad angeschlossen, fährt das Spiel mit dem Lenkrad.
-Note: while a wheel is connected, the game drives with the wheel.
+Lenkrad: im Azimuth-Launcher einrichten. / Wheel: set it up in the Azimuth launcher.

@@ -5,7 +5,7 @@ and media/cars/MER_SLR_05.zip (they are not in the repository)."""
 import importlib.util, math, os, struct, sys, zipfile, zlib
 from emu import Emu
 
-DLL = sys.argv[1] if len(sys.argv) > 1 else 'winmm_test.dll'
+DLL = sys.argv[1] if len(sys.argv) > 1 else '../../gripline-plugin/fh2-mods/Gripline.dll'
 DATA = os.environ.get('FH2_COCKPIT_DATA', '')
 fails = []
 checks = [0]

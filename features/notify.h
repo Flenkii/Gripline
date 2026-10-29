@@ -6,7 +6,7 @@
 /* Gripline notifications: a small card with the Gripline logo at the top right of the game
    picture (drawn into the game's own swap chain, so it also shows in fullscreen). Fades out
    after a few seconds, several stack, never takes the focus. Every message also goes to
-   FH2_ExtraOptions.log. Switch: FH2_ExtraOptions.ini [Gripline] Notifications=1 / in-game menu. */
+   Gripline.log. Switch: Gripline.ini [Gripline] Notifications=1 / Mods page. */
 
 /* UTF-8 text, one or two lines ("\n"). Safe from any thread. */
 void notify_show(const char *text);
@@ -32,9 +32,6 @@ int notify_install_late(void); /* after the game made its swap chain (plugin bui
 /* On/off (menu, INI). Off hides cards at once; messages are still logged. */
 void notify_set_enabled(int enabled);
 int notify_enabled(void);
-
-/* Creator mode (creator_mode.h): while hidden no card is drawn; new cards wait and show afterwards. */
-void notify_set_hidden(int hidden);
 
 /* Key list panel (keyboard_pad.c, key Keybinds): a tall card at the right edge of the picture,
    one row per key, shown until it is switched off; cards move to its left meanwhile. It is only

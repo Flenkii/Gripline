@@ -11,7 +11,7 @@
    messages still go to the log. */
 #define COBJMACROS
 #define WIDL_C_INLINE_WRAPPERS
-#include "extra_options.h"
+#include "gripline.h"
 #include <initguid.h>
 #include <d3d12.h>
 #include <dxgi1_4.h>
@@ -39,7 +39,7 @@ static SRWLOCK lock = SRWLOCK_INIT;
 static Card cards[MAX_CARDS]; /* [0] = newest */
 static unsigned card_count, next_id = 1;
 static volatile LONG cards_changed;
-static volatile LONG enabled = 1, broken, hidden;
+static volatile LONG enabled = 1, broken;
 
 static wchar_t panel_title[TEXT_CAPACITY];
 static NotifyPanelRow panel_rows[NOTIFY_PANEL_ROWS];
@@ -155,9 +155,6 @@ void notify_set_enabled(int on) {
     InterlockedExchange(&enabled, on ? 1 : 0);
 }
 
-void notify_set_hidden(int on) {
-    InterlockedExchange(&hidden, on ? 1 : 0);
-}
 
 int notify_enabled(void) {
     return (int)enabled;
@@ -967,7 +964,7 @@ static void before_present(IDXGISwapChain *swapchain) {
         if (!first_present) first_present = now;
         if (now - first_present >= DEFER_MS) flush_pending();
     }
-    if (!enabled || hidden || broken || (!card_count && !panel_count) || swapchain != swapchain_seen) return;
+    if (!enabled || broken || (!card_count && !panel_count) || swapchain != swapchain_seen) return;
     __try {
         render(swapchain);
     } __except (EXCEPTION_EXECUTE_HANDLER) {

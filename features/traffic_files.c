@@ -10,7 +10,7 @@
  * TrafficLevel (same rules as tools/fh2_more_traffic.py, presets light..maximum) and writes them to
  * Mount\gripline_traffic, which media_overrides.c mounts over game:\media. The game files are never
  * changed; TrafficLevel=0 leaves the folder unmounted. Read once by the game: applies after a restart. */
-#include "extra_options.h"
+#include "gripline.h"
 #include "logging.h"
 #include "support.h"
 #include "cockpit.h"

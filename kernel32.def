@@ -19,6 +19,7 @@ EXPORTS
     GetCurrentThreadId
     GetCurrentProcessId
     GetFullPathNameW
+    GetPrivateProfileIntW
     GetPrivateProfileStringW
     ExitProcess
     GetProcessHeap

@@ -2,7 +2,7 @@
 import os, struct, sys, tempfile
 from emu import Emu, GAME
 
-DLL = sys.argv[1] if len(sys.argv) > 1 else 'winmm_test.dll'
+DLL = sys.argv[1] if len(sys.argv) > 1 else '../../gripline-plugin/fh2-mods/Gripline.dll'
 fails = []
 
 def check(cond, text):

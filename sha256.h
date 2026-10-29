@@ -1,6 +1,6 @@
 #ifndef FH2_SHA256_H
 #define FH2_SHA256_H
-#include "extra_options.h"
+#include "gripline.h"
 
 typedef struct {
     uint32_t h[8];

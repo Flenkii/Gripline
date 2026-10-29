@@ -1,6 +1,6 @@
 ---
 name: Problem / bug report
-about: Something does not work (wheel, keyboard, traffic, weather, menu, crash)
+about: Something does not work (keyboard, traffic, cockpit, cards, menu, crash)
 title: ''
 labels: ''
 ---
@@ -10,14 +10,11 @@ labels: ''
 
 **What do you use?**
 - Device: controller / keyboard / wheel (which one?)
-- Azimuth version:
-- Mod version (e.g. v0.2.98-fork2):
+- Azimuth, Extra Options and FH2MP versions:
+- Gripline version (e.g. V6):
 
-**Log files** – please attach these files from your Azimuth folder (next to `azimuth.exe`).
-Drag them into this text box, GitHub accepts .log and .ini files:
-- [ ] `FH2_ExtraOptions.log` (always)
-- [ ] `FH2_Wheel.log` (wheel problems; `FH2_Lenkrad.log` on fork1-fork3)
-- [ ] `FH2_Wheel.ini` and `FH2_Keyboard.ini` (your settings; `FH2_Lenkrad.ini` / `FH2_Tastatur.ini` on fork1-fork3)
+**Problem report** – Pause › Settings › MODS › *Gripline: Create Problem Report*, then drag
+`Gripline_Report.zip` (next to `azimuth.exe`) into this text box.
 
-The files contain no personal data, only settings and what the mod detected.
-Start the game once, reproduce the problem, close the game, then attach the files.
+The report contains no personal data, only settings and logs of Gripline, Extra Options, the Mod Platform and Azimuth.
+Wheel and force feedback come from Azimuth since Gripline V6 – report wheel problems to Azimuth without mods.

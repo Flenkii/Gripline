@@ -1,9 +1,9 @@
-"""Test of the "mods found" start card (features/mod_scan.c): reads fh2-mods\\platform-mods.txt of the
+"""Test of the mods list for the problem report (features/mod_scan.c): reads fh2-mods\\platform-mods.txt of the
 FH2 Mod Platform and asks for a few known modules by name; no process list."""
 import os, sys, tempfile
 from emu import Emu
 
-DLL = sys.argv[1] if len(sys.argv) > 1 else 'winmm_test.dll'
+DLL = sys.argv[1] if len(sys.argv) > 1 else '../../gripline-plugin/fh2-mods/Gripline.dll'
 fails = []
 
 
@@ -34,16 +34,10 @@ def text_for(mods_list, modules=None):
 
 r, t = text_for(LIST)
 check(r == 1 and t == 'Gripline V6 - mods found\nFH2MP, NitroSystem', f'Platform-Liste: {t!r}')
-r, t = text_for(LIST, {'fh2wheels.dll': 0x1000})
-check(r == 1 and t.endswith('FH2MP, NitroSystem, fh2wheels'), 'fh2wheels (Modulname) kommt dazu')
-r, t = text_for(LIST, {'fh2wheels.dll': 0x1000, 'fh2wheels-next.dll': 0x2000})
-check(t.count('fh2wheels') == 1, 'fh2wheels nur einmal')
-r, t = text_for(None, {'fh2wheels.dll': 0x1000})
-check(r == 1 and t == 'Gripline V6 - mods found\nfh2wheels', 'ohne Platform-Datei: nur bekannte Module')
 r, t = text_for(None)
-check(r == 0, 'nichts gefunden: keine Karte')
+check(r == 0, 'nichts gefunden: keine Liste')
 r, t = text_for('# x\r\nGripline.dll\tGripline\tV5\r\n')
-check(r == 0, 'nur Gripline selbst: keine Karte')
+check(r == 0, 'nur Gripline selbst: keine Liste')
 many = ''.join(f'M{i}.dll\tVeryLongModName{i:02d}\t1\r\n' for i in range(20))
 r, t = text_for(many)
 check(r == 1 and len(t) < 160 and t.endswith('...'), f'viele Mods werden gekuerzt ({len(t)} Zeichen)')

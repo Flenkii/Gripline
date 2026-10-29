@@ -7,7 +7,7 @@
    - the driver models (media\drivers\{default,defaultRace,suited,unsuited,stig}.zip) get the
      hands hidden (their triangles collapsed),
    - every car's driver steering animation (scene\Drivers\...\leftRightTurn.gr2) gets a new
-     steering-wheel curve that turns as far as the real wheel (FH2_Wheel.ini Rotation / 2 per
+     steering-wheel curve that turns as far as the real wheel (Azimuth launcher rotation / 2 per
      side; FH2 itself turns it 90 degrees).
    The files are made once (again only when the rotation changes) into Mount\gripline_cockpit,
    which Gripline mounts over game:\media while the option is on. The game files are never

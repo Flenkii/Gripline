@@ -9,7 +9,7 @@ must use rotation / 2, so the animation turns 1:1 with the real wheel."""
 import math, os, struct, sys
 from emu import Emu, GAME
 
-DLL = sys.argv[1] if len(sys.argv) > 1 else 'winmm_test.dll'
+DLL = sys.argv[1] if len(sys.argv) > 1 else '../../gripline-plugin/fh2-mods/Gripline.dll'
 EXE_IMG = sys.argv[2] if len(sys.argv) > 2 else os.path.join(os.environ.get('FH2_GAME', 'game'), 'exe.img')
 fails = []
 

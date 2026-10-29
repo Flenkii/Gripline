@@ -2,7 +2,7 @@
    Port of tools/fh2_lenkrad.py (V1). Own code: Deflate (RFC 1951), Oodle1 decoding as
    documented by the public-domain liboodle notes, Granny GR2 v7 sections/relocations, quaternion
    curve formats as documented by LSLib (MIT; only the two 16-entry scale/offset tables). */
-#include "extra_options.h"
+#include "gripline.h"
 #include "logging.h"
 #include "support.h"
 #include "cockpit.h"

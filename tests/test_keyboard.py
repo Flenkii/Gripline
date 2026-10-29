@@ -5,7 +5,7 @@ memory; the DLL's hook of Azimuth's RoGetActivationFactory hands out the merged 
 import os, struct, sys, tempfile
 from emu import Emu
 
-DLL = sys.argv[1] if len(sys.argv) > 1 else 'winmm_test.dll'
+DLL = sys.argv[1] if len(sys.argv) > 1 else '../../gripline-plugin/fh2-mods/Gripline.dll'
 fails = []
 checks = [0]
 
@@ -102,8 +102,6 @@ ini = open(os.path.join(root, 'FH2_Keyboard.ini'), 'rb').read()
 check(b'[Keyboard]' in ini and b'Throttle=W' in ini and b'Handbrake=Space' in ini and b'Enabled=1' in ini,
       'FH2_Keyboard.ini (englisch) mit FH5-Belegung angelegt')
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'tools'))
-import make_release
-check(make_release.keyboard_ini().encode('ascii') == ini, 'Release-Profile (tools/make_release.py) = genau die Datei, die die DLL anlegt')
 check(e.call('Fh2TestKeyboardBinding', 0, 0) == ord('W'), 'Gas = W')
 check(e.call('Fh2TestKeyboardBinding', 14, 0) == ord('C') and e.call('Fh2TestKeyboardBinding', 14, 1) == 0x62,
       'Blick zurück = C und Num2')
@@ -260,7 +258,7 @@ keys.add(0x74)
 r = read()
 count, label, kt, width, rows = panel()
 check(r['buttons'] == 0 and r['lx'] == 0.0, 'F5 drueckt nichts im Spiel')
-check(count == 35 and label == 'Throttle' and kt == 'W', f'F5: Tastenliste mit allen belegten Tasten + Autodrive: {count} {label}={kt}')
+check(count == 33 and label == 'Throttle' and kt == 'W', f'F5: Tastenliste mit allen belegten Tasten: {count} {label}={kt}')
 def panel_rows():
     out = {}
     for i in range(count):
@@ -271,7 +269,7 @@ def panel_rows():
 rw = panel_rows()
 check(rw.get('Look back') == 'C, Num 2' and rw.get('Radio: previous') == 'Minus' and rw.get('Clutch') == 'Left Shift'
       and rw.get('Telemetry (hold)') == 'T' and rw.get('Photo mode (hold)') == 'P' and rw.get('Key list on/off') == 'F5'
-      and rw.get('Autodrive') == 'F2' and rw.get('Change camera') == 'Tab', f'Tastennamen lesbar: {rw}')
+      and 'Autodrive' not in rw and 'Creator mode' not in rw and rw.get('Change camera') == 'Tab', f'Tastennamen lesbar: {rw}')
 read()
 check(panel()[0] == count, 'F5 halten: bleibt an (nur Druck schaltet)')
 keys.clear()

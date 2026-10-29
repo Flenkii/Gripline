@@ -5,7 +5,7 @@ the DLL patches its XInputGetState slot and reports NitroButton while a Gripline
 import os, struct, sys, tempfile
 from emu import Emu
 
-DLL = sys.argv[1] if len(sys.argv) > 1 else 'winmm_test.dll'
+DLL = sys.argv[1] if len(sys.argv) > 1 else '../../gripline-plugin/fh2-mods/Gripline.dll'
 fails = []
 checks = [0]
 

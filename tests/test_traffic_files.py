@@ -4,7 +4,7 @@ and the whole start writes the files from media\\EntityModel.zip to Mount\\gripl
 import importlib.util, os, sys, tempfile, zipfile
 from emu import Emu
 
-DLL = sys.argv[1] if len(sys.argv) > 1 else 'winmm_test.dll'
+DLL = sys.argv[1] if len(sys.argv) > 1 else '../../gripline-plugin/fh2-mods/Gripline.dll'
 HERE = os.path.dirname(os.path.abspath(__file__))
 spec = importlib.util.spec_from_file_location('mt', os.path.join(HERE, '..', 'tools', 'fh2_more_traffic.py'))
 MT = importlib.util.module_from_spec(spec)

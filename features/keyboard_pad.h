@@ -14,7 +14,7 @@
    follow the controller layout chosen in the game (A/B/X/Y layouts), menu keys are fixed
    buttons (Enter = A, Backspace = B, Esc = Menu). The arrow keys move the left stick in menus
    and the camera (right stick) while driving. */
-#include "extra_options.h"
+#include "gripline.h"
 
 enum {
     KEY_SETTING_ENABLED,     /* Aktiv                0/1 (next game start) */

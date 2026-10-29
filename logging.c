@@ -75,13 +75,7 @@ void log_start(const wchar_t *directory, const ModOptions *options) {
     if (file == INVALID_HANDLE_VALUE) {
         return;
     }
-#if defined(FH2_GRIPLINE_PLUGIN)
     write_text(file, "Gripline " GRIPLINE_VERSION " - FH2 Mod Platform mod next to the official Extra Options\r\n");
-#elif defined(FH2_AZIMUTH)
-    write_text(file, "Gripline " GRIPLINE_VERSION " (based on " MOD_NAME " " MOD_VERSION ") - Azimuth winmm proxy\r\n");
-#else
-    write_text(file, "Gripline " GRIPLINE_VERSION " (based on " MOD_NAME " " MOD_VERSION ") - xg.dll hook\r\n");
-#endif
     write_text(file, status_get());
     for (size_t index = 0; index < setting_count; ++index) {
         const SettingDefinition *definition = &setting_definitions[index];

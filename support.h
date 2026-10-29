@@ -1,6 +1,6 @@
 #ifndef FH2_SUPPORT_H
 #define FH2_SUPPORT_H
-#include "extra_options.h"
+#include "gripline.h"
 void memory_copy(void *destination, const void *source, size_t size);
 int memory_equal(const void *left, const void *right, size_t size);
 size_t text_length(const char *text);

@@ -1,9 +1,9 @@
 #ifndef FH2_SETTINGS_H
 #define FH2_SETTINGS_H
 
-#include "extra_options.h"
+#include "gripline.h"
 
-typedef enum { SETTING_BOOLEAN, SETTING_MSAA, SETTING_PHOTO_SAMPLES, SETTING_TRAFFIC_LEVEL, SETTING_WEATHER, SETTING_TIME_OF_DAY, SETTING_CENTIMETERS } SettingType;
+typedef enum { SETTING_BOOLEAN, SETTING_TRAFFIC_LEVEL, SETTING_CENTIMETERS } SettingType;
 
 typedef struct {
     const char *section;

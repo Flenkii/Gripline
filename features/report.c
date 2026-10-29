@@ -2,7 +2,7 @@
    into Gripline_Report.zip next to the INIs: a plain ZIP without compression (stored), so no
    compressor is needed and every unzip tool opens it. Missing files are skipped; files the game
    still writes to (logs) are opened with full sharing and read as they are at that moment. */
-#include "extra_options.h"
+#include "gripline.h"
 #include "report.h"
 #include "logging.h"
 #include "mod_scan.h"
@@ -25,16 +25,11 @@ static const struct {
     {L"FH2_ExtraOptions.ini", "FH2_ExtraOptions.ini"},
     {L"Gripline.log", "Gripline.log"}, /* plugin build */
     {L"Gripline.ini", "Gripline.ini"},
-    {L"FH2_Wheel.log", "FH2_Wheel.log"},
-    {L"FH2_Wheel_previous.log", "FH2_Wheel_previous.log"},
-    {L"FH2_Wheel.ini", "FH2_Wheel.ini"},
     {L"FH2_Keyboard.ini", "FH2_Keyboard.ini"},
     {L"fh2-mods\\platform.log", "fh2-mods/platform.log"},
     {L"fh2-mods\\platform-mods.txt", "fh2-mods/platform-mods.txt"},
-    {L"data\\bin\\fh2wheels.log", "fh2wheels.log"},
-    {L"data\\logs\\azimuth.log", "azimuth.log"}, /* Azimuth 1.0.3: wheel and force feedback */
+    {L"data\\logs\\azimuth.log", "azimuth.log"}, /* Azimuth 1.0.3: also its wheel and force feedback */
     {L"mods\\loadorder.txt", "mods/loadorder.txt"},
-    {L"mods\\Extra Options - Weather Control\\plugins\\EO_WeatherControl.ini", "mods/EO_WeatherControl.ini"},
 };
 
 typedef struct {
