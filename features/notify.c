@@ -1016,6 +1016,29 @@ static void adopt_swapchain(IDXGISwapChain *swapchain) {
             if (!InterlockedExchange(&no_device, 1)) log_append("NOTIFY: the presented swap chain is no D3D12 swap chain.\r\n");
         } else {
             D3D12_COMMAND_QUEUE_DESC qd = {D3D12_COMMAND_LIST_TYPE_DIRECT, 0, D3D12_COMMAND_QUEUE_FLAG_NONE, 0};
+            DXGI_SWAP_CHAIN_DESC sd;
+            if (SUCCEEDED(IDXGISwapChain_GetDesc(swapchain, &sd))) {
+                log_append_value("NOTIFY: game swap chain format ", (int)sd.BufferDesc.Format);
+                log_append_value("NOTIFY: game swap chain usage ", (int)sd.BufferUsage);
+                log_append_value("NOTIFY: game swap chain buffers ", (int)sd.BufferCount);
+                log_append_value("NOTIFY: game swap chain flags ", (int)sd.Flags);
+                log_append_value("NOTIFY: game swap chain effect ", (int)sd.SwapEffect);
+                log_append_value("NOTIFY: game swap chain width ", (int)sd.BufferDesc.Width);
+                ID3D12Resource *buffer = NULL;
+                int target_ok = 1;
+                if (SUCCEEDED(IDXGISwapChain_GetBuffer(swapchain, 0, &IID_ID3D12Resource, (void **)&buffer)) && buffer) {
+                    D3D12_RESOURCE_DESC rd = ID3D12Resource_GetDesc(buffer);
+                    log_append_value("NOTIFY: game back buffer flags ", (int)rd.Flags);
+                    log_append_value("NOTIFY: game back buffer format ", (int)rd.Format);
+                    target_ok = (rd.Flags & D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET) != 0;
+                    ID3D12Resource_Release(buffer);
+                }
+                if (!target_ok || !(sd.BufferUsage & DXGI_USAGE_RENDER_TARGET_OUTPUT)) {
+                    fail("the game's back buffers are no render targets");
+                    ID3D12Device_Release(device);
+                    return;
+                }
+            }
             if (SUCCEEDED(ID3D12Device_CreateCommandQueue(device, &qd, &IID_ID3D12CommandQueue, (void **)&q))) {
                 own_queue = 1;
                 hook_swapchain((IUnknown *)q, swapchain);
