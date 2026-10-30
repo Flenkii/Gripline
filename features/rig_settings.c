@@ -82,7 +82,7 @@ unsigned rig_setting_order(unsigned position) {
 static const unsigned char density_presets[RIG_DENSITY_COUNT][2] = {
     {0, 0}, /* 0 = own values (not a preset) */
     {0, 0}, /* 1 = Original */
-    {5, 1}, /* 2 = Deutlich mehr Verkehr (the most the game spawns), all day */
+    {4, 1}, /* 2 = Deutlich mehr Verkehr: 100 cars, all day (more hung the load after the car meet) */
     {6, 0}, /* 3 = Kein Verkehr */
     {7, 1}, /* 4 = Nur Drivatare */
 };
@@ -116,7 +116,7 @@ static const RigText german[RIG_SETTING_COUNT] = {
                              "Wirkt sofort."},
     [RIG_TRAFFIC_PRESET] = {"Verkehr: Voreinstellung",
                             "Stellt Menge und Rushhour mit einem Klick ein: Original, Deutlich mehr "
-                            "Verkehr (so viel das Spiel erzeugt, rund um die Uhr), Kein Verkehr oder Nur Drivatare. Änderst du danach Menge oder Rushhour, steht hier Eigene "
+                            "Verkehr (100 Autos, rund um die Uhr), Kein Verkehr oder Nur Drivatare. Änderst du danach Menge oder Rushhour, steht hier Eigene "
                             "Werte. Wird sofort gespeichert, die Menge wirkt aber erst nach einem "
                             "Neustart von Azimuth."},
     [RIG_KEY_ENABLED] = {"Tastatur: Tastatur",
@@ -167,8 +167,8 @@ static const RigText english[RIG_SETTING_COUNT] = {
                              "Full traffic density at any time of day instead of 7:00-19:00 only. "
                              "Applies immediately."},
     [RIG_TRAFFIC_PRESET] = {"Traffic: Preset",
-                            "Sets amount and rush hour in one go: Original, Much More Traffic (as "
-                            "much as the game spawns, all day), No Traffic or Drivatars Only. Changing amount or "
+                            "Sets amount and rush hour in one go: Original, Much More Traffic (100 "
+                            "cars, all day), No Traffic or Drivatars Only. Changing amount or "
                             "rush hour afterwards shows Custom. Saved immediately, the amount only "
                             "applies after restarting Azimuth."},
     [RIG_KEY_ENABLED] = {"Keyboard: Keyboard",
@@ -235,9 +235,9 @@ const wchar_t *rig_color_choice(unsigned char *game_image, unsigned index) {
 }
 
 static const wchar_t *const traffic_german[RIG_TRAFFIC_COUNT] = {L"Original (~14)", L"30 Autos", L"45 Autos",
-                                                  L"70 Autos",       L"100 Autos", L"150 Autos", L"Kein Verkehr", L"Nur Drivatare"};
+                                                  L"70 Autos",       L"100 Autos", L"100 Autos", L"Kein Verkehr", L"Nur Drivatare"};
 static const wchar_t *const traffic_english[RIG_TRAFFIC_COUNT] = {L"Original (~14)", L"30 Cars", L"45 Cars",
-                                                   L"70 Cars",        L"100 Cars", L"150 Cars", L"No Traffic", L"Drivatars Only"};
+                                                   L"70 Cars",        L"100 Cars", L"100 Cars", L"No Traffic", L"Drivatars Only"};
 
 static const RigText *texts(unsigned char *game_image) {
     return game_language_is_german(game_image) ? german : english;

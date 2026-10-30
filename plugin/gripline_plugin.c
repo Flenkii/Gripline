@@ -305,11 +305,11 @@ static char page_keys[PAGE_ROWS][8];
 
 static const char *const preset_help_en[RIG_DENSITY_COUNT] = {
     "", "The game's own traffic.",
-    "As much traffic as the game spawns, at any time of day, coming from further away.",
+    "100 traffic cars at any time of day, coming from further away.",
     "Nobody drives (offline).", "Drivatars instead of civilian traffic."};
 static const char *const preset_help_de[RIG_DENSITY_COUNT] = {
     "", "Der Verkehr des Spiels.",
-    "So viel Verkehr, wie das Spiel erzeugt, zu jeder Uhrzeit und aus größerer Entfernung.",
+    "100 Verkehrsautos zu jeder Uhrzeit, aus größerer Entfernung.",
     "Offline fährt niemand.", "Drivatare statt normalem Verkehr."};
 
 static void build_traffic_page(void) {
@@ -342,6 +342,10 @@ static void build_traffic_page(void) {
     rows[n].label = german ? "Menge (eigene Werte)" : "Amount (custom)";
     rows[n++].style = FH2_ROW_HEADING;
     for (unsigned v = 0; v < RIG_TRAFFIC_COUNT; ++v, ++n) {
+        if (v == 5) { /* was 200 cars, now the same as 100 cars: not listed twice */
+            --n;
+            continue;
+        }
         size_t used = 0;
         page_labels[n][0] = 0;
         append_wide(page_labels[n], sizeof(page_labels[n]), &used, rig_traffic_choice(game, v));

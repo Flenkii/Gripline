@@ -54,7 +54,7 @@ LEVELS = {
     2: dict(max_festival=22, mult=3.0, festival=2.0, cap=2.0, dist=1.25, fill=1, max_active=45, types=10, type_mult=2),
     3: dict(max_festival=30, mult=5.0, festival=3.0, cap=3.0, dist=1.25, fill=1, max_active=70, types=12, type_mult=2),
     4: dict(max_festival=40, mult=8.0, festival=4.0, cap=4.0, dist=1.5, fill=1, max_active=100, types=14, type_mult=3),
-    5: dict(max_festival=40, mult=14.0, festival=4.0, cap=6.0, dist=2.25, fill=1, max_active=150, types=18, type_mult=5),
+    5: dict(max_festival=40, mult=8.0, festival=4.0, cap=4.0, dist=1.5, fill=1, max_active=100, types=14, type_mult=3),
 }
 
 e = Emu(DLL, tempfile.mkdtemp(prefix='eo-traffic-'))
