@@ -11,6 +11,7 @@ const SettingDefinition setting_definitions[] = {
     SETTING("Gripline", "SteeringAnimation", steering_animation, SETTING_BOOLEAN),
     SETTING("Gripline", "CockpitViewForward", cockpit_view_forward, SETTING_CENTIMETERS),
     SETTING("Gripline", "CockpitViewUp", cockpit_view_up, SETTING_CENTIMETERS),
+    SETTING("Gripline", "CardColor", card_color, SETTING_CARD_COLOR),
 };
 
 const size_t setting_count = ARRAY_COUNT(setting_definitions);
@@ -83,7 +84,7 @@ static int parse_value(const SettingDefinition *definition, const char *text, in
         *value = text[0] == '-' ? -number : number;
         return 1;
     }
-    if (definition->type == SETTING_TRAFFIC_LEVEL) {
+    if (definition->type == SETTING_TRAFFIC_LEVEL || definition->type == SETTING_CARD_COLOR) {
         if (text[0] >= '0' && text[0] <= '7' && !text[1]) {
             *value = text[0] - '0';
             return 1;

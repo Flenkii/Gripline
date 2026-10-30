@@ -110,7 +110,7 @@ for n in names:
 
 print('start:')
 check(e.call('fh2mod_init', api) == 0, 'fh2mod_init returns 0')
-check(seen['info'] == ('Gripline', 'V6'), 'registered as Gripline V6: %r' % (seen['info'],))
+check(seen['info'] == ('Gripline', 'V6.2'), 'registered as Gripline V6.2: %r' % (seen['info'],))
 check(len(e.threads) == 1, 'start thread created (waits for the game)')
 
 print('INI files:')
@@ -126,7 +126,7 @@ check(os.path.isdir(os.path.join(root, 'mods', 'Gripline', 'media')), 'mods\\Gri
 
 print('Mods page rows:')
 rows = seen['rows']
-check(len(rows) == 10, '%d rows (keyboard, traffic, cockpit, Gripline)' % len(rows))
+check(len(rows) == 11, '%d rows (keyboard, traffic, cockpit, Gripline)' % len(rows))
 check(not any(w in r['label'] for r in rows for w in ('Wheel', 'Weather', 'Time of Day', 'Profile')),
       'no wheel, weather, time of day or profile rows (Azimuth / Extra Options do those)')
 keys = [r['key'] for r in rows]
@@ -138,6 +138,9 @@ check(not any(r['label'] in ('Traffic: Preset', 'Traffic: Amount') for r in rows
 check(seen['pages'] == [('Traffic', 'Gripline Traffic')], 'Traffic page with the presets by name: %r' % (seen['pages'],))
 check(any(r['kind'] == 0 for r in rows), 'on/off rows')
 check(any(r['restart'] for r in rows), 'restart rows marked')
+color = [r for r in rows if r['label'] == 'Gripline: Card Colour']
+check(len(color) == 1 and color[0]['min'] == 0 and color[0]['max'] == 7 and not color[0]['restart'] and
+      'Blue (original)' in color[0].get('description', 'Blue (original)'), 'card colour row 0..7, live: %r' % (color,))
 for r in rows[:6]:
     print('     ', r['key'], r['label'], r['kind'], r['min'], r['max'])
 

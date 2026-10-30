@@ -14,6 +14,8 @@ void notify_show(const char *text);
 /* For steps of one task (the wheel setup): when the newest card has the same tag, its text is
    replaced in place instead of stacking a new card; it stays hold_ms from now. */
 void notify_show_step(const char *text, unsigned tag, unsigned hold_ms);
+/* Same, for values updated several times a second (noclip height and speed): not logged. */
+void notify_show_live(const char *text, unsigned tag, unsigned hold_ms);
 
 /* Same, but for messages from game start: kept until the game has shown its first picture
    (a few seconds), then shown in the given order. Safe from any thread. */
@@ -32,6 +34,16 @@ int notify_install_late(void); /* after the game made its swap chain (plugin bui
 /* On/off (menu, INI). Off hides cards at once; messages are still logged. */
 void notify_set_enabled(int enabled);
 int notify_enabled(void);
+
+/* Card colour (menu, INI [Gripline] CardColor): bar, logo and title. Safe from any thread. */
+enum {
+    NOTIFY_COLOR_BLUE, /* original */
+    NOTIFY_COLOR_RED, NOTIFY_COLOR_GREEN, NOTIFY_COLOR_PURPLE, NOTIFY_COLOR_ORANGE,
+    NOTIFY_COLOR_YELLOW, NOTIFY_COLOR_PINK, NOTIFY_COLOR_WHITE,
+    NOTIFY_COLOR_COUNT
+};
+void notify_set_color(int index);
+int notify_color(void);
 
 /* Key list panel (keyboard_pad.c, key Keybinds): a tall card at the right edge of the picture,
    one row per key, shown until it is switched off; cards move to its left meanwhile. It is only

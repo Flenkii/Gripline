@@ -16,6 +16,8 @@
 #include "nitro_link.h"
 #include "notify.h"
 #include "game_language.h"
+#include "trip.h"
+#include "wheel_watch.h"
 
 #define RVA_DYNAMICS_VTABLE 0x2eb4bb8u
 #define RVA_DYNAMICS_REF_VTABLE 0x2eb5e18u
@@ -48,9 +50,16 @@ static ULONGLONG next_online_check;
 static int online;
 
 /* flight, only touched on the game's update thread (and when switching, while the hook is off) */
-static void *body;           /* the body being flown */
+static void *volatile body;  /* the body being flown */
 static float pos[3], dir[2]; /* position, heading (x, z) */
 static float mirror;         /* +1: right row = (z, 0, -x) of the heading, -1: the other way */
+
+/* info card (height, speed) */
+#define INFO_TAG 0x0c11b000u
+#define INFO_EVERY_MS 250u
+#define INFO_DELAY_MS 3000u /* the "noclip on" card with the keys first */
+
+static ULONGLONG info_from, info_next, info_time;
 
 int noclip_active(void) {
     return on != 0;
@@ -68,18 +77,32 @@ static void *slot(void *object, unsigned offset) {
     return fn;
 }
 
-static int is_local_car(void *car) {
-    void *vtable, *manager, *player, *local = NULL;
-    if (!memory_read_pointer(car, &vtable) || vtable != game + GAME_RVA_PLAYER_CAR_VTABLE ||
-        !memory_read_pointer(game + GAME_RVA_PLAYER_MANAGER, &manager) || !manager)
-        return 0;
+static void *find_local_car(void) {
+    void *manager, *player, *local = NULL;
+    if (!memory_read_pointer(game + GAME_RVA_PLAYER_MANAGER, &manager) || !manager) return NULL;
     player = ((PlayerGetter)(game + GAME_RVA_GET_LOCAL_PLAYER))(manager, 0);
-    if (!player) return 0;
+    if (!player) return NULL;
     ((CarGetter)(game + GAME_RVA_GET_PLAYER_CAR))(player, &local);
-    if (!local) return 0;
+    if (!local) return NULL;
     ObjectFn release = (ObjectFn)slot(local, 0x18);
     if (release) release(local);
-    return local == car;
+    return local;
+}
+
+/* The own car, looked up on the game thread at most four times a second (the update runs for
+   every car in every frame). */
+static void *local_car;
+static ULONGLONG local_checked;
+
+static int is_local_car(void *car) {
+    void *vtable;
+    if (!memory_read_pointer(car, &vtable) || vtable != game + GAME_RVA_PLAYER_CAR_VTABLE) return 0;
+    ULONGLONG now = GetTickCount64();
+    if (now - local_checked >= 250) {
+        local_checked = now;
+        local_car = find_local_car();
+    }
+    return local_car == car;
 }
 
 static void *car_body(void *car) {
@@ -170,15 +193,15 @@ static void card(const char *german, const char *english) {
 
 static NoclipHookFn switch_hook;
 
+static int hooked;
+
 static void set_on(LONG value) {
-    if (value && switch_hook && !switch_hook(1)) {
-        log_append("NOCLIP: the car update hook could not be switched on.\r\n");
+    if (value && !hooked) {
+        log_append("NOCLIP: the car update hook is not on.\r\n");
         return;
     }
     body = NULL;
     InterlockedExchange(&on, value);
-    /* off: the hook goes too, so the game runs exactly as without noclip */
-    if (!value && switch_hook) switch_hook(0);
 }
 
 static void handle_toggle(void) {
@@ -208,6 +231,7 @@ static void handle_toggle(void) {
     set_on(!on);
     log_append(on ? "NOCLIP: on\r\n" : "NOCLIP: off\r\n");
     if (on) {
+        info_from = GetTickCount64() + INFO_DELAY_MS;
         card("Noclip an\nW/S fliegen, A/D drehen, Leertaste/Strg hoch/runter",
              "Noclip on\nW/S fly, A/D turn, Space/Ctrl up/down");
     } else {
@@ -215,9 +239,22 @@ static void handle_toggle(void) {
     }
 }
 
+/* the own car's speed for the trip summary, after the game's update */
+static void sample_trip(void *car, float dt) {
+    void *dynamics = car_body(car);
+    GetStateFn get = dynamics ? (GetStateFn)slot(dynamics, SLOT_GET_STATE) : NULL;
+    if (!get) return;
+    _Alignas(16) BodyState state;
+    get(dynamics, &state);
+    _Alignas(16) float v[4];
+    _mm_store_ps(v, state.velocity);
+    if (float_is_finite(v[0]) && float_is_finite(v[1]) && float_is_finite(v[2])) trip_sample(dt, v);
+}
+
 void noclip_car_update(void *car, float dt, float frame_dt, unsigned frame) {
     void *dynamics = NULL;
-    if (on && game && car && is_local_car(car)) {
+    int local = game && car && is_local_car(car);
+    if (on && local) {
         dynamics = car_body(car);
         if (dynamics && dynamics != body && !begin(dynamics)) dynamics = NULL;
         if (!dynamics && !warned) {
@@ -232,14 +269,68 @@ void noclip_car_update(void *car, float dt, float frame_dt, unsigned frame) {
     }
     original(car, dt, frame_dt, frame);
     if (dynamics && on) place(dynamics); /* ... and what the game moved in it is taken back */
+    else if (local && !on) sample_trip(car, dt);
 }
 
-/* The key and the online check run on an own thread: while noclip is off Gripline does nothing
-   in the game's update (the hook is switched off). */
+/* ------------------------------------------------------------------ info card */
+
+static float info_pos[3];
+static int info_have;
+
+static void put_int(char *out, size_t *n, int value) {
+    char digits[12];
+    unsigned d = 0, v = value < 0 ? (unsigned)-value : (unsigned)value;
+    do digits[d++] = (char)('0' + v % 10); while ((v /= 10) && d < sizeof(digits));
+    if (value < 0) out[(*n)++] = '-';
+    while (d) out[(*n)++] = digits[--d];
+    out[*n] = 0;
+}
+
+static void put_text(char *out, size_t *n, const char *text) {
+    while (*text) out[(*n)++] = *text++;
+    out[*n] = 0;
+}
+
+/* height (the game's world y, metres) and speed while flying, a live card at the top right */
+static void info_step(ULONGLONG now) {
+    if (!on || !body) {
+        info_have = 0;
+        return;
+    }
+    if (now < info_from || now < info_next) return;
+    info_next = now + INFO_EVERY_MS;
+    float p[3] = {pos[0], pos[1], pos[2]};
+    int kmh = 0;
+    if (info_have && now > info_time) {
+        float dx = p[0] - info_pos[0], dy = p[1] - info_pos[1], dz = p[2] - info_pos[2];
+        kmh = (int)(root(dx * dx + dy * dy + dz * dz) / ((float)(now - info_time) / 1000.0f) * 3.6f + 0.5f);
+    }
+    info_pos[0] = p[0], info_pos[1] = p[1], info_pos[2] = p[2];
+    info_time = now;
+    info_have = 1;
+    int de = game_language_is_german(game);
+    char text[96];
+    size_t n = 0;
+    text[0] = 0;
+    put_text(text, &n, "Noclip - ");
+    put_int(text, &n, kmh);
+    put_text(text, &n, " km/h\n");
+    put_text(text, &n, de ? "H\xc3\xb6he " : "Height ");
+    put_int(text, &n, (int)(p[1] < 0 ? p[1] - 0.5f : p[1] + 0.5f));
+    put_text(text, &n, " m");
+    notify_show_live(text, INFO_TAG, 1000);
+}
+
+/* The key, the online check, the noclip card, the trip card and the wheel watch run on an own thread; in the game's
+   update Gripline only follows the own car. */
 static DWORD WINAPI watch_thread(LPVOID unused) {
     (void)unused;
     for (;;) {
         handle_toggle();
+        ULONGLONG now = GetTickCount64();
+        info_step(now);
+        trip_step(now);
+        wheel_watch_step(game, now);
         Sleep(30);
     }
 }
@@ -248,6 +339,10 @@ void noclip_start(unsigned char *game_image, void *original_update, NoclipHookFn
     original = (CarUpdateFn)original_update;
     game = game_image;
     switch_hook = hook_switch;
+    trip_start(game_image);
+    /* on for the whole session: noclip and the trip summary both follow the own car */
+    hooked = switch_hook && switch_hook(1);
+    if (!hooked) log_append("NOCLIP: the car update hook could not be switched on - noclip and trip card off.\r\n");
     HANDLE thread = CreateThread(NULL, 0, watch_thread, NULL, 0, NULL);
     if (thread) CloseHandle(thread);
     else log_append("NOCLIP: no thread - noclip off.\r\n");

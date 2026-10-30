@@ -20,6 +20,7 @@ enum {
     RIG_GRIP_STEERING,                   /* SteeringAnimation  0/1, next game start */
     RIG_GRIP_VIEW_FORWARD,               /* CockpitViewForward cm, second cockpit view */
     RIG_GRIP_VIEW_UP,                    /* CockpitViewUp      cm */
+    RIG_GRIP_CARD_COLOR,                 /* CardColor          0..7, notify.h NOTIFY_COLOR_* */
     RIG_GRIP_END,
     RIG_TRAFFIC_PRESET = RIG_GRIP_END,   /* traffic preset: not stored, derived from level + rush hour */
     RIG_GRIP_REPORT,                     /* problem report: an action (On = write Gripline_Report.zip), not stored */
@@ -33,6 +34,7 @@ enum {
     RIG_KIND_PERCENT, /* Slider, value / 100 with the game's percent display */
     RIG_KIND_NUMBER,  /* Slider, value * scale with a plain number display */
     RIG_KIND_DENSITY,  /* SpinnerControl, DensityChoices (traffic presets) */
+    RIG_KIND_COLOR,    /* numbered slider, card colours (rig_color_choice) */
 };
 
 /* kinds shown as a list of choices (SpinnerControl) and the name of their collection */
@@ -57,7 +59,9 @@ int rig_setting_get(unsigned id);
 int rig_setting_set(unsigned id, int value);
 void rig_settings_start(const wchar_t *settings_directory);
 /* [Gripline] values read from Gripline.ini at the game start */
-void rig_settings_gripline(int notifications, int steering_animation, int view_forward, int view_up);
+void rig_settings_gripline(int notifications, int steering_animation, int view_forward, int view_up, int card_color);
+/* game image for the language of the confirmation cards (a card names every change made in the menu) */
+void rig_settings_set_game(unsigned char *game_image);
 void rig_settings_flush(void);
 
 /* Texts of the page (German or English, following the game language). */
@@ -65,6 +69,7 @@ const char *rig_setting_heading(unsigned char *game_image, unsigned id);
 const char *rig_setting_description(unsigned char *game_image, unsigned id);
 const wchar_t *rig_traffic_choice(unsigned char *game_image, unsigned index);
 const wchar_t *rig_density_choice(unsigned char *game_image, unsigned index);
+const wchar_t *rig_color_choice(unsigned char *game_image, unsigned index);
 /* Rows of the menu: rig_setting_order(0 .. rig_setting_menu_count() - 1) are setting ids.
    Settings that are not listed keep working from their INI files but are not shown. */
 unsigned rig_setting_menu_count(void);

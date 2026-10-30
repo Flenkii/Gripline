@@ -33,6 +33,9 @@ PLUGIN_SOURCES = [
     "features/cockpit_view.c",
     "features/nitro_link.c",
     "features/noclip.c",
+    "features/trip.c",
+    "features/wheel_watch.c",
+    "features/version_check.c",
     "features/notify.c",
     "features/cockpit.c",
 ]
@@ -84,7 +87,7 @@ def compiler_arguments(compiler, options):
 
 
 def version_resource(filename):
-    version = "6.0.0"
+    version = "6.2.0"
     numbers = [int(part) for part in version.split(".")]
     numbers += [0] * (4 - len(numbers))
 
@@ -101,10 +104,10 @@ def version_resource(filename):
             data = padded(data) + children
         return struct.pack("<H", len(data)) + data[2:]
 
-    strings = {"FileDescription": "Gripline V6 - FH2 Mod Platform mod",
+    strings = {"FileDescription": "Gripline V6.2 - FH2 Mod Platform mod",
                "FileVersion": version, "InternalName": "Gripline",
                "OriginalFilename": filename, "ProductName": "Gripline",
-               "ProductVersion": "V6",
+               "ProductVersion": "V6.2",
                "LegalCopyright": "Flenkii, GPL-3.0; based on Extra Options by Arthur (RokkuDayo)"}
     entries = b"".join(padded(block(key, wide(value), text=True)) for key, value in strings.items())
     string_info = block("StringFileInfo", children=block("040904b0", children=entries))

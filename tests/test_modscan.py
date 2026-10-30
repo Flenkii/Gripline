@@ -33,7 +33,7 @@ def text_for(mods_list, modules=None):
 
 
 r, t = text_for(LIST)
-check(r == 1 and t == 'Gripline V6 - mods found\nFH2MP, NitroSystem', f'Platform-Liste: {t!r}')
+check(r == 1 and t == 'Gripline V6.2 - mods found\nFH2MP, NitroSystem', f'Platform-Liste: {t!r}')
 r, t = text_for(None)
 check(r == 0, 'nichts gefunden: keine Liste')
 r, t = text_for('# x\r\nGripline.dll\tGripline\tV5\r\n')

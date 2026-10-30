@@ -31,6 +31,7 @@
 #include "features/traffic_files.h"
 #include "features/game_language.h"
 #include "features/noclip.h"
+#include "features/version_check.h"
 
 void keyboard_pad_game_start(unsigned char *game_image, const wchar_t *settings_directory);
 void report_init(const wchar_t *settings_directory);
@@ -168,6 +169,7 @@ static const wchar_t *choice_name(unsigned kind, unsigned index) {
     switch (kind) {
     case RIG_KIND_TRAFFIC: return rig_traffic_choice(game, index);
     case RIG_KIND_DENSITY: return rig_density_choice(game, index);
+    case RIG_KIND_COLOR: return rig_color_choice(game, index);
     }
     return NULL;
 }
@@ -427,9 +429,9 @@ static void noclip_install(void) {
         platform_log("noclip: car update not hooked (see the platform log)");
         return;
     }
-    noclip_hook = hook; /* stays off until F6 */
+    noclip_hook = hook; /* noclip_start switches it on */
     noclip_start(game, original, noclip_switch);
-    log_append("NOCLIP: car update hook ready (on only while noclip is) - key Noclip (F6) offline.\r\n");
+    log_append("NOCLIP: car update hook ready - key Noclip (F6) offline, trip card in the pause menu.\r\n");
 }
 
 static void start_features(void) {
@@ -454,14 +456,16 @@ static void start_features(void) {
     cockpit_start(game, mount_dir, options.steering_animation, azimuth_rotation(), 10 /* linear */);
     notify_set_enabled(options.notifications);
     mod_scan_start(directory);
+    version_check_start(game, directory);
     report_init(directory);
+    rig_settings_set_game(game);
     rig_settings_gripline(options.notifications, options.steering_animation, options.cockpit_view_forward,
-                          options.cockpit_view_up);
+                          options.cockpit_view_up, options.card_color);
     rig_settings_start(directory);
     /* the platform may have loaded Gripline after Azimuth set up gamepads and swap chain */
     if (!keyboard_pad_late()) platform_log("keyboard: not active (off in FH2_Keyboard.ini, Mapper running, or no hook)");
     if (!notify_install_late()) platform_log("cards: could not hook the game picture");
-    notify_show_deferred("Gripline V6 active\nKeyboard, cockpit 2 (V), keys (F5), noclip (F6)");
+    notify_show_deferred("Gripline " GRIPLINE_VERSION " active\nKeyboard, cockpit 2 (V), keys (F5), noclip (F6)");
     InterlockedExchange(&started, 1);
     if (row_count) sync_rows();
     /* Extra Options mounts mods\Gripline\media; the game's steering angle follows once the files are there */
@@ -491,7 +495,7 @@ FH2MOD_EXPORT int fh2mod_init(const FH2ModApi *platform) {
     info.github_repo = "Flenkii/Gripline";
     info.platform_version = "2.7.4";
     info.check_updates = 0;
-    info.description = "Keyboard driving, 1:1 cockpit wheel, cockpit view 2, more traffic and nitro keys for "
+    info.description = "Keyboard driving, 1:1 cockpit wheel, cockpit view 2, more traffic, nitro keys and noclip for "
                        "Forza Horizon 2. Runs next to Extra Options and Azimuth's wheel. Settings: Pause > Settings > MODS.";
     mod = api->register_mod(&info);
     if (!mod) return 1;

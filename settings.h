@@ -3,7 +3,7 @@
 
 #include "gripline.h"
 
-typedef enum { SETTING_BOOLEAN, SETTING_TRAFFIC_LEVEL, SETTING_CENTIMETERS } SettingType;
+typedef enum { SETTING_BOOLEAN, SETTING_TRAFFIC_LEVEL, SETTING_CENTIMETERS, SETTING_CARD_COLOR } SettingType;
 
 typedef struct {
     const char *section;
