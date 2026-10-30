@@ -30,6 +30,7 @@
 #include "features/rig_settings.h"
 #include "features/traffic_files.h"
 #include "features/game_language.h"
+#include "features/noclip.h"
 
 void keyboard_pad_game_start(unsigned char *game_image, const wchar_t *settings_directory);
 void report_init(const wchar_t *settings_directory);
@@ -400,6 +401,34 @@ static int azimuth_rotation(void) {
     return rotation >= 180 && rotation <= 2520 ? rotation : 900;
 }
 
+/* Noclip: the platform hooks the car update (inline, so it also runs behind Extra Options' own
+   car-update hook); if that place is taken, the ForzaCar vtable slot instead. */
+static void noclip_install(void) {
+    if (api->api_version < 3 || !api->hook_function || !api->hook_pointer || !api->enable_hooks) {
+        log_append("NOCLIP: the platform has no hooks (too old) - noclip off.\r\n");
+        return;
+    }
+    void *original = NULL;
+    FH2Hook *hook = api->hook_function(mod, "ForzaCar::Update (Gripline noclip)", game + NOCLIP_CAR_UPDATE_RVA,
+                                       (void *)noclip_car_update, &original);
+    if (!hook) {
+        original = NULL;
+        hook = api->hook_pointer(mod, "ForzaCar vtable update (Gripline noclip)",
+                                 (void **)(game + NOCLIP_CAR_UPDATE_SLOT_RVA), (void *)noclip_car_update, &original);
+    }
+    if (!hook || !original) {
+        log_append("NOCLIP: could not hook the car update - noclip off.\r\n");
+        platform_log("noclip: car update not hooked (see the platform log)");
+        return;
+    }
+    noclip_start(game, original);
+    if (!api->enable_hooks(mod, hook)) {
+        log_append("NOCLIP: the car update hook could not be switched on - noclip off.\r\n");
+        return;
+    }
+    log_append("NOCLIP: car update hooked - key Noclip (F6) offline.\r\n");
+}
+
 static void start_features(void) {
     ModOptions options;
     settings_defaults(&options);
@@ -416,6 +445,7 @@ static void start_features(void) {
     keyboard_pad_game_start(game, directory);
     nitro_link_start(game);
     cockpit_view_start(game);
+    noclip_install();
     gripline_set_output_root(media_dir);
     traffic_files_start(mount_dir, options.traffic_level);
     cockpit_start(game, mount_dir, options.steering_animation, azimuth_rotation(), 10 /* linear */);
@@ -428,7 +458,7 @@ static void start_features(void) {
     /* the platform may have loaded Gripline after Azimuth set up gamepads and swap chain */
     if (!keyboard_pad_late()) platform_log("keyboard: not active (off in FH2_Keyboard.ini, Mapper running, or no hook)");
     if (!notify_install_late()) platform_log("cards: could not hook the game picture");
-    notify_show_deferred("Gripline V6 active\nKeyboard, cockpit view 2 (V), key list (F5)");
+    notify_show_deferred("Gripline V6 active\nKeyboard, cockpit 2 (V), keys (F5), noclip (F6)");
     InterlockedExchange(&started, 1);
     if (row_count) sync_rows();
     /* Extra Options mounts mods\Gripline\media; the game's steering angle follows once the files are there */

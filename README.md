@@ -19,6 +19,7 @@ mod. Since V6 Gripline only does what the others don't:
 | **More traffic** | Presets Original / Much More Traffic (as much as the game spawns, all day) / No Traffic / Drivatars Only, or an amount from 30 to 200 cars, picked by name on the *Traffic* page (MODS › Installed mods › Gripline). Gripline raises the game's own traffic data (copies, game files unchanged). Applies after a restart; offline only. |
 | **Nitro key** | For [NitroSystem](https://github.com/qiangqiang101/NitroSystem) by qiangqiang101: **N** presses its nitro button. Off in online sessions. |
 | **Key list** | **F5** shows all your key bindings at the right of the picture; F5 again hides it. |
+| **Noclip** *(next version, test build)* | **F6** lets your car fly through the map: through walls, the ground and buildings. W/S fly forward/back, A/D turn, Space/Left Ctrl up/down, Left Shift held = 4x faster; the arrow keys still move the camera. A card says on/off. Offline only (locked in online sessions, like nitro). |
 | **Cards** | Small Gripline cards at the top right of the picture (also in fullscreen). Can be switched off. |
 | **Azimuth Mapper check** | While Azimuth Mapper (by bigdamnhero6) runs, Gripline's keyboard stays off and a card says so. |
 | **Problem report** | *Gripline: Create Problem Report* packs logs and settings into `Gripline_Report.zip` next to `azimuth.exe`. Nothing is sent anywhere. |
@@ -94,6 +95,8 @@ Uninstall: delete `fh2-mods\Gripline.dll` and the folder `mods\Gripline`.
 | X / Y | Buttons X / Y | Minus / Plus | Radio previous / next |
 | Page Up / Page Down | Tabs left / right (LB / RB) | N | Nitro (NitroSystem) |
 | V | Cockpit view 2 | F5 | Key list |
+| F6 | Noclip on/off (offline) | Space / Left Ctrl | Noclip: up / down |
+| Left Shift (held) | Noclip: faster | W / S, A / D | Noclip: fly, turn |
 
 ## Reporting problems
 GitHub: [**Issues → New issue**](../../issues/new/choose). Pause › Settings › MODS › *Gripline: Create Problem Report*,
@@ -103,7 +106,8 @@ Wheel problems belong to Azimuth (report them there without mods).
 
 ## Known limits
 - Traffic, steering animation and keyboard on/off need a restart of Azimuth.
-- Online, traffic comes from the session and nitro is off.
+- Online, traffic comes from the session and nitro and noclip are off.
+- Noclip only flies the car (its physics is held still); while it is on, the car can still make collision sounds or take visual damage inside walls. Switching it off drops the car where it is.
 - The steering animation turns as far as the rotation in the Azimuth launcher (900° when none is set).
 
 ## Credits

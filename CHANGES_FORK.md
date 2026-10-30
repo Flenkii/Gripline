@@ -23,6 +23,7 @@ Fork of https://github.com/RokkuDayo/ForzaHorizon2_ExtraOptions – modified in 
 - `features/cockpit_view.c/.h` (V6) – cockpit view 2: camera moved to the gauges, wheel and driver hidden live
 - `features/creator_mode.c/.h` (V6) – creator mode: HUD, minimap, prompts and Gripline cards hidden (key H / wheel function 16)
 - `features/time_of_day.c/.h` (V6) – fixed time of day or slow day in free roam, offline only, through the game's own clock
+- `features/noclip.c/.h` (after V6) – noclip: key F6 flies the own car through the map (the car's CCarDynamics body state set through its own setter around the car update, hooked through the platform), offline only
 - `features/report.c/.h` (V6) – problem report: logs and INIs into `Gripline_Report.zip` (stored ZIP)
 - `third_party/fh2mod/` (V5) – the FH2 Mod Platform's API header (MIT, Trinculo54)
 - `assets/` (V5) – Gripline logo

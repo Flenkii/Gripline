@@ -206,6 +206,10 @@ static void search(void) {
     link_module(module, ini);
 }
 
+int game_session_online(void) {
+    return session_online();
+}
+
 void nitro_link_start(unsigned char *game_image) {
     game = game_image;
 }

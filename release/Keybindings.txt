@@ -30,6 +30,13 @@ FUNKTIONEN / FUNCTIONS
 
 GRIPLINE
   F5                 Tastenliste ein/aus          Key list on/off
+  F6                 Noclip ein/aus (offline)     Noclip on/off (offline)
+
+NOCLIP (wenn an / while on)
+  W / S              Vorwärts / rückwärts fliegen Fly forward / back
+  A / D              Drehen                       Turn
+  Leertaste / Strg   Steigen / sinken             Space / Left Ctrl: up / down
+  Linke Shift-Taste  Schneller (halten)           Left Shift: faster (hold)
 
 MENÜS / MENUS
   Pfeiltasten        Blättern                     Arrow keys: navigate

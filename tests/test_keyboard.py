@@ -258,7 +258,7 @@ keys.add(0x74)
 r = read()
 count, label, kt, width, rows = panel()
 check(r['buttons'] == 0 and r['lx'] == 0.0, 'F5 drueckt nichts im Spiel')
-check(count == 33 and label == 'Throttle' and kt == 'W', f'F5: Tastenliste mit allen belegten Tasten: {count} {label}={kt}')
+check(count == 37 and label == 'Throttle' and kt == 'W', f'F5: Tastenliste mit allen belegten Tasten: {count} {label}={kt}')
 def panel_rows():
     out = {}
     for i in range(count):
@@ -281,6 +281,25 @@ read()
 keys.clear()
 read()
 check(panel()[0] == 0, 'F5 nochmal: Tastenliste aus')
+check(rw.get('Noclip on/off') == 'F6' and rw.get('Noclip: rise') == 'Space' and rw.get('Noclip: sink') == 'Left Ctrl'
+      and rw.get('Noclip: faster (hold)') == 'Left Shift', f'Noclip-Tasten in der Tastenliste: {rw}')
+
+# noclip keys: read by noclip.c, F6 itself presses nothing in the pad
+keys.clear()
+keys.add(0x75)
+r = read()
+check(r['buttons'] == 0 and r['lx'] == 0.0 and e.call('Fh2TestKeyboardHeld', 7) == 1, 'F6: Noclip gehalten, Pad unveraendert')
+keys.clear()
+keys.update({ord('W'), ord('A'), 0x20})
+read()
+check([e.call('Fh2TestKeyboardHeld', i) for i in range(8)] == [1, 0, 1, 0, 1, 0, 0, 0], 'Noclip: W/A/Leertaste gelesen')
+focus['pid'] = 1
+advance(100)
+check(e.call('Fh2TestKeyboardHeld', 0) == 0, 'Noclip: ohne Fokus keine Taste')
+focus['pid'] = 4242
+advance(100)
+keys.clear()
+read()
 
 # vibration
 vib = e.alloc(32)

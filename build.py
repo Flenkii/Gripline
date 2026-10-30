@@ -32,6 +32,7 @@ PLUGIN_SOURCES = [
     "features/report.c",
     "features/cockpit_view.c",
     "features/nitro_link.c",
+    "features/noclip.c",
     "features/notify.c",
     "features/cockpit.c",
 ]
