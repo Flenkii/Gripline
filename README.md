@@ -3,7 +3,7 @@
 **Keyboard driving, cockpit and traffic for Forza Horizon 2 on PC** (Xbox One version on the **Azimuth** wrapper).
 Works offline and online with [FH2MP](https://github.com/Charelene/FH2MP).
 
-**[⬇ Download the latest version](../../releases/latest)** · current version: **V6**
+**[⬇ Download the latest version](../../releases/latest)** · current version: **V6.4**
 
 **[Join the Gripline Discord](https://discord.gg/FEnY2nvc)** · help, bug reports, ideas for V7 and showcase
 
