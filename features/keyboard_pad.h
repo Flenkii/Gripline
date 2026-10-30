@@ -48,6 +48,8 @@ enum {
     KEYBOARD_HOLD_COUNT
 };
 int keyboard_held(unsigned which);
+/* 1 while the world simulation runs (not paused, no menu or loading screen). */
+int game_simulation_running(void);
 
 /* game action -> controller input of the active controller layout (wheel_buttons.c) */
 int controller_action_input(unsigned action);

@@ -501,6 +501,10 @@ static int driving_now(void) {
     return driving;
 }
 
+int game_simulation_running(void) {
+    return driving_now();
+}
+
 /* ------------------------------------------------------------------ keyboard -> reading */
 
 static int down(const Binding *b) {

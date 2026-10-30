@@ -401,6 +401,12 @@ static int azimuth_rotation(void) {
     return rotation >= 180 && rotation <= 2520 ? rotation : 900;
 }
 
+static FH2Hook *noclip_hook;
+
+static int noclip_switch(int on) {
+    return on ? api->enable_hooks(mod, noclip_hook) : api->disable_hooks(mod, noclip_hook);
+}
+
 /* Noclip: the platform hooks the car update (inline, so it also runs behind Extra Options' own
    car-update hook); if that place is taken, the ForzaCar vtable slot instead. */
 static void noclip_install(void) {
@@ -421,12 +427,9 @@ static void noclip_install(void) {
         platform_log("noclip: car update not hooked (see the platform log)");
         return;
     }
-    noclip_start(game, original);
-    if (!api->enable_hooks(mod, hook)) {
-        log_append("NOCLIP: the car update hook could not be switched on - noclip off.\r\n");
-        return;
-    }
-    log_append("NOCLIP: car update hooked - key Noclip (F6) offline.\r\n");
+    noclip_hook = hook; /* stays off until F6 */
+    noclip_start(game, original, noclip_switch);
+    log_append("NOCLIP: car update hook ready (on only while noclip is) - key Noclip (F6) offline.\r\n");
 }
 
 static void start_features(void) {

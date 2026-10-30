@@ -47,7 +47,7 @@ static int key_held, warned;
 static ULONGLONG next_online_check;
 static int online;
 
-/* flight, only touched on the game's update thread */
+/* flight, only touched on the game's update thread (and when switching, while the hook is off) */
 static void *body;           /* the body being flown */
 static float pos[3], dir[2]; /* position, heading (x, z) */
 static float mirror;         /* +1: right row = (z, 0, -x) of the heading, -1: the other way */
@@ -168,9 +168,17 @@ static void card(const char *german, const char *english) {
     notify_show(game_language_is_german(game) ? german : english);
 }
 
+static NoclipHookFn switch_hook;
+
 static void set_on(LONG value) {
-    InterlockedExchange(&on, value);
+    if (value && switch_hook && !switch_hook(1)) {
+        log_append("NOCLIP: the car update hook could not be switched on.\r\n");
+        return;
+    }
     body = NULL;
+    InterlockedExchange(&on, value);
+    /* off: the hook goes too, so the game runs exactly as without noclip */
+    if (!value && switch_hook) switch_hook(0);
 }
 
 static void handle_toggle(void) {
@@ -188,6 +196,10 @@ static void handle_toggle(void) {
     int pressed = held && !key_held;
     key_held = held;
     if (!pressed) return;
+    if (!on && !game_simulation_running()) {
+        log_append("NOCLIP: not now - the game is in a menu or loading.\r\n");
+        return;
+    }
     if (online) {
         log_append("NOCLIP: refused - online session.\r\n");
         card("Noclip gesperrt\nNur offline (nicht in FH2MP)", "Noclip locked\nOffline only (not in FH2MP)");
@@ -205,29 +217,40 @@ static void handle_toggle(void) {
 
 void noclip_car_update(void *car, float dt, float frame_dt, unsigned frame) {
     void *dynamics = NULL;
-    if (game && car && is_local_car(car)) {
-        handle_toggle();
-        if (on) {
-            dynamics = car_body(car);
-            if (dynamics && dynamics != body && !begin(dynamics)) dynamics = NULL;
-            if (!dynamics && !warned) {
-                warned = 1;
-                log_append("NOCLIP: the car's body was not recognised - noclip does nothing.\r\n");
-                card("Noclip geht nicht\nAuto nicht erkannt (Gripline.log)", "Noclip not working\nCar not recognised (Gripline.log)");
-            }
-            if (dynamics) {
-                fly(dt);
-                place(dynamics); /* the update starts from the flown place ... */
-            }
+    if (on && game && car && is_local_car(car)) {
+        dynamics = car_body(car);
+        if (dynamics && dynamics != body && !begin(dynamics)) dynamics = NULL;
+        if (!dynamics && !warned) {
+            warned = 1;
+            log_append("NOCLIP: the car's body was not recognised - noclip does nothing.\r\n");
+            card("Noclip geht nicht\nAuto nicht erkannt (Gripline.log)", "Noclip not working\nCar not recognised (Gripline.log)");
+        }
+        if (dynamics) {
+            fly(dt);
+            place(dynamics); /* the update starts from the flown place ... */
         }
     }
     original(car, dt, frame_dt, frame);
     if (dynamics && on) place(dynamics); /* ... and what the game moved in it is taken back */
 }
 
-void noclip_start(unsigned char *game_image, void *original_update) {
+/* The key and the online check run on an own thread: while noclip is off Gripline does nothing
+   in the game's update (the hook is switched off). */
+static DWORD WINAPI watch_thread(LPVOID unused) {
+    (void)unused;
+    for (;;) {
+        handle_toggle();
+        Sleep(30);
+    }
+}
+
+void noclip_start(unsigned char *game_image, void *original_update, NoclipHookFn hook_switch) {
     original = (CarUpdateFn)original_update;
     game = game_image;
+    switch_hook = hook_switch;
+    HANDLE thread = CreateThread(NULL, 0, watch_thread, NULL, 0, NULL);
+    if (thread) CloseHandle(thread);
+    else log_append("NOCLIP: no thread - noclip off.\r\n");
 }
 
 #ifdef FH2_TWEAKS_TEST
