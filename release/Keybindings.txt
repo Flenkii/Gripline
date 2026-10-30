@@ -1,4 +1,4 @@
-Gripline V6 – Keyboard bindings / Tastenbelegung
+Gripline V6.4 – Keyboard bindings / Tastenbelegung
 ========================================================================
 Default bindings. Change them in FH2_Keyboard.ini next to azimuth.exe (several keys with a
 comma, e.g. Throttle=W,Up; the key names are listed at the top of the file).
