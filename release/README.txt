@@ -35,7 +35,7 @@ Gripline:
   - Cockpit: the steering wheel turns 1:1 with your real wheel (rotation from the Azimuth
     launcher), cockpit view 2 like in FH5 (Tab or V).
   - More Traffic: Original, Much More Traffic, No Traffic or Drivatars Only, picked by name
-    (MODS > Installed mods > Gripline > Traffic), 30-200 cars, rush hour all day (restart needed).
+    (MODS > Installed mods > Gripline > Traffic), 30-150 cars, rush hour all day (restart needed).
   - Nitro key N for the mod NitroSystem (off online), key list F5, Gripline cards,
     problem report (Gripline_Report.zip).
 Azimuth (its launcher): wheel, pedals, buttons, rotation and force feedback.

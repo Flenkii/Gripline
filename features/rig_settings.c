@@ -235,9 +235,9 @@ const wchar_t *rig_color_choice(unsigned char *game_image, unsigned index) {
 }
 
 static const wchar_t *const traffic_german[RIG_TRAFFIC_COUNT] = {L"Original (~14)", L"30 Autos", L"45 Autos",
-                                                  L"70 Autos",       L"100 Autos", L"200 Autos", L"Kein Verkehr", L"Nur Drivatare"};
+                                                  L"70 Autos",       L"100 Autos", L"150 Autos", L"Kein Verkehr", L"Nur Drivatare"};
 static const wchar_t *const traffic_english[RIG_TRAFFIC_COUNT] = {L"Original (~14)", L"30 Cars", L"45 Cars",
-                                                   L"70 Cars",        L"100 Cars", L"200 Cars", L"No Traffic", L"Drivatars Only"};
+                                                   L"70 Cars",        L"100 Cars", L"150 Cars", L"No Traffic", L"Drivatars Only"};
 
 static const RigText *texts(unsigned char *game_image) {
     return game_language_is_german(game_image) ? german : english;
