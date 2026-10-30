@@ -8,7 +8,7 @@ No game files, no Azimuth, no Extra Options and no FH2MP included. Never paste c
 into PowerShell to install a mod – anything like that is a scam.
 Not supported by the Extra Options author, the FH2MP team or the Azimuth developer.
 
-Made for: Azimuth 1.0.3, Extra Options 0.3.9, FH2 Mod Platform 2.7.4, FH2MP 1.1.2.
+Tested with: Azimuth 1.0.4, Extra Options 0.4.4, FH2 Mod Platform 2.8.0, FH2MP 1.1.3.
 
 
 1. INSTALLATION
