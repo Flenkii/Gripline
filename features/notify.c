@@ -1576,6 +1576,13 @@ __declspec(dllexport) int Fh2TestNotifyText(unsigned index, wchar_t *line1, wcha
     return 1;
 }
 
+/* the card's fixed colour (-1 = from the settings) and its title line */
+__declspec(dllexport) int Fh2TestNotifyStyle(unsigned index, wchar_t *title) {
+    if (index >= card_count) return -2;
+    memory_copy(title, cards[index].badge[0] ? cards[index].badge : L"GRIPLINE", sizeof(cards[index].badge));
+    return cards[index].color;
+}
+
 __declspec(dllexport) int Fh2TestNotifyInstall(void *host) {
     return notify_install((unsigned char *)host);
 }

@@ -129,13 +129,18 @@ check(poll()[1] == 0x1000, 'online: real controller LB hidden from NitroSystem t
 check(e.call('Fh2TestNotifyCount') >= 1, 'notification shown')
 l1, l2 = e.alloc(200), e.alloc(200)
 e.call('Fh2TestNotifyText', 0, l1, l2)
-check(e.wstr(l1) == 'Nitro off' and e.wstr(l2) == 'Online session (FH2MP)', 'card text: %r / %r' % (e.wstr(l1), e.wstr(l2)))
+check(e.wstr(l1) == 'Nitro off' and e.wstr(l2) == 'Reason: you are online (FH2MP)', 'card text: %r / %r' % (e.wstr(l1), e.wstr(l2)))
+title = e.alloc(64)
+style = e.call('Fh2TestNotifyStyle', 0, title) & 0xffffffff
+check(style == 1 and e.wstr(title) == 'GRIPLINE \u00b7 WARNING', 'nitro off: red, %r (%d)' % (e.wstr(title), style))
 e.wd(conn + 0x10, 2)
 e.tick += 600
 pad['buttons'] = 0x1000
 check(poll()[1] == 0x1100, 'offline again: nitro back')
 e.call('Fh2TestNotifyText', 0, l1, l2)
-check(e.wstr(l1) == 'Nitro on again' and e.wstr(l2) == 'Offline session', 'card: nitro on again / offline session')
+check(e.wstr(l1) == 'Nitro on again' and e.wstr(l2) == 'Reason: you are offline again', 'card: nitro on again / offline session')
+style = e.call('Fh2TestNotifyStyle', 0, title) & 0xffffffff
+check(style == 2 and e.wstr(title) == 'GRIPLINE', 'nitro on again: green (%d)' % style)
 e.wq(NET, 0)
 e.tick += 600
 check(poll()[1] == 0x1100, 'no connection object: offline')
