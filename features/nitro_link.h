@@ -18,4 +18,7 @@ void nitro_link_set(unsigned source, int held);
 /* Game mapped: enables the online check (nitro is switched off in an FH2MP session). */
 void nitro_link_start(unsigned char *game_image);
 
+/* 1 while a network session (FH2MP) is up. Also used by noclip.c. Safe from any thread. */
+int game_session_online(void);
+
 #endif

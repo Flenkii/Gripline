@@ -35,6 +35,22 @@ int keyboard_setting(unsigned id);
 void keyboard_set_setting(unsigned id, int value);
 const wchar_t *keyboard_ini_path(void);
 
+/* Noclip keys (noclip.h): 1 while held and the game window has the focus. */
+enum {
+    KEYBOARD_HOLD_FORWARD, /* Throttle */
+    KEYBOARD_HOLD_BACK,    /* Brake */
+    KEYBOARD_HOLD_LEFT,    /* SteerLeft */
+    KEYBOARD_HOLD_RIGHT,   /* SteerRight */
+    KEYBOARD_HOLD_UP,      /* NoclipUp */
+    KEYBOARD_HOLD_DOWN,    /* NoclipDown */
+    KEYBOARD_HOLD_FAST,    /* NoclipFast */
+    KEYBOARD_HOLD_NOCLIP,  /* Noclip (on/off) */
+    KEYBOARD_HOLD_COUNT
+};
+int keyboard_held(unsigned which);
+/* 1 while the world simulation runs (not paused, no menu or loading screen). */
+int game_simulation_running(void);
+
 /* game action -> controller input of the active controller layout (wheel_buttons.c) */
 int controller_action_input(unsigned action);
 int wheel_buttons_install(unsigned char *game_image);

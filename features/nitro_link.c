@@ -4,6 +4,7 @@
 #include "support.h"
 #include "nitro_link.h"
 #include "notify.h"
+#include "game_language.h"
 
 typedef struct {
     DWORD packet;
@@ -52,10 +53,17 @@ static int nitro_blocked(void) {
         if (before != online && (before != -1 || online)) {
             if (online) {
                 log_append("NITRO: online session - nitro off.\r\n");
-                if (linked_module) notify_show("Nitro off\nOnline session (FH2MP)");
+                if (linked_module) {
+                    int de = game_language_is_german(game);
+                    notify_show_tinted(de ? "Nitro aus\nGrund: Du bist online (FH2MP)" : "Nitro off\nReason: you are online (FH2MP)",
+                                       NOTIFY_COLOR_RED, de ? "WARNUNG" : "WARNING", 0);
+                }
             } else {
                 log_append("NITRO: offline again - nitro on.\r\n");
-                if (linked_module) notify_show("Nitro on again\nOffline session");
+                if (linked_module)
+                    notify_show_tinted(game_language_is_german(game) ? "Nitro wieder an\nGrund: Du bist wieder offline"
+                                                                     : "Nitro on again\nReason: you are offline again",
+                                       NOTIFY_COLOR_GREEN, NULL, 0);
             }
         }
     }
@@ -204,6 +212,10 @@ static void search(void) {
     static wchar_t ini[PATH_CAPACITY];
     if (!path_join(ini, path, L"FnFNitro.ini")) return;
     link_module(module, ini);
+}
+
+int game_session_online(void) {
+    return session_online();
 }
 
 void nitro_link_start(unsigned char *game_image) {

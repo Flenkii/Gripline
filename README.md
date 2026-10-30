@@ -16,10 +16,11 @@ mod. Since V6 Gripline only does what the others don't:
 | **Keyboard** | Drive with WASD, arrow keys move the camera while driving and scroll in menus, Enter/Backspace/Esc in menus. Works together with a controller (one merged pad). Bindings in `FH2_Keyboard.ini`. |
 | **Steering animation** *(off by default)* | Cockpit: hands hidden, the in-game steering wheel turns 1:1 with your real wheel, as far as the rotation set in the Azimuth launcher. Files are made once into `mods\Gripline\media`, game files stay untouched. Applies after a restart. |
 | **Cockpit view 2** | A second interior camera like in FH5: Tab goes cockpit → cockpit 2 → next camera (also **V**). Distance: *Cockpit View 2: Forward / Up*. |
-| **More traffic** | Presets Original / Much More Traffic (as much as the game spawns, all day) / No Traffic / Drivatars Only, or an amount from 30 to 200 cars, picked by name on the *Traffic* page (MODS › Installed mods › Gripline). Gripline raises the game's own traffic data (copies, game files unchanged). Applies after a restart; offline only. |
+| **More traffic** | Presets Original / Much More Traffic (100 cars, all day) / No Traffic / Drivatars Only, or an amount from 30 to 100 cars, picked by name on the *Traffic* page (MODS › Installed mods › Gripline). Gripline raises the game's own traffic data (copies, game files unchanged). Applies after a restart; offline only. |
 | **Nitro key** | For [NitroSystem](https://github.com/qiangqiang101/NitroSystem) by qiangqiang101: **N** presses its nitro button. Off in online sessions. |
 | **Key list** | **F5** shows all your key bindings at the right of the picture; F5 again hides it. |
-| **Cards** | Small Gripline cards at the top right of the picture (also in fullscreen). Can be switched off. |
+| **Noclip** *(V6.4)* | **F6** lets your car fly through the map: through walls, the ground and buildings. W/S fly forward/back, A/D turn, Space/Left Ctrl up/down, Left Shift held = 4x faster; the arrow keys still move the camera. A card says on/off and shows speed and height while flying (mph/ft or km/h/m, like the game's speedometer). Offline only: a card says when it is locked in an online session and available again offline (like nitro). |
+| **Cards** | Small Gripline cards at the top right of the picture (also in fullscreen). Can be switched off; colour selectable (*Gripline: Card Colour*: blue, red, green, purple, orange, yellow, pink, white). V6.4 cards: every setting changed in the menu ("Traffic: Preset – Much More Traffic"), a trip summary in the pause menu (distance, top speed, driving time of the session; miles/mph when the game is set to mph), wheel connected (green) / disconnected (red, WARNING), and a start check when Azimuth, Extra Options and FH2MP do not fit together (e.g. FH2MP needs an update for a new Azimuth; red, WARNING). Warning cards are always red with WARNING in the title (also "Nitro off" online, with the reason), noclip locked is orange, "Nitro on again" and noclip available again are green; all other cards use the chosen colour. |
 | **Azimuth Mapper check** | While Azimuth Mapper (by bigdamnhero6) runs, Gripline's keyboard stays off and a card says so. |
 | **Problem report** | *Gripline: Create Problem Report* packs logs and settings into `Gripline_Report.zip` next to `azimuth.exe`. Nothing is sent anywhere. |
 
@@ -30,7 +31,7 @@ Settings: Pause › Settings › **MODS** (rows starting with *Keyboard*, *Traff
 
 | What | Where now |
 |---|---|
-| Wheel, pedals, buttons, rotation, force feedback | Azimuth 1.0.3 launcher (wheel settings) |
+| Wheel, pedals, buttons, rotation, force feedback | Azimuth launcher (wheel settings) |
 | Weather, time of day | Extra Options (Weather Control) |
 | Hide the HUD | Extra Options, **F1** |
 | Autodrive | Extra Options, **F2** |
@@ -44,14 +45,14 @@ Settings: Pause › Settings › **MODS** (rows starting with *Keyboard*, *Traff
 > Report problems here ([Reporting problems](#reporting-problems)).
 
 ## Compatibility
-Built for what FH2MP 1.1.2 installs (October 2026):
+Tested with what FH2MP 1.1.3 installs (October 2026):
 
 | Part | Version |
 |---|---|
-| Azimuth | **1.0.3** |
-| Extra Options (official, `winmm.dll`) | **0.3.9** |
-| FH2 Mod Platform | **2.7.4** |
-| FH2MP | **1.1.2** (optional) |
+| Azimuth | **1.0.4** |
+| Extra Options (official, `winmm.dll`) | **0.4.4** |
+| FH2 Mod Platform | **2.8.0** |
+| FH2MP | **1.1.3** (optional) |
 | Forza Horizon 2 | Xbox One version 1.0.0.64 (`forza_durango_release_final.exe`) |
 
 ## Installation
@@ -66,8 +67,8 @@ Gripline is a mod for the [FH2 Mod Platform](https://github.com/Trinculo54/fh2-m
 4. Start the game. Settings: Pause › Settings › MODS. Wheel: set it up in the Azimuth launcher.
 
 ### B) Azimuth only (no FH2MP, no Extra Options)
-1. Install Azimuth 1.0.3 and start the game once.
-2. Get the FH2 Mod Platform: download the ZIP from its [releases](https://github.com/Trinculo54/fh2-mod-platform/releases) (version 2.7.4 or newer) and copy **`DWrite.dll`** next to `azimuth.exe`. (Any other mod's ZIP that ships platform 2.7.4+ has this file too.)
+1. Install Azimuth 1.0.4 and start the game once.
+2. Get the FH2 Mod Platform: download the ZIP from its [releases](https://github.com/Trinculo54/fh2-mod-platform/releases) (version 2.8.0 or newer) and copy **`DWrite.dll`** next to `azimuth.exe`. (Any other mod's ZIP that ships platform 2.8.0+ has this file too.)
 3. Copy `fh2-mods\Gripline.dll` from the release ZIP's `Azimuth` folder next to `azimuth.exe` (so it ends up in `fh2-mods`).
 4. Start the game. Check: `fh2-mods\platform.log` lists Gripline, and Pause › Settings › MODS shows it.
    Nothing there? Send `platform.log` (or the problem report) on [Discord](https://discord.gg/FEnY2nvc) or as an issue.
@@ -94,6 +95,8 @@ Uninstall: delete `fh2-mods\Gripline.dll` and the folder `mods\Gripline`.
 | X / Y | Buttons X / Y | Minus / Plus | Radio previous / next |
 | Page Up / Page Down | Tabs left / right (LB / RB) | N | Nitro (NitroSystem) |
 | V | Cockpit view 2 | F5 | Key list |
+| F6 | Noclip on/off (offline) | Space / Left Ctrl | Noclip: up / down |
+| Left Shift (held) | Noclip: faster | W / S, A / D | Noclip: fly, turn |
 
 ## Reporting problems
 GitHub: [**Issues → New issue**](../../issues/new/choose). Pause › Settings › MODS › *Gripline: Create Problem Report*,
@@ -103,7 +106,8 @@ Wheel problems belong to Azimuth (report them there without mods).
 
 ## Known limits
 - Traffic, steering animation and keyboard on/off need a restart of Azimuth.
-- Online, traffic comes from the session and nitro is off.
+- Online, traffic comes from the session and nitro and noclip are off.
+- Noclip only flies the car (its physics is held still); while it is on, the car can still make collision sounds or take visual damage inside walls. Switching it off drops the car where it is.
 - The steering animation turns as far as the rotation in the Azimuth launcher (900° when none is set).
 
 ## Credits

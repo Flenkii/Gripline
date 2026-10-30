@@ -30,6 +30,8 @@
 #include "features/rig_settings.h"
 #include "features/traffic_files.h"
 #include "features/game_language.h"
+#include "features/noclip.h"
+#include "features/version_check.h"
 
 void keyboard_pad_game_start(unsigned char *game_image, const wchar_t *settings_directory);
 void report_init(const wchar_t *settings_directory);
@@ -167,6 +169,7 @@ static const wchar_t *choice_name(unsigned kind, unsigned index) {
     switch (kind) {
     case RIG_KIND_TRAFFIC: return rig_traffic_choice(game, index);
     case RIG_KIND_DENSITY: return rig_density_choice(game, index);
+    case RIG_KIND_COLOR: return rig_color_choice(game, index);
     }
     return NULL;
 }
@@ -302,11 +305,11 @@ static char page_keys[PAGE_ROWS][8];
 
 static const char *const preset_help_en[RIG_DENSITY_COUNT] = {
     "", "The game's own traffic.",
-    "As much traffic as the game spawns, at any time of day, coming from further away.",
+    "100 traffic cars at any time of day, coming from further away.",
     "Nobody drives (offline).", "Drivatars instead of civilian traffic."};
 static const char *const preset_help_de[RIG_DENSITY_COUNT] = {
     "", "Der Verkehr des Spiels.",
-    "So viel Verkehr, wie das Spiel erzeugt, zu jeder Uhrzeit und aus größerer Entfernung.",
+    "100 Verkehrsautos zu jeder Uhrzeit, aus größerer Entfernung.",
     "Offline fährt niemand.", "Drivatare statt normalem Verkehr."};
 
 static void build_traffic_page(void) {
@@ -339,6 +342,10 @@ static void build_traffic_page(void) {
     rows[n].label = german ? "Menge (eigene Werte)" : "Amount (custom)";
     rows[n++].style = FH2_ROW_HEADING;
     for (unsigned v = 0; v < RIG_TRAFFIC_COUNT; ++v, ++n) {
+        if (v == 5) { /* was 200 cars, now the same as 100 cars: not listed twice */
+            --n;
+            continue;
+        }
         size_t used = 0;
         page_labels[n][0] = 0;
         append_wide(page_labels[n], sizeof(page_labels[n]), &used, rig_traffic_choice(game, v));
@@ -400,6 +407,37 @@ static int azimuth_rotation(void) {
     return rotation >= 180 && rotation <= 2520 ? rotation : 900;
 }
 
+static FH2Hook *noclip_hook;
+
+static int noclip_switch(int on) {
+    return on ? api->enable_hooks(mod, noclip_hook) : api->disable_hooks(mod, noclip_hook);
+}
+
+/* Noclip: the platform hooks the car update (inline, so it also runs behind Extra Options' own
+   car-update hook); if that place is taken, the ForzaCar vtable slot instead. */
+static void noclip_install(void) {
+    if (api->api_version < 3 || !api->hook_function || !api->hook_pointer || !api->enable_hooks) {
+        log_append("NOCLIP: the platform has no hooks (too old) - noclip off.\r\n");
+        return;
+    }
+    void *original = NULL;
+    FH2Hook *hook = api->hook_function(mod, "ForzaCar::Update (Gripline noclip)", game + NOCLIP_CAR_UPDATE_RVA,
+                                       (void *)noclip_car_update, &original);
+    if (!hook) {
+        original = NULL;
+        hook = api->hook_pointer(mod, "ForzaCar vtable update (Gripline noclip)",
+                                 (void **)(game + NOCLIP_CAR_UPDATE_SLOT_RVA), (void *)noclip_car_update, &original);
+    }
+    if (!hook || !original) {
+        log_append("NOCLIP: could not hook the car update - noclip off.\r\n");
+        platform_log("noclip: car update not hooked (see the platform log)");
+        return;
+    }
+    noclip_hook = hook; /* noclip_start switches it on */
+    noclip_start(game, original, noclip_switch);
+    log_append("NOCLIP: car update hook ready - key Noclip (F6) offline, trip card in the pause menu.\r\n");
+}
+
 static void start_features(void) {
     ModOptions options;
     settings_defaults(&options);
@@ -416,19 +454,22 @@ static void start_features(void) {
     keyboard_pad_game_start(game, directory);
     nitro_link_start(game);
     cockpit_view_start(game);
+    noclip_install();
     gripline_set_output_root(media_dir);
     traffic_files_start(mount_dir, options.traffic_level);
     cockpit_start(game, mount_dir, options.steering_animation, azimuth_rotation(), 10 /* linear */);
     notify_set_enabled(options.notifications);
     mod_scan_start(directory);
+    version_check_start(game, directory);
     report_init(directory);
+    rig_settings_set_game(game);
     rig_settings_gripline(options.notifications, options.steering_animation, options.cockpit_view_forward,
-                          options.cockpit_view_up);
+                          options.cockpit_view_up, options.card_color);
     rig_settings_start(directory);
     /* the platform may have loaded Gripline after Azimuth set up gamepads and swap chain */
     if (!keyboard_pad_late()) platform_log("keyboard: not active (off in FH2_Keyboard.ini, Mapper running, or no hook)");
     if (!notify_install_late()) platform_log("cards: could not hook the game picture");
-    notify_show_deferred("Gripline V6 active\nKeyboard, cockpit view 2 (V), key list (F5)");
+    notify_show_deferred("Gripline " GRIPLINE_VERSION " active\nKeyboard, cockpit 2 (V), keys (F5), noclip (F6)");
     InterlockedExchange(&started, 1);
     if (row_count) sync_rows();
     /* Extra Options mounts mods\Gripline\media; the game's steering angle follows once the files are there */
@@ -458,7 +499,7 @@ FH2MOD_EXPORT int fh2mod_init(const FH2ModApi *platform) {
     info.github_repo = "Flenkii/Gripline";
     info.platform_version = "2.7.4";
     info.check_updates = 0;
-    info.description = "Keyboard driving, 1:1 cockpit wheel, cockpit view 2, more traffic and nitro keys for "
+    info.description = "Keyboard driving, 1:1 cockpit wheel, cockpit view 2, more traffic, nitro keys and noclip for "
                        "Forza Horizon 2. Runs next to Extra Options and Azimuth's wheel. Settings: Pause > Settings > MODS.";
     mod = api->register_mod(&info);
     if (!mod) return 1;

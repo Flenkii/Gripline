@@ -25,7 +25,7 @@ typedef struct {
     double traffic, festival, cap, distance;
 } Level;
 
-/* TrafficLevel 0..5; MaxActiveTraffic follows the menu ("30 cars" .. "200 cars"). spawnIn/OutDistance only
+/* TrafficLevel 0..5; MaxActiveTraffic follows the menu ("30 cars" .. "100 cars"). spawnIn/OutDistance only
    exists for town roads (200/250 m), so the distance factor stays small: a larger circle with the same
    number of cars only thins them out. 6 = no traffic, 7 = Drivatars only (the festival cars, which the game
    caps at 11 in CarLoadingSettings, instead of civilian traffic). */
@@ -35,7 +35,8 @@ static const Level levels[8] = {
     {45, 10, 2, 1, ROADS_NORMAL, 22, 3.0, 2.0, 2.0, 1.25},   /* lively */
     {70, 12, 2, 1, ROADS_NORMAL, 30, 5.0, 3.0, 3.0, 1.25},   /* busy */
     {100, 14, 3, 1, ROADS_NORMAL, 40, 8.0, 4.0, 4.0, 1.5},   /* rush hour */
-    {200, 20, 6, 1, ROADS_NORMAL, 80, 20.0, 6.0, 8.0, 3.0},  /* much more: as full as the game allows */
+    {100, 14, 3, 1, ROADS_NORMAL, 40, 8.0, 4.0, 4.0, 1.5},   /* was 200 cars: 150 and 200 hung the load after the
+                                                                car meet (V6.4), now as rush hour (old INIs) */
     {18, 8, 1, 0, ROADS_EMPTY, 11, 1.0, 1.0, 1.0, 1.0},      /* no traffic: density 0 for traffic and festival cars */
     {18, 8, 1, 0, ROADS_DRIVATARS, 80, 1.0, 8.0, 3.0, 1.0},  /* Drivatars only, at the road's traffic speed */
 };
