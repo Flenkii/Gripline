@@ -23,10 +23,11 @@ Fork of https://github.com/RokkuDayo/ForzaHorizon2_ExtraOptions – modified in 
 - `features/cockpit_view.c/.h` (V6) – cockpit view 2: camera moved to the gauges, wheel and driver hidden live
 - `features/creator_mode.c/.h` (V6) – creator mode: HUD, minimap, prompts and Gripline cards hidden (key H / wheel function 16)
 - `features/time_of_day.c/.h` (V6) – fixed time of day or slow day in free roam, offline only, through the game's own clock
-- `features/noclip.c/.h` (V6.2) – noclip: key F6 flies the own car through the map (the car's CCarDynamics body state set through its own setter around the car update, hooked through the platform), offline only; live card with speed and height
-- `features/trip.c/.h` (V6.2) – trip summary card in the pause menu (km, top speed, driving time; speed from the own car's body in the car update)
-- `features/wheel_watch.c/.h` (V6.2) – wheel connected/disconnected card (raw input device list, vendor/product ids of known wheels)
-- `features/version_check.c/.h` (V6.2) – start card when Azimuth, Extra Options and FH2MP do not fit (azimuth.exe version resource, `FH2_ExtraOptions.log`, `fh2-mods\platform.log`)
+- `features/noclip.c/.h` (V6.4) – noclip: key F6 flies the own car through the map (the car's CCarDynamics body state set through its own setter around the car update, hooked through the platform), offline only; live card with speed and height
+- `features/trip.c/.h` (V6.4) – trip summary card in the pause menu (km, top speed, driving time; speed from the own car's body in the car update)
+- `features/wheel_watch.c/.h` (V6.4) – wheel connected/disconnected card (raw input device list, vendor/product ids of known wheels)
+- `features/game_units.c/.h` (V6.4) – the game's Units option (mph or km/h; Default = the language's units), read from its locale object, so the cards use the same unit as the speedometer
+- `features/version_check.c/.h` (V6.4) – start card when Azimuth, Extra Options and FH2MP do not fit (azimuth.exe version resource, `FH2_ExtraOptions.log`, `fh2-mods\platform.log`)
 - `features/report.c/.h` (V6) – problem report: logs and INIs into `Gripline_Report.zip` (stored ZIP)
 - `third_party/fh2mod/` (V5) – the FH2 Mod Platform's API header (MIT, Trinculo54)
 - `assets/` (V5) – Gripline logo

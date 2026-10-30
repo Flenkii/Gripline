@@ -1,4 +1,4 @@
-GRIPLINE V6 – keyboard, cockpit & traffic for Forza Horizon 2 (Azimuth)
+GRIPLINE V6.4 – keyboard, cockpit & traffic for Forza Horizon 2 (Azimuth)
 =======================================================================
 An add-on next to Azimuth, the official Extra Options and FH2MP.
 
@@ -42,8 +42,18 @@ Azimuth (its launcher): wheel, pedals, buttons, rotation and force feedback.
 Extra Options: weather, time of day, hiding the HUD (F1), autodrive (F2).
 
 
-3. NEW IN V6
-------------
+3. NEW IN V6.4
+--------------
+  - Noclip (F6): fly through walls, ground and buildings. W/S forward/back, A/D turn,
+    Space/Left Ctrl up/down, Left Shift = 4x faster. Offline only (locked online, like nitro).
+  - New cards: speed and height while flying, trip summary in the pause menu, wheel
+    connected/disconnected, start check (Azimuth / Extra Options / FH2MP fit together?),
+    a card for every setting you change. mph or km/h like the game's speedometer.
+  - Card colour selectable (Gripline: Card Colour). Warnings are always red with WARNING.
+  - Much More Traffic is now 100 cars (more hung the load after leaving a car meet).
+
+NEW IN V6
+---------
   - Runs next to the official Extra Options (FH2MP-compatible, no winmm.dll swap).
   - Only what the others don't have: Gripline's own wheel, force feedback, weather,
     time of day and creator mode are gone - Azimuth and Extra Options do those now.

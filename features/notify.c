@@ -33,6 +33,8 @@ typedef struct {
     ULONGLONG hold; /* ms fully visible before the fade-out */
     unsigned id;
     unsigned tag; /* notify_show_step: the card a later step replaces (0 = none) */
+    int color; /* fixed NOTIFY_COLOR_* of this card, -1 = the colour from the settings */
+    wchar_t badge[24]; /* after GRIPLINE in the title line, e.g. WARNUNG; empty = none */
 } Card;
 
 static SRWLOCK lock = SRWLOCK_INIT;
@@ -76,7 +78,8 @@ static Pending pending[MAX_PENDING];
 static volatile LONG pending_count;
 static ULONGLONG first_present;
 
-static void show_card_logged(const char *text, ULONGLONG hold, unsigned tag, int logged);
+static void show_card_full(const char *text, ULONGLONG hold, unsigned tag, int logged, int color, const char *badge);
+#define show_card_logged(text, hold, tag, logged) show_card_full(text, hold, tag, logged, -1, NULL)
 #define show_card(text, hold, tag) show_card_logged(text, hold, tag, 1)
 
 static void defer(const char *text, NotifyTextFn make) {
@@ -130,8 +133,18 @@ void notify_show_live(const char *text, unsigned tag, unsigned hold_ms) {
     show_card_logged(text, hold_ms, tag, 0);
 }
 
-static void show_card_logged(const char *text, ULONGLONG hold, unsigned tag, int logged) {
+void notify_show_tinted(const char *text, int color, const char *badge, int long_hold) {
+    if (color < 0 || color >= NOTIFY_COLOR_COUNT) color = -1;
+    show_card_full(text, long_hold ? STARTUP_CARD_MS : CARD_MS, 0, 1, color, badge);
+}
+
+static void show_card_full(const char *text, ULONGLONG hold, unsigned tag, int logged, int color, const char *badge) {
     if (!text) return;
+    if (logged && badge && *badge) {
+        log_append("[");
+        log_append(badge);
+        log_append("] ");
+    }
     if (logged) log_append("GRIPLINE: ");
     for (const char *p = text; *p && logged; ++p) {
         char one[2] = {*p == '\n' ? ' ' : *p, 0};
@@ -151,6 +164,16 @@ static void show_card_logged(const char *text, ULONGLONG hold, unsigned tag, int
     card.shown = 0;
     card.hold = hold;
     card.tag = tag;
+    card.color = color;
+    card.badge[0] = 0;
+    if (badge && *badge) {
+        wchar_t wide[TEXT_CAPACITY];
+        utf8_line(badge, text_length(badge), wide);
+        unsigned i = 0;
+        for (const wchar_t *g = L"GRIPLINE \x00b7 "; *g; ++g) card.badge[i++] = *g;
+        for (const wchar_t *b = wide; *b && i + 1 < sizeof(card.badge) / sizeof(card.badge[0]); ++b) card.badge[i++] = *b;
+        card.badge[i] = 0;
+    }
     AcquireSRWLockExclusive(&lock);
     if (tag && card_count && cards[0].tag == tag) { /* the next step of the same card: new text in place */
         if (cards[0].shown) card.hold += GetTickCount64() - cards[0].shown;
@@ -330,10 +353,10 @@ static int draw_cards(const Card *list, unsigned count, const Layout *l, unsigne
     HGDIOBJ old_bitmap = gdi.SelectObject(dc, bitmap);
     unsigned char *px = (unsigned char *)bits;
     const unsigned char bg[3] = {32, 23, 17};      /* B, G, R: dark navy */
-    const unsigned char(*tone)[3] = palette[color];
-    const unsigned char accent[3] = {tone[0][2], tone[0][1], tone[0][0]}; /* B, G, R */
-    const unsigned char logo[3] = {tone[1][2], tone[1][1], tone[1][0]};
     for (unsigned c = 0; c < count; ++c) {
+        const unsigned char(*tone)[3] = palette[list[c].color >= 0 ? list[c].color : color];
+        const unsigned char accent[3] = {tone[0][2], tone[0][1], tone[0][0]}; /* B, G, R */
+        const unsigned char logo[3] = {tone[1][2], tone[1][1], tone[1][0]};
         int top = (int)c * l->height;
         for (int y = 0; y < l->height; ++y) {
             unsigned char *row = px + (size_t)(top + y) * w * 4;
@@ -382,9 +405,11 @@ static int draw_cards(const Card *list, unsigned count, const Layout *l, unsigne
         RECT clip = {tx, top, w - l->pad, top + l->height};
         int has2 = list[c].line2[0] != 0;
         int y = top + (int)((has2 ? 12 : 20) * s);
+        const unsigned char(*tone)[3] = palette[list[c].color >= 0 ? list[c].color : color];
+        const wchar_t *heading = list[c].badge[0] ? list[c].badge : L"GRIPLINE";
         HGDIOBJ old_font = gdi.SelectObject(dc, title);
         gdi.SetTextColor(dc, RGB(tone[1][0], tone[1][1], tone[1][2]));
-        gdi.ExtTextOutW(dc, tx, y, ETO_CLIPPED, &clip, L"GRIPLINE", 8, NULL);
+        gdi.ExtTextOutW(dc, tx, y, ETO_CLIPPED, &clip, heading, (UINT)text_width_chars(heading), NULL);
         y += (int)(19 * s);
         gdi.SelectObject(dc, main);
         gdi.SetTextColor(dc, RGB(245, 247, 250));

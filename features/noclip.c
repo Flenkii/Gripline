@@ -15,6 +15,7 @@
 #include "keyboard_pad.h"
 #include "nitro_link.h"
 #include "notify.h"
+#include "game_units.h"
 #include "game_language.h"
 #include "trip.h"
 #include "wheel_watch.h"
@@ -47,7 +48,7 @@ static CarUpdateFn original;
 static volatile LONG on;
 static int key_held, warned;
 static ULONGLONG next_online_check;
-static int online;
+static int online, online_known;
 
 /* flight, only touched on the game's update thread (and when switching, while the hook is off) */
 static void *volatile body;  /* the body being flown */
@@ -191,6 +192,10 @@ static void card(const char *german, const char *english) {
     notify_show(game_language_is_german(game) ? german : english);
 }
 
+static void tinted(const char *german, const char *english, int color) {
+    notify_show_tinted(game_language_is_german(game) ? german : english, color, NULL, 0);
+}
+
 static NoclipHookFn switch_hook;
 
 static int hooked;
@@ -208,12 +213,27 @@ static void handle_toggle(void) {
     ULONGLONG now = GetTickCount64();
     if (now >= next_online_check) {
         next_online_check = now + 500;
+        int was_online = online;
         online = game_session_online();
+        if (online != was_online && online_known) {
+            /* like Nitro: a card when the session goes online (noclip locked) and back offline */
+            if (online) {
+                if (on) set_on(0);
+                log_append("NOCLIP: online session - noclip locked.\r\n");
+                tinted("Noclip gesperrt\nOnline-Sitzung (FH2MP)", "Noclip locked\nOnline session (FH2MP)",
+                       NOTIFY_COLOR_ORANGE);
+            } else {
+                log_append("NOCLIP: offline again - noclip available.\r\n");
+                tinted("Noclip wieder verf\xc3\xbcgbar\nOffline - Taste F6", "Noclip available again\nOffline - key F6",
+                       NOTIFY_COLOR_GREEN);
+            }
+        }
+        online_known = 1;
     }
-    if (on && online) {
+    if (on && online) { /* the first check already online */
         set_on(0);
         log_append("NOCLIP: online session - noclip off.\r\n");
-        card("Noclip aus\nOnline-Sitzung (FH2MP)", "Noclip off\nOnline session (FH2MP)");
+        tinted("Noclip gesperrt\nOnline-Sitzung (FH2MP)", "Noclip locked\nOnline session (FH2MP)", NOTIFY_COLOR_ORANGE);
     }
     int held = keyboard_held(KEYBOARD_HOLD_NOCLIP);
     int pressed = held && !key_held;
@@ -225,7 +245,8 @@ static void handle_toggle(void) {
     }
     if (online) {
         log_append("NOCLIP: refused - online session.\r\n");
-        card("Noclip gesperrt\nNur offline (nicht in FH2MP)", "Noclip locked\nOffline only (not in FH2MP)");
+        tinted("Noclip gesperrt\nNur offline (nicht in FH2MP)", "Noclip locked\nOffline only (not in FH2MP)",
+               NOTIFY_COLOR_ORANGE);
         return;
     }
     set_on(!on);
@@ -292,6 +313,9 @@ static void put_text(char *out, size_t *n, const char *text) {
 }
 
 /* height (the game's world y, metres) and speed while flying, a live card at the top right */
+static ULONGLONG units_next;
+static int imperial;
+
 static void info_step(ULONGLONG now) {
     if (!on || !body) {
         info_have = 0;
@@ -309,15 +333,20 @@ static void info_step(ULONGLONG now) {
     info_time = now;
     info_have = 1;
     int de = game_language_is_german(game);
+    if (now >= units_next) { /* the game's Units option (mph / km/h), read again every few seconds */
+        units_next = now + 3000;
+        imperial = game_units_imperial(game);
+    }
+    float height = imperial ? p[1] * 3.28084f : p[1];
     char text[96];
     size_t n = 0;
     text[0] = 0;
     put_text(text, &n, "Noclip - ");
-    put_int(text, &n, kmh);
-    put_text(text, &n, " km/h\n");
+    put_int(text, &n, imperial ? (int)(kmh / 1.609344f + 0.5f) : kmh);
+    put_text(text, &n, imperial ? " mph\n" : " km/h\n");
     put_text(text, &n, de ? "H\xc3\xb6he " : "Height ");
-    put_int(text, &n, (int)(p[1] < 0 ? p[1] - 0.5f : p[1] + 0.5f));
-    put_text(text, &n, " m");
+    put_int(text, &n, (int)(height < 0 ? height - 0.5f : height + 0.5f));
+    put_text(text, &n, imperial ? " ft" : " m");
     notify_show_live(text, INFO_TAG, 1000);
 }
 

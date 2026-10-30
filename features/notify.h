@@ -16,6 +16,9 @@ void notify_show(const char *text);
 void notify_show_step(const char *text, unsigned tag, unsigned hold_ms);
 /* Same, for values updated several times a second (noclip height and speed): not logged. */
 void notify_show_live(const char *text, unsigned tag, unsigned hold_ms);
+/* a card in a fixed colour (NOTIFY_COLOR_*, whatever the setting says); badge (UTF-8, may be NULL) goes after
+   GRIPLINE in the title line, e.g. "WARNUNG" on red warning cards; long_hold = as long as a start card */
+void notify_show_tinted(const char *text, int color, const char *badge, int long_hold);
 
 /* Same, but for messages from game start: kept until the game has shown its first picture
    (a few seconds), then shown in the given order. Safe from any thread. */

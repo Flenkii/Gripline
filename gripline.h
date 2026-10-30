@@ -6,7 +6,7 @@
 #include <windows.h>
 
 /* Gripline: an FH2 Mod Platform mod (fh2-mods\Gripline.dll) next to the official Extra Options. */
-#define GRIPLINE_VERSION "V6.2"
+#define GRIPLINE_VERSION "V6.4"
 #define MOD_INI_NAME L"Gripline.ini"
 #define MOD_LOG_NAME L"Gripline.log"
 #define GAME_EXE_NAME L"forza_durango_release_final.exe"

@@ -13,7 +13,7 @@ void mod_scan_announce_mapper(void);
 /* Game start: remembers where fh2-mods\ is (the platform's mod list, for the problem report). */
 void mod_scan_start(const wchar_t *settings_directory);
 
-/* The mods list text ("Gripline V6.2 - mods found\n<names>"); 0 = none found. */
+/* The mods list text ("Gripline V6.4 - mods found\n<names>"); 0 = none found. */
 int mod_scan_mods_list(char *out, unsigned size);
 
 #endif

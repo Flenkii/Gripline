@@ -137,13 +137,20 @@ static int make_card(char *out, unsigned size) {
     return 1;
 }
 
+/* the start check's card: red, with WARNUNG / WARNING in the title */
+static int show_card(char *out, unsigned size) {
+    if (make_card(out, size))
+        notify_show_tinted(out, NOTIFY_COLOR_RED, game_language_is_german(game) ? "WARNUNG" : "WARNING", 1);
+    return 0;
+}
+
 void version_check_start(unsigned char *game_image, const wchar_t *directory) {
     game = game_image;
     if (!directory || !path_join(eo_log, directory, L"FH2_ExtraOptions.log") ||
         !path_join(platform_log_path, directory, L"fh2-mods\\platform.log"))
         return;
     have_azimuth = read_azimuth_version();
-    notify_show_deferred_call(make_card);
+    notify_show_deferred_call(show_card);
 }
 
 #ifdef FH2_TWEAKS_TEST

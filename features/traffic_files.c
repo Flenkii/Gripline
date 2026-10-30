@@ -36,7 +36,7 @@ static const Level levels[8] = {
     {70, 12, 2, 1, ROADS_NORMAL, 30, 5.0, 3.0, 3.0, 1.25},   /* busy */
     {100, 14, 3, 1, ROADS_NORMAL, 40, 8.0, 4.0, 4.0, 1.5},   /* rush hour */
     {100, 14, 3, 1, ROADS_NORMAL, 40, 8.0, 4.0, 4.0, 1.5},   /* was 200 cars: 150 and 200 hung the load after the
-                                                                car meet (V6.2), now as rush hour (old INIs) */
+                                                                car meet (V6.4), now as rush hour (old INIs) */
     {18, 8, 1, 0, ROADS_EMPTY, 11, 1.0, 1.0, 1.0, 1.0},      /* no traffic: density 0 for traffic and festival cars */
     {18, 8, 1, 0, ROADS_DRIVATARS, 80, 1.0, 8.0, 3.0, 1.0},  /* Drivatars only, at the road's traffic speed */
 };

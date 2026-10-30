@@ -1,4 +1,4 @@
-"""V6.2 cards: trip summary text, start version check, wheel ids, card colour + confirmation card."""
+"""V6.4 cards: trip summary text, start version check, wheel ids, card colour + confirmation card."""
 import os, sys, tempfile
 from emu import Emu
 
@@ -44,8 +44,10 @@ for _ in range(10):                       # 1 s at 50 m/s (180 km/h) = 50 m
     e.call('Fh2TestTripSample', 100, 0, 0, 5000)
 e.call('Fh2TestTripSample', 100, 30000, 0, 0)   # 300 m/s: teleport, not counted
 e.call('Fh2TestTripSample', 500, 2500, 0, 0)    # dt 0.5 s: a hitch, not counted
-_, t = text(e, 'Fh2TestTripText')
+_, t = text(e, 'Fh2TestTripText', 0)
 check(t == 'Trip: 1.6 km\nmax 180 km/h, driving time 1 min', repr(t))
+_, t = text(e, 'Fh2TestTripText', 1)       # game set to mph
+check(t == 'Trip: 1.0 mi\nmax 112 mph, driving time 1 min', repr(t))
 
 print('Wheel ids')
 check(e.call('Fh2TestWheelOf', 0x046d, 0xc262) == 0, 'G920 known')

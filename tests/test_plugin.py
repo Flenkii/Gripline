@@ -110,7 +110,7 @@ for n in names:
 
 print('start:')
 check(e.call('fh2mod_init', api) == 0, 'fh2mod_init returns 0')
-check(seen['info'] == ('Gripline', 'V6.2'), 'registered as Gripline V6.2: %r' % (seen['info'],))
+check(seen['info'] == ('Gripline', 'V6.4'), 'registered as Gripline V6.4: %r' % (seen['info'],))
 check(len(e.threads) == 1, 'start thread created (waits for the game)')
 
 print('INI files:')

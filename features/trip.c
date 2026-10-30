@@ -2,10 +2,12 @@
 #include <xmmintrin.h>
 #include "gripline.h"
 #include "support.h"
+#include "logging.h"
 #include "trip.h"
 #include "keyboard_pad.h"
 #include "notify.h"
 #include "game_language.h"
+#include "game_units.h"
 
 #define MIN_GAP_MS 120000u    /* cards at most every two minutes */
 #define MIN_NEW_METRES 500.0  /* and only after half a kilometre more */
@@ -52,19 +54,20 @@ static void put_int(char *out, size_t *n, size_t cap, unsigned value) {
     out[*n] = 0;
 }
 
-static void format(char *text, size_t cap, double m, double s, float t) {
+static void format(char *text, size_t cap, double m, double s, float t, int imperial) {
     int de = game_language_is_german(game);
     size_t n = 0;
     text[0] = 0;
-    unsigned tenths = (unsigned)(m / 100.0 + 0.5);
+    unsigned tenths = (unsigned)(m / (imperial ? 160.9344 : 100.0) + 0.5);
     put_text(text, &n, cap, de ? "Fahrt-Bilanz: " : "Trip: ");
     put_int(text, &n, cap, tenths / 10);
     put_text(text, &n, cap, de ? "," : ".");
     put_int(text, &n, cap, tenths % 10);
-    put_text(text, &n, cap, " km\n");
+    put_text(text, &n, cap, imperial ? " mi\n" : " km\n");
     put_text(text, &n, cap, "max ");
-    put_int(text, &n, cap, (unsigned)(t * 3.6f + 0.5f));
-    put_text(text, &n, cap, de ? " km/h, Fahrzeit " : " km/h, driving time ");
+    put_int(text, &n, cap, (unsigned)(t * (imperial ? 2.236936f : 3.6f) + 0.5f));
+    put_text(text, &n, cap, imperial ? " mph" : " km/h");
+    put_text(text, &n, cap, de ? ", Fahrzeit " : ", driving time ");
     unsigned minutes = (unsigned)(s / 60.0 + 0.5);
     if (minutes >= 60) {
         put_int(text, &n, cap, minutes / 60);
@@ -76,9 +79,28 @@ static void format(char *text, size_t cap, double m, double s, float t) {
     put_text(text, &n, cap, " min");
 }
 
+static void log_units(void) {
+    static int logged;
+    int option, language;
+    if (logged || !game_units_raw(game, &option, &language)) return;
+    logged = 1;
+    char line[96];
+    size_t n = 0;
+    line[0] = 0;
+    put_text(line, &n, sizeof(line), "UNITS: option ");
+    if (option < 0) put_text(line, &n, sizeof(line), "-");
+    put_int(line, &n, sizeof(line), (unsigned)(option < 0 ? -option : option));
+    put_text(line, &n, sizeof(line), ", language ");
+    if (language < 0) put_text(line, &n, sizeof(line), "-");
+    put_int(line, &n, sizeof(line), (unsigned)(language < 0 ? -language : language));
+    put_text(line, &n, sizeof(line), game_units_imperial(game) ? " -> mph\r\n" : " -> km/h\r\n");
+    log_append(line);
+}
+
 static void show(double m, double s, float t) {
+    log_units();
     char text[128];
-    format(text, sizeof(text), m, s, t);
+    format(text, sizeof(text), m, s, t, game_units_imperial(game));
     notify_show(text);
 }
 
@@ -104,7 +126,7 @@ __declspec(dllexport) void Fh2TestTripSample(unsigned dt_ms, int vx_cm, int vy_c
     float v[3] = {(float)vx_cm / 100.0f, (float)vy_cm / 100.0f, (float)vz_cm / 100.0f};
     trip_sample((float)dt_ms / 1000.0f, v);
 }
-__declspec(dllexport) void Fh2TestTripText(char *out, unsigned size) {
-    format(out, size, metres, seconds, top);
+__declspec(dllexport) void Fh2TestTripText(int imperial, char *out, unsigned size) {
+    format(out, size, metres, seconds, top, imperial);
 }
 #endif
