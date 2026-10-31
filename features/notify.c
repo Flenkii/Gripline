@@ -1695,7 +1695,13 @@ static void blend_block(unsigned char *frame, int frame_w, int frame_h, int x, i
         for (int col = 0; col < w; ++col) {
             int fx = x + col;
             if (fx < 0 || fx >= frame_w) continue;
-            for (int c = 0; c < 4; ++c) d[fx * 4 + c] = (unsigned char)((s[col * 4 + c] * scale) >> 8);
+            /* premultiplied "over": a card's transparent glow margin must not wipe out what is already
+               there (the glow of the card below lay over the bottom of the card above) */
+            unsigned sa = (s[col * 4 + 3] * scale) >> 8, keep = 255 - sa;
+            for (int c = 0; c < 4; ++c) {
+                unsigned v = ((s[col * 4 + c] * scale) >> 8) + (d[fx * 4 + c] * keep + 127) / 255;
+                d[fx * 4 + c] = (unsigned char)(v > 255 ? 255 : v);
+            }
         }
     }
 }
