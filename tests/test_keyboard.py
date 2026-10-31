@@ -258,7 +258,7 @@ keys.add(0x74)
 r = read()
 count, label, kt, width, rows = panel()
 check(r['buttons'] == 0 and r['lx'] == 0.0, 'F5 drueckt nichts im Spiel')
-check(count == 38 and label == 'Throttle' and kt == 'W', f'F5: Tastenliste mit allen belegten Tasten: {count} {label}={kt}')
+check(count == 39 and label == 'Throttle' and kt == 'W', f'F5: Tastenliste mit allen belegten Tasten: {count} {label}={kt}')
 def panel_rows():
     out = {}
     for i in range(count):

@@ -59,6 +59,7 @@ static volatile LONG color;
 static wchar_t panel_title[TEXT_CAPACITY];
 static NotifyPanelRow panel_rows[NOTIFY_PANEL_ROWS];
 static volatile LONG panel_count; /* 0 = panel off */
+static volatile LONG panel_at_top; /* key menu: top right instead of centred */
 static unsigned panel_id; /* changes with every notify_panel_set: the panel is drawn again */
 
 /* ------------------------------------------------------------------ public */
@@ -215,6 +216,10 @@ int notify_enabled(void) {
 }
 
 void notify_panel_set(const wchar_t *title, const NotifyPanelRow *rows, unsigned count) {
+    notify_panel_show(title, rows, count, 0);
+}
+
+void notify_panel_show(const wchar_t *title, const NotifyPanelRow *rows, unsigned count, int at_top) {
     if (count > NOTIFY_PANEL_ROWS) count = NOTIFY_PANEL_ROWS;
     if (!rows) count = 0;
     AcquireSRWLockExclusive(&lock);
@@ -226,6 +231,7 @@ void notify_panel_set(const wchar_t *title, const NotifyPanelRow *rows, unsigned
     panel_title[n] = 0;
     for (unsigned i = 0; i < count; ++i) panel_rows[i] = rows[i];
     ++panel_id;
+    InterlockedExchange(&panel_at_top, at_top ? 1 : 0);
     InterlockedExchange(&panel_count, (LONG)count);
     InterlockedExchange(&cards_changed, 1);
     ReleaseSRWLockExclusive(&lock);
@@ -508,11 +514,31 @@ static int draw_panel(const wchar_t *title, const NotifyPanelRow *rows, unsigned
         int y = l->panel_header + (int)i * l->panel_row;
         RECT left = {tx, y, kx - l->pad / 2, y + l->panel_row};
         RECT right = {kx, y, w - l->pad, y + l->panel_row};
-        gdi.SelectObject(dc, label);
-        gdi.SetTextColor(dc, RGB(200, 207, 218));
+        int style = rows[i].style;
+        COLORREF label_color = RGB(200, 207, 218), keys_color = RGB(tone[1][0], tone[1][1], tone[1][2]);
+        if (style == NOTIFY_ROW_SELECTED) {
+            /* key menu: the chosen row on a band in the card colour */
+            gdi.GdiFlush(); /* text of the rows above is in the bitmap before it is touched directly */
+            for (int by = y; by < y + l->panel_row && by < h; ++by) {
+                unsigned char *row = px + (size_t)by * w * 4;
+                for (int x = l->bar + l->pad / 2; x < w - l->pad / 2; ++x) {
+                    row[x * 4 + 0] = (unsigned char)((bg[0] + accent[0]) / 2);
+                    row[x * 4 + 1] = (unsigned char)((bg[1] + accent[1]) / 2);
+                    row[x * 4 + 2] = (unsigned char)((bg[2] + accent[2]) / 2);
+                }
+            }
+            gdi.GdiFlush();
+            label_color = keys_color = RGB(255, 255, 255);
+        } else if (style == NOTIFY_ROW_INFO) {
+            label_color = RGB(150, 158, 170);
+        } else if (style == NOTIFY_ROW_HINT) {
+            label_color = keys_color = RGB(130, 138, 150);
+        }
+        gdi.SelectObject(dc, style == NOTIFY_ROW_HINT ? small_bold : label);
+        gdi.SetTextColor(dc, label_color);
         gdi.ExtTextOutW(dc, tx, y, ETO_CLIPPED, &left, rows[i].label, (UINT)text_width_chars(rows[i].label), NULL);
-        gdi.SelectObject(dc, keys);
-        gdi.SetTextColor(dc, RGB(tone[1][0], tone[1][1], tone[1][2]));
+        gdi.SelectObject(dc, style == NOTIFY_ROW_HINT ? small_bold : keys);
+        gdi.SetTextColor(dc, keys_color);
         gdi.ExtTextOutW(dc, kx, y, ETO_CLIPPED, &right, rows[i].keys, (UINT)text_width_chars(rows[i].keys), NULL);
     }
     gdi.SelectObject(dc, old_font);
@@ -939,7 +965,7 @@ static void render(IDXGISwapChain *swapchain) {
     if (panel) {
         float ph = (float)panel_pixels(l, panel);
         float x0 = (float)width - l->margin - l->width;
-        float y0 = ((float)height - ph) * 0.5f;
+        float y0 = panel_at_top ? (float)l->margin : ((float)height - ph) * 0.5f;
         if (y0 < (float)l->margin) y0 = (float)l->margin;
         float c[12] = {x0 / width * 2.0f - 1.0f,
                        1.0f - y0 / height * 2.0f,
@@ -1178,7 +1204,7 @@ static DWORD WINAPI overlay_thread(void *unused) {
         int shift = 0;
         if (panel) {
             int ph = panel_pixels(&l, panel);
-            int y0 = (screen_h - ph) / 2;
+            int y0 = panel_at_top ? l.margin : (screen_h - ph) / 2;
             if (y0 < l.margin) y0 = l.margin;
             blend_block(frame, frame_w, frame_h, frame_w - l.margin - l.width, y0, scratch_panel, l.width * 4, l.width,
                         ph, 1.0f);

@@ -52,10 +52,19 @@ int notify_color(void);
    one row per key, shown until it is switched off; cards move to its left meanwhile. It is only
    drawn, the game keeps every input. count 0 hides it. Safe from any thread. */
 #define NOTIFY_PANEL_ROWS 44
+enum {
+    NOTIFY_ROW_NORMAL,   /* label left, keys right */
+    NOTIFY_ROW_SELECTED, /* key menu: the row the arrows stand on (highlighted) */
+    NOTIFY_ROW_INFO,     /* key menu: dim label, value in the card colour, not selectable */
+    NOTIFY_ROW_HINT,     /* key menu: small grey help line (label left, keys right) */
+};
 typedef struct {
     wchar_t label[32], keys[32];
+    int style; /* NOTIFY_ROW_* */
 } NotifyPanelRow;
 void notify_panel_set(const wchar_t *title, const NotifyPanelRow *rows, unsigned count);
+/* Same panel for the key menu (key_menu.h): at_top 1 = at the top right like the cards, not centred. */
+void notify_panel_show(const wchar_t *title, const NotifyPanelRow *rows, unsigned count, int at_top);
 int notify_panel_visible(void);
 
 #endif

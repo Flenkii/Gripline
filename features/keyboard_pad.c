@@ -10,6 +10,7 @@
 #include "noclip.h"
 #include "notify.h"
 #include "game_language.h"
+#include "key_menu.h"
 
 #define KEY_INI L"FH2_Keyboard.ini"
 #define MAX_PADS 8
@@ -76,6 +77,7 @@ enum {
     KIND_COCKPIT_VIEW, /* second cockpit view on/off, see cockpit_view.h */
     KIND_KEYLIST, /* key list panel on/off (notify.h), the game keeps the key */
     KIND_NOCLIP,  /* noclip keys (noclip.c reads them through keyboard_held), not in the pad reading */
+    KIND_MENU,    /* Gripline key menu on/off (key_menu.c reads it), not in the pad reading */
 };
 
 typedef struct {
@@ -136,6 +138,7 @@ static Binding bindings[] = {
     {L"NoclipDown", KIND_NOCLIP, 0, L"LCtrl", {0}},
     {L"NoclipFast", KIND_NOCLIP, 0, L"LShift", {0}},
     {L"Freecam", KIND_NOCLIP, 0, L"F7", {0}},
+    {L"KeyMenu", KIND_MENU, 0, L"F8", {0}},
 };
 
 static const struct {
@@ -244,7 +247,9 @@ static const char default_ini[] =
     ";   SteerLeft/SteerRight turn, NoclipUp/NoclipDown rise/sink, NoclipFast held = faster.\r\n"
     "; Freecam: the camera flies without the car (offline only), again = off, the car stays where it was.\r\n"
     ";   Arrow keys look, Throttle/Brake fly forward/back, SteerLeft/SteerRight sideways,\r\n"
-    ";   NoclipUp/NoclipDown up/down, NoclipFast held = faster.\r\n";
+    ";   NoclipUp/NoclipDown up/down, NoclipFast held = faster.\r\n"
+    "; KeyMenu: Gripline menu to change these keys in the game (arrows, Enter, Esc/Backspace = back).\r\n"
+    ";   It saves its changes into this file.\r\n";
 
 /* Default file text including the key bindings (also used by ini_migrate.c). Returns the
    length, 0 if it does not fit. */
@@ -287,7 +292,8 @@ static const wchar_t *const labels_german[ARRAY_COUNT(bindings)] = {
     L"Bestätigen (A)", L"Zurück (B)", L"Taste X", L"Taste Y", L"Reiter links (LB)", L"Reiter rechts (RB)",
     L"Menü/Kamera hoch", L"Menü/Kamera runter", L"Menü/Kamera links", L"Menü/Kamera rechts",
     L"Steuerkreuz hoch", L"Steuerkreuz runter", L"Steuerkreuz links", L"Steuerkreuz rechts",
-    L"Noclip ein/aus", L"Noclip: steigen", L"Noclip: sinken", L"Noclip: schneller (halten)", L"Freecam ein/aus"};
+    L"Noclip ein/aus", L"Noclip: steigen", L"Noclip: sinken", L"Noclip: schneller (halten)", L"Freecam ein/aus",
+    L"Tastenmenü öffnen"};
 static const wchar_t *const labels_english[ARRAY_COUNT(bindings)] = {
     L"Throttle", L"Brake", L"Steer left", L"Steer right", L"Handbrake", L"Shift up", L"Shift down",
     L"Clutch", L"Change camera", L"Rewind", L"Telemetry (hold)", L"Photo mode (hold)", L"Radio: previous",
@@ -296,12 +302,15 @@ static const wchar_t *const labels_english[ARRAY_COUNT(bindings)] = {
     L"Confirm (A)", L"Back (B)", L"Button X", L"Button Y", L"Tab left (LB)", L"Tab right (RB)",
     L"Menu/camera up", L"Menu/camera down", L"Menu/camera left", L"Menu/camera right",
     L"D-pad up", L"D-pad down", L"D-pad left", L"D-pad right",
-    L"Noclip on/off", L"Noclip: rise", L"Noclip: sink", L"Noclip: faster (hold)", L"Freecam on/off"};
+    L"Noclip on/off", L"Noclip: rise", L"Noclip: sink", L"Noclip: faster (hold)", L"Freecam on/off",
+    L"Open key menu"};
 _Static_assert(ARRAY_COUNT(bindings) + 1 <= NOTIFY_PANEL_ROWS, "key list rows");
 
 static unsigned char *game_base;
 static HMODULE user32;
 static volatile LONG key_list_held, key_list_on;
+static volatile LONG input_blocked; /* key menu open: the game and noclip get no key */
+static volatile unsigned char swallowed[256]; /* held when the menu closed: ignored until released */
 
 typedef int(WINAPI *MapKeyFn)(UINT, UINT);
 typedef int(WINAPI *KeyNameFn)(LONG, LPWSTR, int);
@@ -403,6 +412,7 @@ static void key_list_show(void) {
         if (!bindings[i].vk[0]) continue;
         copy_text(rows[count].label, german ? labels_german[i] : labels_english[i], 32);
         key_list_keys(&bindings[i], german, rows[count].keys, 32);
+        rows[count].style = NOTIFY_ROW_NORMAL;
         ++count;
     }
     notify_panel_set(german ? L"Tastenbelegung" : L"Key Bindings", rows, count);
@@ -514,7 +524,13 @@ int game_simulation_running(void) {
 
 static int down(const Binding *b) {
     for (unsigned k = 0; k < 4 && b->vk[k]; ++k) {
-        if (async_key(b->vk[k]) & 0x8000) return 1;
+        unsigned char vk = b->vk[k];
+        int held = (async_key(vk) & 0x8000) != 0;
+        if (swallowed[vk]) {
+            if (held) continue;
+            swallowed[vk] = 0;
+        }
+        if (held) return 1;
     }
     return 0;
 }
@@ -580,7 +596,7 @@ static void keyboard_reading(PadReading *r) {
     int flying = noclip_active() && driving_now();
     for (unsigned i = 0; i < ARRAY_COUNT(bindings); ++i) {
         const Binding *b = &bindings[i];
-        int pressed = focused && b->vk[0] && down(b);
+        int pressed = focused && !input_blocked && b->vk[0] && down(b);
         /* noclip / freecam: the driving keys only fly (noclip.c), so they do not look like a controller there */
         if (flying && (b->kind == KIND_ACTION || b->kind == KIND_STEER || (b->kind == KIND_NAV && noclip_freecam_active())))
             pressed = 0; /* noclip keeps the arrows for the game's camera, freecam looks with them itself */
@@ -609,6 +625,7 @@ static void keyboard_reading(PadReading *r) {
                 key_list_input(pressed);
                 break;
             case KIND_NOCLIP:
+            case KIND_MENU:
                 break;
             case KIND_ACTION: {
                 int input = controller_action_input(b->target);
@@ -1131,7 +1148,132 @@ int keyboard_held(unsigned which) {
         if (!index[which]) return 0;
     }
     const Binding *b = &bindings[index[which] - 1];
-    return b->vk[0] && game_has_focus() && down(b);
+    return b->vk[0] && !input_blocked && game_has_focus() && down(b);
+}
+
+/* ------------------------------------------------------------------ key menu (key_menu.c) */
+
+unsigned keyboard_binding_count(void) {
+    return ARRAY_COUNT(bindings);
+}
+
+int keyboard_binding_find(const wchar_t *key) {
+    for (unsigned i = 0; i < ARRAY_COUNT(bindings); ++i)
+        if (wide_equal(bindings[i].key, key)) return (int)i;
+    return -1;
+}
+
+const wchar_t *keyboard_binding_key(unsigned index) {
+    return index < ARRAY_COUNT(bindings) ? bindings[index].key : L"";
+}
+
+const wchar_t *keyboard_binding_label(unsigned index, int german) {
+    if (index >= ARRAY_COUNT(bindings)) return L"";
+    return german ? labels_german[index] : labels_english[index];
+}
+
+void keyboard_binding_vks(unsigned index, unsigned char vk[4]) {
+    for (unsigned k = 0; k < 4; ++k) vk[k] = index < ARRAY_COUNT(bindings) ? bindings[index].vk[k] : 0;
+}
+
+void keyboard_binding_default_vks(unsigned index, unsigned char vk[4]) {
+    Binding parsed = {0};
+    if (index < ARRAY_COUNT(bindings)) parse_keys(&parsed, bindings[index].defaults);
+    for (unsigned k = 0; k < 4; ++k) vk[k] = parsed.vk[k];
+}
+
+void keyboard_binding_set(unsigned index, const unsigned char vk[4]) {
+    if (index >= ARRAY_COUNT(bindings)) return;
+    /* all four at once: the game thread may read them meanwhile */
+    UINT32 packed = (UINT32)vk[0] | (UINT32)vk[1] << 8 | (UINT32)vk[2] << 16 | (UINT32)vk[3] << 24;
+    InterlockedExchange((volatile LONG *)(void *)bindings[index].vk, (LONG)packed);
+}
+
+void keyboard_keys_text(const unsigned char vk[4], int german, wchar_t *out, unsigned capacity) {
+    Binding b = {0};
+    for (unsigned k = 0; k < 4; ++k) b.vk[k] = vk[k];
+    key_list_keys(&b, german, out, capacity);
+    if (!out[0]) append(out, 0, capacity, german ? L"keine" : L"none");
+}
+
+/* name of a key as FH2_Keyboard.ini writes it ("W", "F8", "Num2", "LShift"); "" = not bindable */
+const char *keyboard_key_ini_name(unsigned char vk, char buffer[8]) {
+    static const struct {
+        unsigned char vk;
+        const char *name;
+    } names[] = {{0x20, "Space"},   {0x0d, "Enter"},    {0x1b, "Esc"},     {0x09, "Tab"},      {0x08, "Backspace"},
+                 {0xa0, "LShift"},  {0xa1, "RShift"},   {0xa2, "LCtrl"},   {0xa3, "RCtrl"},    {0x12, "Alt"},
+                 {0x26, "Up"},      {0x28, "Down"},     {0x25, "Left"},    {0x27, "Right"},    {0x21, "PageUp"},
+                 {0x22, "PageDown"}, {0x24, "Home"},    {0x23, "End"},     {0x2d, "Insert"},   {0x2e, "Delete"},
+                 {0xbd, "Minus"},   {0xbb, "Plus"},     {0xbc, "Comma"},   {0xbe, "Period"},   {0x01, "Mouse1"},
+                 {0x02, "Mouse2"},  {0x04, "Mouse3"},   {0x05, "Mouse4"},  {0x06, "Mouse5"},   {0x10, "Shift"},
+                 {0x11, "Ctrl"}};
+    buffer[0] = 0;
+    if ((vk >= 'A' && vk <= 'Z') || (vk >= '0' && vk <= '9')) {
+        buffer[0] = (char)vk, buffer[1] = 0;
+    } else if (vk >= 0x70 && vk <= 0x7b) {
+        int f = vk - 0x70 + 1;
+        buffer[0] = 'F', buffer[1] = (char)(f >= 10 ? '1' : '0' + f);
+        buffer[2] = f >= 10 ? (char)('0' + f - 10) : 0, buffer[3] = 0;
+    } else if (vk >= 0x60 && vk <= 0x69) {
+        buffer[0] = 'N', buffer[1] = 'u', buffer[2] = 'm', buffer[3] = (char)('0' + vk - 0x60), buffer[4] = 0;
+    } else {
+        for (unsigned i = 0; i < ARRAY_COUNT(names); ++i)
+            if (names[i].vk == vk) return names[i].name;
+    }
+    return buffer;
+}
+
+int keyboard_key_down(unsigned char vk) {
+    return vk && user32_ready() && game_has_focus() && (async_key(vk) & 0x8000) != 0;
+}
+
+int keyboard_game_focused(void) {
+    return user32_ready() && game_has_focus();
+}
+
+void keyboard_block_input(int blocked) {
+    if (!blocked && input_blocked && user32_ready()) {
+        /* keys still held when the menu closes (Esc, Enter, the menu key) do nothing in the game */
+        for (unsigned vk = 1; vk < 256; ++vk)
+            if (async_key((int)vk) & 0x8000) swallowed[vk] = 1;
+    }
+    InterlockedExchange(&input_blocked, blocked ? 1 : 0);
+}
+
+int keyboard_input_blocked(void) {
+    return (int)input_blocked;
+}
+
+/* the key list (F5) was on: shown again with the current keys; off: the panel is cleared */
+void keyboard_key_list_restore(void) {
+    if (key_list_on) key_list_show();
+    else notify_panel_set(NULL, NULL, 0);
+}
+
+unsigned char *keyboard_game_image(void) {
+    return game_base;
+}
+
+/* start card: "F5 keys, F6 noclip, F7 freecam, F8 menu" with the keys bound now */
+size_t keyboard_start_keys(char *out, size_t capacity) {
+    static const struct {
+        const wchar_t *key;
+        const char *word;
+    } parts[] = {{L"Keybinds", " keys"}, {L"Noclip", " noclip"}, {L"Freecam", " freecam"}, {L"KeyMenu", " menu"}};
+    size_t n = 0;
+    out[0] = 0;
+    for (unsigned p = 0; p < ARRAY_COUNT(parts); ++p) {
+        int i = keyboard_binding_find(parts[p].key);
+        if (i < 0 || !bindings[i].vk[0]) continue;
+        char buffer[8];
+        const char *name = keyboard_key_ini_name(bindings[i].vk[0], buffer);
+        if (n && n + 2 < capacity) out[n++] = ',', out[n++] = ' ';
+        while (*name && n + 1 < capacity) out[n++] = *name++;
+        for (const char *w = parts[p].word; *w && n + 1 < capacity; ++w) out[n++] = *w;
+    }
+    out[n] = 0;
+    return n;
 }
 
 void keyboard_pad_game_start(unsigned char *game_image, const wchar_t *settings_directory) {
@@ -1139,6 +1281,7 @@ void keyboard_pad_game_start(unsigned char *game_image, const wchar_t *settings_
     ini_migrate(settings_directory);
     if (!loaded) settings_load();
     game_base = game_image;
+    key_menu_start();
     if (values[KEY_SETTING_ENABLED] && !mod_scan_mapper_running()) wheel_buttons_install(game_image); /* follows the controller layout */
 }
 

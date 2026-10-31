@@ -31,6 +31,8 @@ FUNKTIONEN / FUNCTIONS
 GRIPLINE
   F5                 Tastenliste ein/aus          Key list on/off
   F6                 Noclip ein/aus (offline)     Noclip on/off (offline)
+  F7                 Freecam ein/aus (offline)    Freecam on/off (offline)
+  F8                 Tastenmenü (Tasten ändern)   Key menu (change keys)
 
 NOCLIP (wenn an / while on)
   W / S              Vorwärts / rückwärts fliegen Fly forward / back

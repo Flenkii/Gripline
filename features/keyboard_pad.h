@@ -56,6 +56,25 @@ int keyboard_held(unsigned which);
 /* 1 while the world simulation runs (not paused, no menu or loading screen). */
 int game_simulation_running(void);
 
+/* Key menu (key_menu.c): the bindings of FH2_Keyboard.ini, read and changed while playing. */
+unsigned keyboard_binding_count(void);
+int keyboard_binding_find(const wchar_t *key); /* index of an INI key name, -1 if unknown */
+const wchar_t *keyboard_binding_key(unsigned index); /* INI key name, e.g. L"Throttle" */
+const wchar_t *keyboard_binding_label(unsigned index, int german); /* as in the key list (F5) */
+void keyboard_binding_vks(unsigned index, unsigned char vk[4]);
+void keyboard_binding_default_vks(unsigned index, unsigned char vk[4]);
+void keyboard_binding_set(unsigned index, const unsigned char vk[4]); /* at once, the INI is not written */
+void keyboard_keys_text(const unsigned char vk[4], int german, wchar_t *out, unsigned capacity);
+const char *keyboard_key_ini_name(unsigned char vk, char buffer[8]);
+int keyboard_key_down(unsigned char vk); /* held and the game window has the focus */
+int keyboard_game_focused(void);
+/* 1 = the game, noclip and freecam get no key (menu open); 0 = keys held now stay ignored until released */
+void keyboard_block_input(int blocked);
+int keyboard_input_blocked(void);
+void keyboard_key_list_restore(void); /* after the menu: key list (F5) again if it was on, else nothing */
+unsigned char *keyboard_game_image(void);
+size_t keyboard_start_keys(char *out, size_t capacity); /* start card line */
+
 /* game action -> controller input of the active controller layout (wheel_buttons.c) */
 int controller_action_input(unsigned action);
 int wheel_buttons_install(unsigned char *game_image);

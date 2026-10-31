@@ -19,6 +19,7 @@ python build.py /path/to/zig --test --output out-test
 cd tests
 python test_plugin.py ../out-test/fh2-mods/Gripline.dll
 python test_keyboard.py ../out-test/fh2-mods/Gripline.dll
+python test_key_menu.py ../out-test/fh2-mods/Gripline.dll
 python test_traffic_files.py ../out-test/fh2-mods/Gripline.dll
 python test_modscan.py ../out-test/fh2-mods/Gripline.dll
 python test_report.py ../out-test/fh2-mods/Gripline.dll

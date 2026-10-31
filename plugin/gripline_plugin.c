@@ -438,6 +438,19 @@ static void noclip_install(void) {
     log_append("NOCLIP: car update hook ready - key Noclip (F6) offline, trip card in the pause menu.\r\n");
 }
 
+/* "Gripline V7 active" + "F5 keys, F6 noclip, F7 freecam, F8 menu" (short: the card is narrow) */
+static int start_card(char *out, unsigned size) {
+    static const char head[] = "Gripline " GRIPLINE_VERSION " active\n";
+    unsigned n = 0;
+    while (head[n] && n + 1 < size) {
+        out[n] = head[n];
+        ++n;
+    }
+    out[n] = 0;
+    if (n + 1 < size) keyboard_start_keys(out + n, size - n);
+    return 1;
+}
+
 static void start_features(void) {
     ModOptions options;
     settings_defaults(&options);
@@ -469,7 +482,7 @@ static void start_features(void) {
     /* the platform may have loaded Gripline after Azimuth set up gamepads and swap chain */
     if (!keyboard_pad_late()) platform_log("keyboard: not active (off in FH2_Keyboard.ini, Mapper running, or no hook)");
     if (!notify_install_late()) platform_log("cards: could not hook the game picture");
-    notify_show_deferred("Gripline " GRIPLINE_VERSION " active\nF5 keys, F6 noclip, F7 freecam, V cockpit 2");
+    notify_show_deferred_call(start_card); /* the keys as bound now (the key menu can change them) */
     InterlockedExchange(&started, 1);
     if (row_count) sync_rows();
     /* Extra Options mounts mods\Gripline\media; the game's steering angle follows once the files are there */

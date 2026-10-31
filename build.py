@@ -28,6 +28,7 @@ PLUGIN_SOURCES = [
     "features/rig_settings.c",
     "features/wheel_buttons.c",
     "features/keyboard_pad.c",
+    "features/key_menu.c",
     "features/mod_scan.c",
     "features/report.c",
     "features/cockpit_view.c",
