@@ -20,5 +20,6 @@ typedef struct {
     int notifications, steering_animation;     /* [Gripline] */
     int cockpit_view_forward, cockpit_view_up; /* [Gripline] second cockpit view, cm */
     int card_color;                            /* [Gripline] 0 blue (original) .. 7, notify.h */
+    int card_style; /* NOTIFY_STYLE_*: 0 Classic, 1 Enhanced, 2 Overdrive (V7) */
 } ModOptions;
 #endif

@@ -111,7 +111,7 @@ check(ok == 1 and card_text == 'Press F8 to change your keys\nKey menu: arrows, 
 check(e.call('Fh2TestKeyboardBinding', 42, 0) == F8, 'KeyMenu = F8 (Standard)')
 
 press(F8)
-check(tick() == LEVEL_GROUPS and panel() == 6, f'F8 oeffnet das Menue (4 Seiten + Alle auf Standard + Hinweis): {panel()}')
+check(tick() == LEVEL_GROUPS and panel() == 7, f'F8 oeffnet das Menue (4 Seiten + Karten-Design + Alle auf Standard + Hinweis): {panel()}')
 check(selected() == 'Driving', f'erste Zeile gewaehlt: {selected()}')
 
 # while open: the game and noclip get no key
@@ -212,6 +212,22 @@ e.call('Fh2TestKeyboardHeld', 0)
 keys.add(ord('W'))
 check(e.call('Fh2TestKeyboardHeld', 0) == 1, 'losgelassen und neu gedrueckt: W geht wieder')
 keys.discard(ord('W'))
+
+# card design page: Overdrive is the default, Classic chosen -> Gripline.ini CardStyle=0
+open(os.path.join(root, 'Gripline.ini'), 'wb').write(b'[Gripline]\r\nCardColor=3\r\n')
+press(0x79)
+press(UP); press(UP)
+check(selected() == 'Card design' and panel_rows().get('Card design') == 'Overdrive', f'Karten-Design-Zeile zeigt Overdrive: {panel_rows()}')
+press(ENTER)
+check(selected() == 'Overdrive' and panel_rows().get('Overdrive') == '\u2713 active', f'Design-Seite: Overdrive aktiv gewaehlt {panel_rows()}')
+press(UP); press(UP); press(ENTER)
+gi = open(os.path.join(root, 'Gripline.ini'), 'rb').read()
+check(e.call('Fh2TestNotifyStyleGet') == 0 and b'CardStyle=0' in gi and b'CardColor=3' in gi, f'Classic gewaehlt und gespeichert: {gi!r}')
+check(panel_rows().get('Classic') == '\u2713 active', 'Haken wandert zu Classic')
+press(DOWN); press(DOWN); press(ENTER)
+check(e.call('Fh2TestNotifyStyleGet') == 2 and b'CardStyle=2' in open(os.path.join(root, 'Gripline.ini'), 'rb').read(), 'zurueck auf Overdrive')
+press(ESC); press(ESC)
+check(tick() == LEVEL_CLOSED, 'Esc, Esc: zu')
 
 # "all to default" with confirmation
 press(0x79)

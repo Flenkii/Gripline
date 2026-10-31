@@ -473,6 +473,7 @@ static void start_features(void) {
     traffic_files_start(mount_dir, options.traffic_level);
     cockpit_start(game, mount_dir, options.steering_animation, azimuth_rotation(), 10 /* linear */);
     notify_set_enabled(options.notifications);
+    notify_set_style(options.card_style);
     mod_scan_start(directory);
     version_check_start(game, directory);
     report_init(directory);

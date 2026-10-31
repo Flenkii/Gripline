@@ -19,6 +19,7 @@
 #include "support.h"
 #include "notify.h"
 #include "gripline_logo.h"
+#include "gripline_symbol.h"
 
 #define MAX_CARDS 3
 #define CARD_MS 5000u
@@ -55,6 +56,18 @@ static const unsigned char palette[NOTIFY_COLOR_COUNT][2][3] = {
     {{215, 220, 228}, {255, 255, 255}}, /* white */
 };
 static volatile LONG color;
+/* Overdrive: second colour of the two-colour fade, per card colour (R, G, B) */
+static const unsigned char palette_second[NOTIFY_COLOR_COUNT][3] = {
+    {150, 60, 235},  /* blue -> violet */
+    {255, 120, 30},  /* red -> orange */
+    {20, 190, 170},  /* green -> teal */
+    {235, 70, 170},  /* purple -> pink */
+    {235, 45, 70},   /* orange -> red */
+    {255, 135, 20},  /* yellow -> orange */
+    {140, 70, 230},  /* pink -> purple */
+    {140, 165, 205}, /* white -> steel blue */
+};
+static volatile LONG card_style = NOTIFY_STYLE_OVERDRIVE;
 
 static wchar_t panel_title[TEXT_CAPACITY];
 static NotifyPanelRow panel_rows[NOTIFY_PANEL_ROWS];
@@ -201,6 +214,19 @@ void notify_set_color(int index) {
     ReleaseSRWLockExclusive(&lock);
 }
 
+void notify_set_style(int style) {
+    if (style < 0 || style >= NOTIFY_STYLE_COUNT || InterlockedExchange(&card_style, style) == style) return;
+    AcquireSRWLockExclusive(&lock);
+    for (unsigned i = 0; i < card_count; ++i) cards[i].id = next_id++; /* drawn again in the new look */
+    ++panel_id;
+    InterlockedExchange(&cards_changed, 1);
+    ReleaseSRWLockExclusive(&lock);
+}
+
+int notify_style(void) {
+    return (int)card_style;
+}
+
 int notify_color(void) {
     return (int)color;
 }
@@ -293,6 +319,8 @@ typedef struct {
     int width, height, gap, margin, radius, icon, pad, bar;
     int glow;    /* V7: the cards glow out this far; width/height include it, gap/margin are shrunk by it */
     float scale; /* screen height / 1080 */
+    int style;   /* NOTIFY_STYLE_* this layout was made for */
+    int skew;    /* Overdrive: the left/right edges lean over this many pixels (a racing banner) */
     int panel_header, panel_row, panel_height; /* key list panel; panel_height = all rows */
 } Layout;
 
@@ -302,15 +330,22 @@ static Layout layout_for(UINT screen_height) {
     if (s > 2.5f) s = 2.5f;
     Layout l;
     l.scale = s;
-    l.glow = (int)(9 * s);
+    l.style = (int)card_style;
+    l.glow = l.style == NOTIFY_STYLE_CLASSIC ? 0 : l.style == NOTIFY_STYLE_OVERDRIVE ? (int)(12 * s) : (int)(9 * s);
     l.width = (int)(430 * s) + 2 * l.glow;
     l.height = (int)(88 * s) + 2 * l.glow;
     l.gap = (int)(10 * s) - 2 * l.glow; /* the visible gap stays 10 */
     l.margin = (int)(28 * s) - l.glow;
     l.radius = (int)(12 * s);
-    l.icon = (int)(70 * s);
+    l.icon = l.style == NOTIFY_STYLE_CLASSIC ? (int)(58 * s) : (int)(70 * s);
     l.pad = (int)(14 * s);
     l.bar = (int)(5 * s) > 2 ? (int)(5 * s) : 2;
+    l.skew = 0;
+    if (l.style == NOTIFY_STYLE_OVERDRIVE) {
+        l.bar = (int)(6 * s) > 3 ? (int)(6 * s) : 3;
+        l.skew = (int)(18 * s);
+        l.width += l.skew; /* the lean takes room; the text keeps the width it has in the other looks */
+    }
     l.panel_header = (int)(60 * s);
     l.panel_row = (int)(20 * s);
     l.panel_height = l.panel_header + NOTIFY_PANEL_ROWS * l.panel_row + l.pad + 2 * l.glow;
@@ -358,6 +393,137 @@ static float root(float v) {
     float r = v > 1.0f ? v * 0.5f : 1.0f;
     for (int i = 0; i < 8; ++i) r = 0.5f * (r + v / r);
     return r;
+}
+
+/* ------------------------------------------------------------------ Overdrive look
+   A bright racing banner instead of a dark box: the card leans forward (slanted sides), it is filled
+   with a fade between two colours (blue -> violet ...), a glossy lacquer highlight cuts diagonally
+   across the top, speed streaks run to the right, a white light bar sits at the leading edge, and
+   it floats on a dark drop shadow plus a glow in its colours. */
+
+static const unsigned char *second_colour(const unsigned char (*tone)[3]) {
+    for (int i = 0; i < NOTIFY_COLOR_COUNT; ++i)
+        if (palette[i] == tone) return palette_second[i];
+    return palette_second[0];
+}
+
+/* left edge of the slanted box at row y (0 = top) */
+static float lean_left(const Layout *l, int ch, float y) {
+    return (float)l->skew * (1.0f - y / (float)ch);
+}
+
+/* 1 when white text would be hard to read on this card colour (yellow, white) */
+static int over_light_card(const unsigned char (*tone)[3]) {
+    const unsigned char *b = second_colour(tone);
+    float lum = 0.299f * (tone[0][0] + b[0]) * 0.5f + 0.587f * (tone[0][1] + b[1]) * 0.5f +
+                0.114f * (tone[0][2] + b[2]) * 0.5f;
+    return lum > 150.0f;
+}
+
+static void paint_overdrive_back(unsigned char *px, int w, int x0, int y0, int cw, int ch, int body_from,
+                                 const Layout *l, const unsigned char (*tone)[3]) {
+    const unsigned char *b2 = second_colour(tone);
+    const unsigned char one[3] = {tone[0][2], tone[0][1], tone[0][0]}; /* B, G, R */
+    const unsigned char two[3] = {b2[2], b2[1], b2[0]};
+    const unsigned char navy[3] = {30, 18, 12};
+    float s = l->scale;
+    float span = (float)(cw - l->skew);
+    /* speed streaks: row (fraction of the height), start (fraction of the width), thickness */
+    static const float streaks[][3] = {{0.22f, 0.62f, 1.0f}, {0.30f, 0.80f, 1.0f}, {0.71f, 0.55f, 2.0f},
+                                       {0.80f, 0.72f, 1.0f}, {0.87f, 0.48f, 1.0f}};
+    int banner_h = body_from > 0 ? body_from : ch; /* panel: colour only in the header */
+    for (int y = 0; y < ch; ++y) {
+        unsigned char *row = px + (size_t)(y0 + y) * w * 4 + (size_t)x0 * 4;
+        float le = lean_left(l, ch, (float)y);
+        int banner = y < banner_h;
+        float fy = banner ? (float)y / (float)(banner_h > 1 ? banner_h - 1 : 1) : 1.0f;
+        float gloss_edge = (float)banner_h * 0.52f; /* lacquer highlight: diagonal lower edge */
+        for (int x = 0; x < cw; ++x) {
+            unsigned char *p = row + x * 4;
+            p[3] = 0;
+            float xr = (float)x - le;
+            if (xr < 0.0f) {
+                p[0] = p[1] = p[2] = 0;
+                continue;
+            }
+            if (xr < (float)l->bar) { /* white light bar at the leading edge, coloured at its foot */
+                float t = banner ? fy * 0.5f : 0.6f;
+                for (int k = 0; k < 3; ++k) p[k] = mix8(255, one[k], t);
+                continue;
+            }
+            float fx = (xr - (float)l->bar) / span;
+            if (fx > 1.0f) fx = 1.0f;
+            if (!banner) { /* panel body: deep navy that takes on the colours faintly */
+                float vy = (float)(y - banner_h) / (float)(ch - banner_h > 1 ? ch - banner_h : 1);
+                for (int k = 0; k < 3; ++k) {
+                    float v = (float)navy[k];
+                    v += ((float)mix8(one[k], two[k], fx) - v) * (0.10f + 0.10f * (1.0f - vy) * (1.0f - fx));
+                    p[k] = mix8(0, 255, v / 255.0f);
+                }
+                continue;
+            }
+            float shade = 1.0f - 0.30f * fy; /* darker towards the bottom */
+            for (int k = 0; k < 3; ++k) {
+                float v = (float)mix8(one[k], two[k], fx) * shade;
+                p[k] = mix8(0, 255, v / 255.0f);
+            }
+            float edge = gloss_edge - xr * 0.18f;
+            if ((float)y < edge) { /* glossy lacquer, strongest at the very top */
+                float t = 0.10f + 0.20f * (1.0f - (float)y / edge);
+                float soft = edge - (float)y < 1.5f * s ? (edge - (float)y) / (1.5f * s) : 1.0f;
+                for (int k = 0; k < 3; ++k) p[k] = mix8(p[k], 255, t * soft);
+            }
+            for (unsigned i = 0; i < sizeof(streaks) / sizeof(streaks[0]); ++i) {
+                int sy = (int)(streaks[i][0] * (float)banner_h);
+                int th = (int)(streaks[i][2] * s) > 1 ? (int)(streaks[i][2] * s) : 1;
+                if (y >= sy && y < sy + th && fx > streaks[i][1]) {
+                    float t = (fx - streaks[i][1]) / (1.0f - streaks[i][1]);
+                    for (int k = 0; k < 3; ++k) p[k] = mix8(p[k], 255, 0.35f * t);
+                }
+            }
+        }
+    }
+}
+
+/* Overdrive: finished pixel of the slanted banner, its colour glow and drop shadow (premultiplied) */
+static float over_inside(const Layout *l, int cw, int ch, float px_, float py_) {
+    float le = lean_left(l, ch, py_);
+    float re = (float)cw - ((float)l->skew - lean_left(l, ch, py_));
+    float d = px_ - le;
+    if (re - px_ < d) d = re - px_;
+    if (py_ < d) d = py_;
+    if ((float)ch - py_ < d) d = (float)ch - py_;
+    return d; /* > 0 inside, distance to the nearest edge */
+}
+
+static void finish_pixel_over(const unsigned char *src, unsigned char *dst, int x, int y, int w, int h, int g,
+                              const Layout *l, float opacity, const unsigned char (*tone)[3]) {
+    int cw = w - 2 * g, ch = h - 2 * g;
+    float s = l->scale;
+    float px_ = (float)(x - g) + 0.5f, py_ = (float)(y - g) + 0.5f;
+    float d = over_inside(l, cw, ch, px_, py_);
+    float outer = clamp01(d + 0.5f), inner = clamp01(d - 0.7f);
+    const unsigned char *b2 = second_colour(tone);
+    float fx = clamp01(px_ / (float)cw);
+    unsigned char c[3] = {src[0], src[1], src[2]};
+    float rim = outer - inner;
+    if (rim > 0.0f) /* thin bright edge */
+        for (int k = 0; k < 3; ++k) c[k] = mix8(c[k], 255, rim * (0.85f - 0.45f * clamp01(py_ / (float)ch)));
+    /* drop shadow (down right) and glow in the two colours */
+    float sd = over_inside(l, cw, ch, px_ - 4.0f * s, py_ - 5.0f * s);
+    float shadow = sd > -(float)g ? 0.55f * clamp01(1.0f + sd / (float)g) * clamp01(1.0f + sd / (float)g) : 0.0f;
+    float e = d < 0.0f ? -d : 0.0f;
+    float glow = e < (float)g ? 0.60f * (1.0f - e / (float)g) * (1.0f - e / (float)g) : 0.0f;
+    unsigned char gc[3] = {mix8(tone[0][2], b2[2], fx), mix8(tone[0][1], b2[1], fx), mix8(tone[0][0], b2[0], fx)};
+    float a = opacity * outer;
+    float ga = glow * (1.0f - a);
+    float sa = shadow * (1.0f - a - ga > 0.0f ? 1.0f - a - ga : 0.0f);
+    for (int k = 0; k < 3; ++k) {
+        float v = c[k] * a + gc[k] * ga; /* shadow adds darkness only (black) */
+        dst[k] = (unsigned char)(v > 255.0f ? 255.0f : v + 0.5f);
+    }
+    float alpha = a + ga + sa;
+    dst[3] = (unsigned char)(255.0f * (alpha > 1.0f ? 1.0f : alpha) + 0.5f);
 }
 
 /* inside of one card or panel: the cw x ch box at (x0, y0) of a w wide BGRA bitmap */
@@ -413,7 +579,7 @@ static void paint_halo(unsigned char *px, int w, int y_min, int y_end, int cx, i
 }
 
 /* the logo (alpha mask) in colour col into a size x size box, 2x2 samples per pixel */
-static void paint_logo(unsigned char *px, int w, int ix, int iy, int size, const unsigned char col[3]) {
+static void paint_logo(unsigned char *px, int w, int ix, int iy, int size, const unsigned char col[3], float strength) {
     for (int y = 0; y < size; ++y) {
         for (int x = 0; x < size; ++x) {
             float a = 0.0f;
@@ -433,7 +599,7 @@ static void paint_logo(unsigned char *px, int w, int ix, int iy, int size, const
                           gripline_logo_alpha[y1 * GRIPLINE_LOGO_SIZE + x1] * ax) * ay;
                 }
             }
-            a /= 4.0f * 255.0f;
+            a *= strength / (4.0f * 255.0f);
             unsigned char *p = px + ((size_t)(iy + y) * w + ix + x) * 4;
             for (int k = 0; k < 3; ++k) p[k] = (unsigned char)(p[k] * (1 - a) + col[k] * a);
         }
@@ -442,9 +608,15 @@ static void paint_logo(unsigned char *px, int w, int ix, int iy, int size, const
 
 /* One finished pixel of a cell (w x h, card inside at glow g): rounded corners, opacity, the rim
    (bright at the top) and outside the card the glow in the card colour. Premultiplied BGRA. */
-static void finish_pixel(const unsigned char *src, unsigned char *dst, int x, int y, int w, int h, int g, int r,
-                         float opacity, const unsigned char (*tone)[3]) {
+static void finish_pixel(const unsigned char *src, unsigned char *dst, int x, int y, int w, int h, int g,
+                         const Layout *l, float opacity, const unsigned char (*tone)[3]) {
+    if (l->style == NOTIFY_STYLE_OVERDRIVE) {
+        finish_pixel_over(src, dst, x, y, w, h, g, l, opacity, tone);
+        return;
+    }
     int cw = w - 2 * g, ch = h - 2 * g;
+    int over = 0;
+    int r = l->radius;
     float outer = card_coverage(x - g, y - g, cw, ch, r);
     float inner = card_coverage(x - g - 1, y - g - 1, cw - 2, ch - 2, r > 1 ? r - 1 : 1);
     const unsigned char accent[3] = {tone[0][2], tone[0][1], tone[0][0]};
@@ -454,7 +626,7 @@ static void finish_pixel(const unsigned char *src, unsigned char *dst, int x, in
     unsigned char c[3] = {src[0], src[1], src[2]};
     float rim = outer - inner;
     if (rim > 0.0f) {
-        float strength = rim * (0.95f - 0.65f * fy);
+        float strength = rim * (over ? 1.0f - 0.35f * fy : 0.95f - 0.65f * fy);
         const unsigned char rim_col[3] = {mix8(light[0], 255, 0.4f), mix8(light[1], 255, 0.4f), mix8(light[2], 255, 0.4f)};
         for (int k = 0; k < 3; ++k) c[k] = mix8(c[k], rim_col[k], strength);
     }
@@ -472,7 +644,7 @@ static void finish_pixel(const unsigned char *src, unsigned char *dst, int x, in
         if (e < (float)g) {
             float t = 1.0f - e / (float)g;
             float side = (float)x / (float)w; /* a little stronger at the left, where the bar is */
-            glow = 0.50f * t * t * (1.15f - 0.4f * side);
+            glow = (over ? 0.70f : 0.50f) * t * t * (1.15f - 0.4f * side);
         }
     }
     float a = opacity * outer;
@@ -500,7 +672,7 @@ static void clear_bitmap(unsigned char *px, int w, int h) {
 }
 
 /* Draws every card into a top-down BGRA bitmap (premultiplied alpha), one cell per card. */
-static int draw_cards(const Card *list, unsigned count, const Layout *l, unsigned char *pixels, int pitch) {
+static int draw_cards_v7(const Card *list, unsigned count, const Layout *l, unsigned char *pixels, int pitch) {
     static BITMAPINFO info;
     void *bits = NULL;
     int w = l->width, h = l->height * MAX_CARDS, g = l->glow;
@@ -527,38 +699,61 @@ static int draw_cards(const Card *list, unsigned count, const Layout *l, unsigne
         const unsigned char logo[3] = {mix8(tone[1][2], 255, 0.15f), mix8(tone[1][1], 255, 0.15f),
                                        mix8(tone[1][0], 255, 0.15f)};
         int top = (int)c * l->height;
-        paint_card_back(px, w, g, top + g, cw, ch, l, tone);
-        int ix = g + l->bar + (int)(9 * s), iy = top + g + (ch - l->icon) / 2;
-        paint_halo(px, w, top + g, top + g + ch, ix + l->icon / 2, iy + l->icon / 2, l->icon * 7 / 10, 0.38f, tone);
-        paint_logo(px, w, ix, iy, l->icon, logo);
+        int ix = g + l->skew * 6 / 10 + l->bar + (int)(9 * s), iy = top + g + (ch - l->icon) / 2;
+        if (l->style == NOTIFY_STYLE_OVERDRIVE) { /* banner; logo in white (dark on light cards) with a shadow */
+            paint_overdrive_back(px, w, g, top + g, cw, ch, 0, l, tone);
+            const unsigned char ink[3] = {0, 0, 0}, white[3] = {255, 255, 255}, dark[3] = {40, 26, 18};
+            int off = (int)(2 * s) > 1 ? (int)(2 * s) : 1;
+            paint_logo(px, w, ix + off, iy + off, l->icon, ink, 0.45f);
+            paint_logo(px, w, ix, iy, l->icon, over_light_card(tone) ? dark : white, 1.0f);
+        } else {
+            paint_card_back(px, w, g, top + g, cw, ch, l, tone);
+            paint_halo(px, w, top + g, top + g + ch, ix + l->icon / 2, iy + l->icon / 2, l->icon * 7 / 10, 0.38f, tone);
+            paint_logo(px, w, ix, iy, l->icon, logo, 1.0f);
+        }
     }
     gdi.GdiFlush();
     HFONT badge_font = gdi.CreateFontW(-(int)(13 * s), 0, 0, 0, FW_BOLD, 0, 0, 0, DEFAULT_CHARSET, 0, 0,
                                        ANTIALIASED_QUALITY, 0, L"Segoe UI");
-    HFONT main = gdi.CreateFontW(-(int)(20 * s), 0, 0, 0, FW_BOLD, 0, 0, 0, DEFAULT_CHARSET, 0, 0,
-                                 ANTIALIASED_QUALITY, 0, L"Segoe UI");
+    int italic = l->style == NOTIFY_STYLE_OVERDRIVE;
+    HFONT main = gdi.CreateFontW(-(int)(20 * s), 0, 0, 0, italic ? FW_HEAVY : FW_BOLD, (DWORD)italic, 0, 0,
+                                 DEFAULT_CHARSET, 0, 0, ANTIALIASED_QUALITY, 0, L"Segoe UI");
     HFONT small = gdi.CreateFontW(-(int)(14 * s), 0, 0, 0, FW_NORMAL, 0, 0, 0, DEFAULT_CHARSET, 0, 0,
                                   ANTIALIASED_QUALITY, 0, L"Segoe UI");
     gdi.SetBkMode(dc, TRANSPARENT);
-    int tx = g + l->bar + (int)(9 * s) + l->icon + (int)(12 * s);
+    int tx = g + l->skew * 6 / 10 + l->bar + (int)(9 * s) + l->icon + (int)(12 * s);
     int shade = s >= 1.5f ? 2 : 1;
     for (unsigned c = 0; c < count; ++c) {
         int top = (int)c * l->height + g;
-        RECT clip = {tx, top, g + cw - l->pad, top + ch};
+        RECT clip = {tx, top, g + cw - l->pad - l->skew, top + ch};
         int has2 = list[c].line2[0] != 0, badge = list[c].badge[0] != 0;
         const unsigned char(*tone)[3] = palette[list[c].color >= 0 ? list[c].color : color];
+        int dark_text = italic && over_light_card(tone);
+        COLORREF text1 = dark_text ? RGB(18, 22, 32) : RGB(252, 253, 255);
+        COLORREF text2 = italic ? (dark_text ? RGB(40, 46, 60) : RGB(236, 240, 248)) : RGB(180, 190, 205);
+        COLORREF badge_col = italic ? text1 : RGB(tone[1][0], tone[1][1], tone[1][2]);
         int y = top + (int)((badge ? (has2 ? 10 : 20) : (has2 ? 19 : 31)) * s);
         HGDIOBJ old_font = gdi.SelectObject(dc, badge_font);
         if (badge) { /* WARNUNG / HINWEIS above the text */
-            shadow_text(dc, tx, y, &clip, list[c].badge, RGB(tone[1][0], tone[1][1], tone[1][2]), shade);
+            if (dark_text) {
+                gdi.SetTextColor(dc, badge_col);
+                gdi.ExtTextOutW(dc, tx, y, ETO_CLIPPED, &clip, list[c].badge, (UINT)text_width_chars(list[c].badge), NULL);
+            } else {
+                shadow_text(dc, tx, y, &clip, list[c].badge, badge_col, shade);
+            }
             y += (int)(19 * s);
         }
         gdi.SelectObject(dc, main);
-        shadow_text(dc, tx, y, &clip, list[c].line1, RGB(252, 253, 255), shade);
+        if (dark_text) {
+            gdi.SetTextColor(dc, text1);
+            gdi.ExtTextOutW(dc, tx, y, ETO_CLIPPED, &clip, list[c].line1, (UINT)text_width_chars(list[c].line1), NULL);
+        } else {
+            shadow_text(dc, tx, y, &clip, list[c].line1, text1, shade);
+        }
         if (has2) {
             y += (int)(27 * s);
             gdi.SelectObject(dc, small);
-            gdi.SetTextColor(dc, RGB(180, 190, 205));
+            gdi.SetTextColor(dc, text2);
             gdi.ExtTextOutW(dc, tx, y, ETO_CLIPPED, &clip, list[c].line2, (UINT)text_width_chars(list[c].line2),
                             NULL);
         }
@@ -576,7 +771,7 @@ static int draw_cards(const Card *list, unsigned count, const Layout *l, unsigne
                 dst[x * 4 + 0] = dst[x * 4 + 1] = dst[x * 4 + 2] = dst[x * 4 + 3] = 0;
                 continue;
             }
-            finish_pixel(src + x * 4, dst + x * 4, x, cy, w, l->height, g, l->radius, 0.95f, tone);
+            finish_pixel(src + x * 4, dst + x * 4, x, cy, w, l->height, g, l, 0.95f, tone);
         }
     }
     gdi.SelectObject(dc, old_bitmap);
@@ -594,8 +789,8 @@ static int panel_pixels(const Layout *l, unsigned count) {
 }
 
 /* Draws the key list panel into l->panel_height rows (premultiplied BGRA, unused rows clear). */
-static int draw_panel(const wchar_t *title, const NotifyPanelRow *rows, unsigned count, const Layout *l,
-                      unsigned char *pixels, int pitch) {
+static int draw_panel_v7(const wchar_t *title, const NotifyPanelRow *rows, unsigned count, const Layout *l,
+                         unsigned char *pixels, int pitch) {
     static BITMAPINFO info;
     void *bits = NULL;
     int w = l->width, h = panel_pixels(l, count), g = l->glow;
@@ -619,15 +814,23 @@ static int draw_panel(const wchar_t *title, const NotifyPanelRow *rows, unsigned
     const unsigned char accent[3] = {tone[0][2], tone[0][1], tone[0][0]};
     float s = l->scale;
     clear_bitmap(px, w, h);
-    paint_card_back(px, w, g, g, cw, ch, l, tone);
-    int left = g + l->bar, right = g + cw; /* inside, right of the colour bar */
+    int over = l->style == NOTIFY_STYLE_OVERDRIVE;
+    if (over) paint_overdrive_back(px, w, g, g, cw, ch, l->panel_header, l, tone);
+    else paint_card_back(px, w, g, g, cw, ch, l, tone);
+    int left = g + l->bar + l->skew, right = g + cw - l->skew; /* inside, right of the colour bar */
     int first_row = g + l->panel_header;
     /* header: the logo on a soft light, the title next to it */
     int logo_size = l->panel_header - (int)(14 * s);
     int lx = left + (int)(8 * s), ly = g + (int)(5 * s);
     const unsigned char logo[3] = {mix8(tone[1][2], 255, 0.15f), mix8(tone[1][1], 255, 0.15f), mix8(tone[1][0], 255, 0.15f)};
-    paint_halo(px, w, g, g + ch, lx + logo_size / 2, ly + logo_size / 2, logo_size * 7 / 10, 0.38f, tone);
-    paint_logo(px, w, lx, ly, logo_size, logo);
+    if (over) {
+        const unsigned char ink[3] = {0, 0, 0}, white[3] = {255, 255, 255}, dark[3] = {40, 26, 18};
+        paint_logo(px, w, lx + 1, ly + 1, logo_size, ink, 0.45f);
+        paint_logo(px, w, lx, ly, logo_size, over_light_card(tone) ? dark : white, 1.0f);
+    } else {
+        paint_halo(px, w, g, g + ch, lx + logo_size / 2, ly + logo_size / 2, logo_size * 7 / 10, 0.38f, tone);
+        paint_logo(px, w, lx, ly, logo_size, logo, 1.0f);
+    }
     /* every second row a touch lighter: long lists read easier */
     for (unsigned i = 1; i < count; i += 2) {
         int y0 = first_row + (int)i * l->panel_row;
@@ -649,8 +852,9 @@ static int draw_panel(const wchar_t *title, const NotifyPanelRow *rows, unsigned
     gdi.GdiFlush();
     HFONT small_bold = gdi.CreateFontW(-(int)(13 * s), 0, 0, 0, FW_BOLD, 0, 0, 0, DEFAULT_CHARSET, 0, 0,
                                        ANTIALIASED_QUALITY, 0, L"Segoe UI");
-    HFONT main = gdi.CreateFontW(-(int)(20 * s), 0, 0, 0, FW_BOLD, 0, 0, 0, DEFAULT_CHARSET, 0, 0,
-                                 ANTIALIASED_QUALITY, 0, L"Segoe UI");
+    int italic = l->style == NOTIFY_STYLE_OVERDRIVE;
+    HFONT main = gdi.CreateFontW(-(int)(20 * s), 0, 0, 0, italic ? FW_HEAVY : FW_BOLD, (DWORD)italic, 0, 0,
+                                 DEFAULT_CHARSET, 0, 0, ANTIALIASED_QUALITY, 0, L"Segoe UI");
     HFONT label = gdi.CreateFontW(-(int)(15 * s), 0, 0, 0, FW_NORMAL, 0, 0, 0, DEFAULT_CHARSET, 0, 0,
                                   ANTIALIASED_QUALITY, 0, L"Segoe UI");
     HFONT keys = gdi.CreateFontW(-(int)(15 * s), 0, 0, 0, FW_SEMIBOLD, 0, 0, 0, DEFAULT_CHARSET, 0, 0,
@@ -660,7 +864,7 @@ static int draw_panel(const wchar_t *title, const NotifyPanelRow *rows, unsigned
     int title_x = lx + logo_size + (int)(12 * s);
     RECT clip = {title_x, g, right - l->pad, g + ch};
     HGDIOBJ old_font = gdi.SelectObject(dc, main);
-    shadow_text(dc, title_x, g + (l->panel_header - (int)(26 * s)) / 2 - (int)(2 * s), &clip, title, RGB(252, 253, 255),
+    shadow_text(dc, title_x, g + (l->panel_header - (int)(26 * s)) / 2 - (int)(2 * s), &clip, title, over && over_light_card(tone) ? RGB(18, 22, 32) : RGB(252, 253, 255),
                 s >= 1.5f ? 2 : 1);
     for (unsigned i = 0; i < count; ++i) {
         int y = first_row + (int)i * l->panel_row;
@@ -707,7 +911,7 @@ static int draw_panel(const wchar_t *title, const NotifyPanelRow *rows, unsigned
                 dst[x * 4 + 0] = dst[x * 4 + 1] = dst[x * 4 + 2] = dst[x * 4 + 3] = 0;
                 continue;
             }
-            finish_pixel(src + x * 4, dst + x * 4, x, y, w, h, g, l->radius, 0.94f, tone);
+            finish_pixel(src + x * 4, dst + x * 4, x, y, w, h, g, l, 0.94f, tone);
         }
     }
     gdi.SelectObject(dc, old_bitmap);
@@ -718,6 +922,247 @@ static int draw_panel(const wchar_t *title, const NotifyPanelRow *rows, unsigned
     gdi.DeleteObject(bitmap);
     gdi.DeleteDC(dc);
     return 1;
+}
+
+/* ------------------------------------------------------------------ classic card look (V6, "Classic") */
+
+/* Draws every card into a top-down BGRA bitmap (premultiplied alpha), one row per card. */
+static int draw_cards_classic(const Card *list, unsigned count, const Layout *l, unsigned char *pixels, int pitch) {
+    static BITMAPINFO info;
+    void *bits = NULL;
+    int w = l->width, h = l->height * MAX_CARDS;
+    info.bmiHeader.biSize = sizeof(info.bmiHeader);
+    info.bmiHeader.biWidth = w;
+    info.bmiHeader.biHeight = -h;
+    info.bmiHeader.biPlanes = 1;
+    info.bmiHeader.biBitCount = 32;
+    info.bmiHeader.biCompression = BI_RGB;
+    HDC dc = gdi.CreateCompatibleDC(NULL);
+    if (!dc) return 0;
+    HBITMAP bitmap = gdi.CreateDIBSection(dc, &info, DIB_RGB_COLORS, &bits, NULL, 0);
+    if (!bitmap || !bits) {
+        gdi.DeleteDC(dc);
+        return 0;
+    }
+    HGDIOBJ old_bitmap = gdi.SelectObject(dc, bitmap);
+    unsigned char *px = (unsigned char *)bits;
+    const unsigned char bg[3] = {32, 23, 17};      /* B, G, R: dark navy */
+    for (unsigned c = 0; c < count; ++c) {
+        const unsigned char(*tone)[3] = palette[list[c].color >= 0 ? list[c].color : color];
+        const unsigned char accent[3] = {tone[0][2], tone[0][1], tone[0][0]}; /* B, G, R */
+        const unsigned char logo[3] = {tone[1][2], tone[1][1], tone[1][0]};
+        int top = (int)c * l->height;
+        for (int y = 0; y < l->height; ++y) {
+            unsigned char *row = px + (size_t)(top + y) * w * 4;
+            for (int x = 0; x < w; ++x) {
+                const unsigned char *col = x < l->bar ? accent : bg;
+                row[x * 4 + 0] = col[0];
+                row[x * 4 + 1] = col[1];
+                row[x * 4 + 2] = col[2];
+                row[x * 4 + 3] = 0;
+            }
+        }
+        /* logo symbol, bilinear */
+        int ix = l->bar + l->pad, iy = top + (l->height - l->icon) / 2;
+        for (int y = 0; y < l->icon; ++y) {
+            for (int x = 0; x < l->icon; ++x) {
+                float fx = (x + 0.5f) * GRIPLINE_SYMBOL_SIZE / l->icon - 0.5f;
+                float fy = (y + 0.5f) * GRIPLINE_SYMBOL_SIZE / l->icon - 0.5f;
+                int x0 = (int)fx, y0 = (int)fy;
+                if (fx < 0) { fx = 0; x0 = 0; }
+                if (fy < 0) { fy = 0; y0 = 0; }
+                int x1 = x0 + 1 < GRIPLINE_SYMBOL_SIZE ? x0 + 1 : x0;
+                int y1 = y0 + 1 < GRIPLINE_SYMBOL_SIZE ? y0 + 1 : y0;
+                float ax = fx - x0, ay = fy - y0;
+                float a = (gripline_symbol_alpha[y0 * GRIPLINE_SYMBOL_SIZE + x0] * (1 - ax) +
+                           gripline_symbol_alpha[y0 * GRIPLINE_SYMBOL_SIZE + x1] * ax) * (1 - ay) +
+                          (gripline_symbol_alpha[y1 * GRIPLINE_SYMBOL_SIZE + x0] * (1 - ax) +
+                           gripline_symbol_alpha[y1 * GRIPLINE_SYMBOL_SIZE + x1] * ax) * ay;
+                a /= 255.0f;
+                unsigned char *p = px + ((size_t)(iy + y) * w + ix + x) * 4;
+                for (int k = 0; k < 3; ++k) p[k] = (unsigned char)(p[k] * (1 - a) + logo[k] * a);
+            }
+        }
+    }
+    gdi.GdiFlush();
+    float s = (float)l->height / 88.0f;
+    HFONT title = gdi.CreateFontW(-(int)(13 * s), 0, 0, 0, FW_BOLD, 0, 0, 0, DEFAULT_CHARSET, 0, 0,
+                                  ANTIALIASED_QUALITY, 0, L"Segoe UI");
+    HFONT main = gdi.CreateFontW(-(int)(18 * s), 0, 0, 0, FW_SEMIBOLD, 0, 0, 0, DEFAULT_CHARSET, 0, 0,
+                                 ANTIALIASED_QUALITY, 0, L"Segoe UI");
+    HFONT small = gdi.CreateFontW(-(int)(14 * s), 0, 0, 0, FW_NORMAL, 0, 0, 0, DEFAULT_CHARSET, 0, 0,
+                                  ANTIALIASED_QUALITY, 0, L"Segoe UI");
+    gdi.SetBkMode(dc, TRANSPARENT);
+    int tx = l->bar + l->pad + l->icon + l->pad;
+    for (unsigned c = 0; c < count; ++c) {
+        int top = (int)c * l->height;
+        RECT clip = {tx, top, w - l->pad, top + l->height};
+        int has2 = list[c].line2[0] != 0;
+        int y = top + (int)((has2 ? 12 : 20) * s);
+        const unsigned char(*tone)[3] = palette[list[c].color >= 0 ? list[c].color : color];
+        wchar_t heading[40] = L"GRIPLINE";
+        if (list[c].badge[0]) { /* classic title line: GRIPLINE · WARNUNG */
+            unsigned n = 8;
+            for (const wchar_t *g = L" \x00b7 "; *g; ++g) heading[n++] = *g;
+            for (const wchar_t *b = list[c].badge; *b && n + 1 < 40; ++b) heading[n++] = *b;
+            heading[n] = 0;
+        }
+        HGDIOBJ old_font = gdi.SelectObject(dc, title);
+        gdi.SetTextColor(dc, RGB(tone[1][0], tone[1][1], tone[1][2]));
+        gdi.ExtTextOutW(dc, tx, y, ETO_CLIPPED, &clip, heading, (UINT)text_width_chars(heading), NULL);
+        y += (int)(19 * s);
+        gdi.SelectObject(dc, main);
+        gdi.SetTextColor(dc, RGB(245, 247, 250));
+        gdi.ExtTextOutW(dc, tx, y, ETO_CLIPPED, &clip, list[c].line1, (UINT)text_width_chars(list[c].line1), NULL);
+        if (has2) {
+            y += (int)(25 * s);
+            gdi.SelectObject(dc, small);
+            gdi.SetTextColor(dc, RGB(170, 180, 195));
+            gdi.ExtTextOutW(dc, tx, y, ETO_CLIPPED, &clip, list[c].line2, (UINT)text_width_chars(list[c].line2),
+                            NULL);
+        }
+        gdi.SelectObject(dc, old_font);
+    }
+    gdi.GdiFlush();
+    /* rounded corners + opacity, premultiplied, into the upload rows */
+    for (int y = 0; y < h; ++y) {
+        unsigned char *src = px + (size_t)y * w * 4;
+        unsigned char *dst = pixels + (size_t)y * pitch;
+        int card = y / l->height, cy = y % l->height;
+        for (int x = 0; x < w; ++x) {
+            float a = (unsigned)card < count ? 0.94f * card_coverage(x, cy, w, l->height, l->radius) : 0.0f;
+            dst[x * 4 + 0] = (unsigned char)(src[x * 4 + 0] * a + 0.5f);
+            dst[x * 4 + 1] = (unsigned char)(src[x * 4 + 1] * a + 0.5f);
+            dst[x * 4 + 2] = (unsigned char)(src[x * 4 + 2] * a + 0.5f);
+            dst[x * 4 + 3] = (unsigned char)(255.0f * a + 0.5f);
+        }
+    }
+    gdi.SelectObject(dc, old_bitmap);
+    gdi.DeleteObject(title);
+    gdi.DeleteObject(main);
+    gdi.DeleteObject(small);
+    gdi.DeleteObject(bitmap);
+    gdi.DeleteDC(dc);
+    return 1;
+}
+
+/* Draws the key list panel into l->panel_height rows (premultiplied BGRA, unused rows clear). */
+static int draw_panel_classic(const wchar_t *title, const NotifyPanelRow *rows, unsigned count, const Layout *l,
+                      unsigned char *pixels, int pitch) {
+    static BITMAPINFO info;
+    void *bits = NULL;
+    int w = l->width, h = panel_pixels(l, count);
+    info.bmiHeader.biSize = sizeof(info.bmiHeader);
+    info.bmiHeader.biWidth = w;
+    info.bmiHeader.biHeight = -h;
+    info.bmiHeader.biPlanes = 1;
+    info.bmiHeader.biBitCount = 32;
+    info.bmiHeader.biCompression = BI_RGB;
+    HDC dc = gdi.CreateCompatibleDC(NULL);
+    if (!dc) return 0;
+    HBITMAP bitmap = gdi.CreateDIBSection(dc, &info, DIB_RGB_COLORS, &bits, NULL, 0);
+    if (!bitmap || !bits) {
+        gdi.DeleteDC(dc);
+        return 0;
+    }
+    HGDIOBJ old_bitmap = gdi.SelectObject(dc, bitmap);
+    unsigned char *px = (unsigned char *)bits;
+    const unsigned char bg[3] = {32, 23, 17};
+    const unsigned char(*tone)[3] = palette[color];
+    const unsigned char accent[3] = {tone[0][2], tone[0][1], tone[0][0]};
+    for (int y = 0; y < h; ++y) {
+        unsigned char *row = px + (size_t)y * w * 4;
+        for (int x = 0; x < w; ++x) {
+            const unsigned char *col = x < l->bar ? accent : bg;
+            row[x * 4 + 0] = col[0];
+            row[x * 4 + 1] = col[1];
+            row[x * 4 + 2] = col[2];
+            row[x * 4 + 3] = 0;
+        }
+    }
+    gdi.GdiFlush();
+    float s = (float)l->height / 88.0f;
+    HFONT small_bold = gdi.CreateFontW(-(int)(13 * s), 0, 0, 0, FW_BOLD, 0, 0, 0, DEFAULT_CHARSET, 0, 0,
+                                       ANTIALIASED_QUALITY, 0, L"Segoe UI");
+    HFONT main = gdi.CreateFontW(-(int)(18 * s), 0, 0, 0, FW_SEMIBOLD, 0, 0, 0, DEFAULT_CHARSET, 0, 0,
+                                 ANTIALIASED_QUALITY, 0, L"Segoe UI");
+    HFONT label = gdi.CreateFontW(-(int)(15 * s), 0, 0, 0, FW_NORMAL, 0, 0, 0, DEFAULT_CHARSET, 0, 0,
+                                  ANTIALIASED_QUALITY, 0, L"Segoe UI");
+    HFONT keys = gdi.CreateFontW(-(int)(15 * s), 0, 0, 0, FW_SEMIBOLD, 0, 0, 0, DEFAULT_CHARSET, 0, 0,
+                                 ANTIALIASED_QUALITY, 0, L"Segoe UI");
+    gdi.SetBkMode(dc, TRANSPARENT);
+    int tx = l->bar + l->pad, kx = w * 58 / 100;
+    RECT clip = {tx, 0, w - l->pad, h};
+    HGDIOBJ old_font = gdi.SelectObject(dc, small_bold);
+    gdi.SetTextColor(dc, RGB(tone[1][0], tone[1][1], tone[1][2]));
+    gdi.ExtTextOutW(dc, tx, (int)(10 * s), ETO_CLIPPED, &clip, L"GRIPLINE", 8, NULL);
+    gdi.SelectObject(dc, main);
+    gdi.SetTextColor(dc, RGB(245, 247, 250));
+    gdi.ExtTextOutW(dc, tx, (int)(28 * s), ETO_CLIPPED, &clip, title, (UINT)text_width_chars(title), NULL);
+    for (unsigned i = 0; i < count; ++i) {
+        int y = l->panel_header + (int)i * l->panel_row;
+        RECT left = {tx, y, kx - l->pad / 2, y + l->panel_row};
+        RECT right = {kx, y, w - l->pad, y + l->panel_row};
+        int style = rows[i].style;
+        COLORREF label_color = RGB(200, 207, 218), keys_color = RGB(tone[1][0], tone[1][1], tone[1][2]);
+        if (style == NOTIFY_ROW_SELECTED) {
+            /* key menu: the chosen row on a band in the card colour */
+            gdi.GdiFlush(); /* text of the rows above is in the bitmap before it is touched directly */
+            for (int by = y; by < y + l->panel_row && by < h; ++by) {
+                unsigned char *row = px + (size_t)by * w * 4;
+                for (int x = l->bar + l->pad / 2; x < w - l->pad / 2; ++x) {
+                    row[x * 4 + 0] = (unsigned char)((bg[0] + accent[0]) / 2);
+                    row[x * 4 + 1] = (unsigned char)((bg[1] + accent[1]) / 2);
+                    row[x * 4 + 2] = (unsigned char)((bg[2] + accent[2]) / 2);
+                }
+            }
+            gdi.GdiFlush();
+            label_color = keys_color = RGB(255, 255, 255);
+        } else if (style == NOTIFY_ROW_INFO) {
+            label_color = RGB(150, 158, 170);
+        } else if (style == NOTIFY_ROW_HINT) {
+            label_color = keys_color = RGB(130, 138, 150);
+        }
+        gdi.SelectObject(dc, style == NOTIFY_ROW_HINT ? small_bold : label);
+        gdi.SetTextColor(dc, label_color);
+        gdi.ExtTextOutW(dc, tx, y, ETO_CLIPPED, &left, rows[i].label, (UINT)text_width_chars(rows[i].label), NULL);
+        gdi.SelectObject(dc, style == NOTIFY_ROW_HINT ? small_bold : keys);
+        gdi.SetTextColor(dc, keys_color);
+        gdi.ExtTextOutW(dc, kx, y, ETO_CLIPPED, &right, rows[i].keys, (UINT)text_width_chars(rows[i].keys), NULL);
+    }
+    gdi.SelectObject(dc, old_font);
+    gdi.GdiFlush();
+    for (int y = 0; y < l->panel_height; ++y) {
+        unsigned char *src = px + (size_t)y * w * 4;
+        unsigned char *dst = pixels + (size_t)y * pitch;
+        for (int x = 0; x < w; ++x) {
+            float a = y < h ? 0.92f * card_coverage(x, y, w, h, l->radius) : 0.0f;
+            dst[x * 4 + 0] = y < h ? (unsigned char)(src[x * 4 + 0] * a + 0.5f) : 0;
+            dst[x * 4 + 1] = y < h ? (unsigned char)(src[x * 4 + 1] * a + 0.5f) : 0;
+            dst[x * 4 + 2] = y < h ? (unsigned char)(src[x * 4 + 2] * a + 0.5f) : 0;
+            dst[x * 4 + 3] = (unsigned char)(255.0f * a + 0.5f);
+        }
+    }
+    gdi.SelectObject(dc, old_bitmap);
+    gdi.DeleteObject(small_bold);
+    gdi.DeleteObject(main);
+    gdi.DeleteObject(label);
+    gdi.DeleteObject(keys);
+    gdi.DeleteObject(bitmap);
+    gdi.DeleteDC(dc);
+    return 1;
+}
+
+
+static int draw_cards(const Card *list, unsigned count, const Layout *l, unsigned char *pixels, int pitch) {
+    return l->style == NOTIFY_STYLE_CLASSIC ? draw_cards_classic(list, count, l, pixels, pitch)
+                                            : draw_cards_v7(list, count, l, pixels, pitch);
+}
+
+static int draw_panel(const wchar_t *title, const NotifyPanelRow *rows, unsigned count, const Layout *l,
+                      unsigned char *pixels, int pitch) {
+    return l->style == NOTIFY_STYLE_CLASSIC ? draw_panel_classic(title, rows, count, l, pixels, pitch)
+                                            : draw_panel_v7(title, rows, count, l, pixels, pitch);
 }
 
 /* ------------------------------------------------------------------ D3D12 */
@@ -1035,7 +1480,7 @@ static void render(IDXGISwapChain *swapchain) {
         fail("could not build the overlay shader");
         return;
     }
-    if (height != gpu.screen_height) {
+    if (height != gpu.screen_height || gpu.layout.style != (int)card_style) {
         gpu.screen_height = height;
         gpu.layout = layout_for(height);
         gpu.drawn_count = (unsigned)-1;
@@ -1747,6 +2192,12 @@ int notify_install_late(void) {
 }
 
 #ifdef FH2_TWEAKS_TEST
+__declspec(dllexport) int Fh2TestNotifyStyleGet(void) {
+    return notify_style();
+}
+__declspec(dllexport) void Fh2TestNotifySetStyle(int style) {
+    notify_set_style(style);
+}
 __declspec(dllexport) void Fh2TestNotifyShow(const char *text, int tint, const char *badge) {
     if (tint < 0) notify_show(text);
     else notify_show_tinted(text, tint, badge, 0);

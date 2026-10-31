@@ -4,7 +4,8 @@ import sys, struct, tempfile
 sys.path.insert(0, '/home/claude/gripline/tests')
 from emu import Emu
 from PIL import Image, ImageDraw, ImageFont
-DLL, OUT, BG = sys.argv[1], sys.argv[2], sys.argv[3] if len(sys.argv) > 3 else None
+DLL, OUT = sys.argv[1], sys.argv[2]
+BG = sys.argv[3] if len(sys.argv) > 3 and sys.argv[3] != '-' else None
 FONTS = {(False): '/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf', True: '/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf'}
 
 class R(Emu):
@@ -62,6 +63,8 @@ class R(Emu):
 
 root = tempfile.mkdtemp()
 e = R(DLL, root)
+STYLE = int(sys.argv[4]) if len(sys.argv) > 4 else -1
+if STYLE >= 0: e.call('Fh2TestNotifySetStyle', STYLE)
 def show(t, tint=-1, badge=None):
     e.call('Fh2TestNotifyShow', e.put_bytes(t.encode()), tint & 0xffffffff, e.put_bytes(badge.encode()) if badge else 0)
 H = 1080
@@ -105,7 +108,7 @@ w, rows, cnt = e.rd(w_), e.rd(r_), e.rd(c_)
 pix = e.alloc(w * rows * 4)
 e.call('Fh2TestNotifyPanelDraw', H, pix, w * 4, w_, r_, c_, l_, k_)
 img = Image.frombytes('RGBA', (w, rows), bytes(e.mu.mem_read(pix, w * rows * 4)), 'raw', 'BGRA')
-ph = 60 + cnt * 20 + 14 + 18 + 4
+ph = rows
 bg2 = Image.new('RGB', (w + 40, ph + 40), (60, 70, 55)); bp = bg2.load(); ip = img.load()
 for y in range(min(rows, ph)):
     for x in range(w):

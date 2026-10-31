@@ -17,7 +17,12 @@
 #define FILE_LIMIT 32768u
 #define MAX_ROWS (NOTIFY_PANEL_ROWS - 1)
 
-enum { LEVEL_CLOSED, LEVEL_GROUPS, LEVEL_LIST, LEVEL_BINDING, LEVEL_CAPTURE, LEVEL_RESET_ALL };
+enum { LEVEL_CLOSED, LEVEL_GROUPS, LEVEL_LIST, LEVEL_BINDING, LEVEL_CAPTURE, LEVEL_RESET_ALL, LEVEL_STYLE, LEVEL_COUNT };
+
+/* first page: rows after the binding pages */
+enum { TOP_STYLE = 100, TOP_RESET = 101 };
+
+static const wchar_t *const style_names[NOTIFY_STYLE_COUNT] = {L"Classic", L"Enhanced", L"Overdrive"};
 
 /* the pages of the first level; every binding is in exactly one (tests/test_key_menu.py) */
 static const wchar_t *const group_driving[] = {L"Throttle", L"Brake", L"SteerLeft", L"SteerRight", L"Handbrake",
@@ -46,7 +51,7 @@ enum { ACT_REPLACE, ACT_ADD, ACT_DEFAULT, ACT_CLEAR, ACT_COUNT };
 static struct {
     int level;
     int group, binding;   /* page shown on LEVEL_LIST / LEVEL_BINDING */
-    int sel[6];           /* selected row per level */
+    int sel[LEVEL_COUNT]; /* selected row per level */
     int add;              /* capture: 1 = add a key, 0 = replace */
     int armed;            /* capture: all keys were released once */
     unsigned char held[256]; /* fixed menu keys, last tick */
@@ -121,10 +126,10 @@ static int any_key_down(void) {
 
 /* ------------------------------------------------------------------ FH2_Keyboard.ini */
 
-static int read_ini(size_t *length) {
+static int read_file_at(const wchar_t *path, size_t *length) {
     *length = 0;
     file_text[0] = 0;
-    HANDLE file = CreateFileW(ini_path, GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE, NULL, OPEN_EXISTING,
+    HANDLE file = CreateFileW(path, GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE, NULL, OPEN_EXISTING,
                               FILE_ATTRIBUTE_NORMAL, NULL);
     if (file == INVALID_HANDLE_VALUE) return GetLastError() == ERROR_FILE_NOT_FOUND; /* made new */
     LARGE_INTEGER size;
@@ -138,16 +143,16 @@ static int read_ini(size_t *length) {
     return 1;
 }
 
-static int write_ini(const char *data, size_t length) {
+static int write_file_at(const wchar_t *path, const char *data, size_t length) {
     static wchar_t temp[PATH_CAPACITY + 8];
-    unsigned n = wcopy(temp, 0, PATH_CAPACITY, ini_path);
+    unsigned n = wcopy(temp, 0, PATH_CAPACITY, path);
     wcopy(temp, n, PATH_CAPACITY + 8, L".gltmp");
     HANDLE file = CreateFileW(temp, GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
     if (file == INVALID_HANDLE_VALUE) return 0;
     DWORD written = 0;
     int ok = WriteFile(file, data, (DWORD)length, &written, NULL) && written == length && FlushFileBuffers(file);
     CloseHandle(file);
-    if (ok) ok = MoveFileExW(temp, ini_path, MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH);
+    if (ok) ok = MoveFileExW(temp, path, MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH);
     if (!ok) DeleteFileW(temp);
     return ok;
 }
@@ -178,7 +183,7 @@ static void ascii_key(const wchar_t *key, char *out, unsigned capacity) {
 /* writes the current keys of bindings [first, end) into FH2_Keyboard.ini; the rest of the file stays */
 static int save_bindings(unsigned first, unsigned end) {
     size_t length;
-    if (!ini_path[0] || !read_ini(&length)) {
+    if (!ini_path[0] || !read_file_at(ini_path, &length)) {
         log_append("KEYMENU: FH2_Keyboard.ini could not be read - change not saved.\r\n");
         return 0;
     }
@@ -199,8 +204,28 @@ static int save_bindings(unsigned first, unsigned end) {
         length = n;
         slot ^= 1;
     }
-    if (!write_ini(source, length)) {
+    if (!write_file_at(ini_path, source, length)) {
         log_append("KEYMENU: FH2_Keyboard.ini could not be written - change not saved.\r\n");
+        return 0;
+    }
+    return 1;
+}
+
+/* Gripline.ini next to FH2_Keyboard.ini: [Gripline] CardStyle */
+static int save_style(int style) {
+    static wchar_t path[PATH_CAPACITY];
+    unsigned n = wcopy(path, 0, PATH_CAPACITY, ini_path), cut = 0;
+    for (unsigned i = 0; i < n; ++i)
+        if (path[i] == L'\\' || path[i] == L'/') cut = i + 1;
+    if (!cut) return 0;
+    path[cut] = 0;
+    wcopy(path, cut, PATH_CAPACITY, L"Gripline.ini");
+    size_t length;
+    if (!read_file_at(path, &length)) return 0;
+    char value[2] = {(char)('0' + style), 0};
+    size_t written = ini_set_value(file_text, length, "Gripline", "CardStyle", value, edit_text[0], FILE_LIMIT + 1);
+    if (!written || written > FILE_LIMIT || !write_file_at(path, edit_text[0], written)) {
+        log_append("KEYMENU: Gripline.ini could not be written - card design not saved.\r\n");
         return 0;
     }
     return 1;
@@ -306,7 +331,8 @@ static void build_page(wchar_t *title) {
         case LEVEL_GROUPS:
             wcopy(title, 0, 64, tr(L"Tastenbelegung ändern", L"Change key bindings"));
             for (unsigned g = 0; g < GROUP_COUNT; ++g) row_add(tr(groups[g].german, groups[g].english), L"›", 0, (int)g);
-            row_add(tr(L"Alle auf Standard", L"Reset all to default"), L"›", 0, (int)GROUP_COUNT);
+            row_add(tr(L"Karten-Design", L"Card design"), style_names[notify_style()], 0, TOP_STYLE);
+            row_add(tr(L"Alle auf Standard", L"Reset all to default"), L"›", 0, TOP_RESET);
             hint(1);
             break;
         case LEVEL_LIST:
@@ -341,6 +367,12 @@ static void build_page(wchar_t *title) {
                     L"", NOTIFY_ROW_INFO, -1);
             row_add(tr(L"Abbrechen", L"Cancel"), L"Esc", NOTIFY_ROW_HINT, -1);
             break;
+        case LEVEL_STYLE:
+            wcopy(title, 0, 64, tr(L"Karten-Design", L"Card design"));
+            for (int i = 0; i < NOTIFY_STYLE_COUNT; ++i)
+                row_add(style_names[i], i == notify_style() ? tr(L"✓ aktiv", L"✓ active") : L"", 0, i);
+            hint(0);
+            break;
         case LEVEL_RESET_ALL:
             wcopy(title, 0, 64, tr(L"Alle Tasten auf Standard?", L"All keys to default?"));
             row_add(tr(L"Nein, zurück", L"No, back"), L"", 0, 0);
@@ -367,7 +399,7 @@ static void show(void) {
 static void open_menu(void) {
     m.german = game_language_is_german(keyboard_game_image());
     m.level = LEVEL_GROUPS;
-    for (unsigned i = 0; i < 6; ++i) m.sel[i] = 0;
+    for (unsigned i = 0; i < LEVEL_COUNT; ++i) m.sel[i] = 0;
     keyboard_block_input(1);
     show();
     log_append("KEYMENU: opened\r\n");
@@ -385,6 +417,7 @@ static void back(void) {
         case LEVEL_GROUPS: close_menu(); return;
         case LEVEL_LIST: m.level = LEVEL_GROUPS; break;
         case LEVEL_RESET_ALL: m.level = LEVEL_GROUPS; break;
+        case LEVEL_STYLE: m.level = LEVEL_GROUPS; break;
         case LEVEL_BINDING: m.level = LEVEL_LIST; break;
         case LEVEL_CAPTURE: m.level = LEVEL_BINDING; break;
     }
@@ -403,9 +436,12 @@ static void choose(void) {
     if (action < 0) return;
     switch (m.level) {
         case LEVEL_GROUPS:
-            if (action == (int)GROUP_COUNT) {
+            if (action == TOP_RESET) {
                 m.level = LEVEL_RESET_ALL;
                 m.sel[LEVEL_RESET_ALL] = 0;
+            } else if (action == TOP_STYLE) {
+                m.level = LEVEL_STYLE;
+                m.sel[LEVEL_STYLE] = notify_style();
             } else {
                 m.group = action;
                 m.level = LEVEL_LIST;
@@ -435,6 +471,23 @@ static void choose(void) {
                 unsigned char none[4] = {0, 0, 0, 0};
                 apply((unsigned)m.binding, none);
             }
+            break;
+        }
+        case LEVEL_STYLE: {
+            notify_set_style(action);
+            int saved = save_style(action);
+            char text[160];
+            unsigned t = 0;
+            wchar_t line[96];
+            unsigned n = wcopy(line, 0, 96, tr(L"Karten-Design: ", L"Card design: "));
+            n = wcopy(line, n, 96, style_names[action]);
+            wcopy(line, n, 96, saved ? tr(L"\nSo sehen deine Karten jetzt aus", L"\nThis is how your cards look now")
+                                     : tr(L"\nNur bis zum Spielende (nicht gespeichert)", L"\nUntil the game closes (not saved)"));
+            utf8(line, text, sizeof(text), &t);
+            text[t] = 0;
+            notify_show(text);
+            log_append(action == 0 ? "KEYMENU: card design Classic\r\n" : action == 1 ? "KEYMENU: card design Enhanced\r\n"
+                                                                          : "KEYMENU: card design Overdrive\r\n");
             break;
         }
         case LEVEL_RESET_ALL:

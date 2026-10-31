@@ -46,6 +46,11 @@ enum {
     NOTIFY_COLOR_COUNT
 };
 void notify_set_color(int index);
+/* Card design (F8 menu, INI [Gripline] CardStyle): Classic = V6 look, Enhanced = glow and glass (V7),
+   Overdrive = carbon, cut corners, racing stripes. Safe from any thread. */
+enum { NOTIFY_STYLE_CLASSIC, NOTIFY_STYLE_ENHANCED, NOTIFY_STYLE_OVERDRIVE, NOTIFY_STYLE_COUNT };
+void notify_set_style(int style);
+int notify_style(void);
 int notify_color(void);
 
 /* Key list panel (keyboard_pad.c, key Keybinds): a tall card at the right edge of the picture,
