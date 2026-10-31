@@ -334,7 +334,10 @@ static Layout layout_for(UINT screen_height) {
     l.glow = l.style == NOTIFY_STYLE_CLASSIC ? 0 : l.style == NOTIFY_STYLE_OVERDRIVE ? (int)(12 * s) : (int)(9 * s);
     l.width = (int)(430 * s) + 2 * l.glow;
     l.height = (int)(88 * s) + 2 * l.glow;
-    l.gap = (int)(10 * s) - 2 * l.glow; /* the visible gap stays 10 */
+    /* visible gap between two cards = gap + 2 * glow: at least the glow plus a little, so the next
+       card's glow and shadow never fall onto the card above (they overlapped by 2-4 px before) */
+    int visible_gap = (int)(10 * s) > l.glow + (int)(4 * s) ? (int)(10 * s) : l.glow + (int)(4 * s);
+    l.gap = visible_gap - 2 * l.glow;
     l.margin = (int)(28 * s) - l.glow;
     l.radius = (int)(12 * s);
     l.icon = l.style == NOTIFY_STYLE_CLASSIC ? (int)(58 * s) : (int)(70 * s);
