@@ -22,7 +22,7 @@
 
 #define MAX_CARDS 3
 #define CARD_MS 5000u
-#define STARTUP_CARD_MS 9000u /* start cards (mods found, Mapper) stay longer */
+#define STARTUP_CARD_MS 15000u /* start cards (start, key menu, mods found, version check) stay 15 s (Marvin, V7) */
 #define FADE_IN_MS 250u
 #define FADE_OUT_MS 500u
 #define TEXT_CAPACITY 96
