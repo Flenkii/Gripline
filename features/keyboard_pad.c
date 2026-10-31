@@ -7,6 +7,7 @@
 #include "support.h"
 #include "nitro_link.h"
 #include "cockpit_view.h"
+#include "noclip.h"
 #include "notify.h"
 #include "game_language.h"
 
@@ -134,6 +135,7 @@ static Binding bindings[] = {
     {L"NoclipUp", KIND_NOCLIP, 0, L"Space", {0}},
     {L"NoclipDown", KIND_NOCLIP, 0, L"LCtrl", {0}},
     {L"NoclipFast", KIND_NOCLIP, 0, L"LShift", {0}},
+    {L"Freecam", KIND_NOCLIP, 0, L"F7", {0}},
 };
 
 static const struct {
@@ -239,7 +241,10 @@ static const char default_ini[] =
     "; CockpitView: second cockpit view on/off (close to the dashboard, set on the MODS page).\r\n"
     "; Keybinds: shows this key list at the right of the picture, again = off (the game keeps running).\r\n"
     "; Noclip: fly through the map (offline only), again = off. Throttle/Brake fly forward/back,\r\n"
-    ";   SteerLeft/SteerRight turn, NoclipUp/NoclipDown rise/sink, NoclipFast held = faster.\r\n";
+    ";   SteerLeft/SteerRight turn, NoclipUp/NoclipDown rise/sink, NoclipFast held = faster.\r\n"
+    "; Freecam: the camera flies without the car (offline only), again = off, the car stays where it was.\r\n"
+    ";   Arrow keys look, Throttle/Brake fly forward/back, SteerLeft/SteerRight sideways,\r\n"
+    ";   NoclipUp/NoclipDown up/down, NoclipFast held = faster.\r\n";
 
 /* Default file text including the key bindings (also used by ini_migrate.c). Returns the
    length, 0 if it does not fit. */
@@ -282,7 +287,7 @@ static const wchar_t *const labels_german[ARRAY_COUNT(bindings)] = {
     L"Bestätigen (A)", L"Zurück (B)", L"Taste X", L"Taste Y", L"Reiter links (LB)", L"Reiter rechts (RB)",
     L"Menü/Kamera hoch", L"Menü/Kamera runter", L"Menü/Kamera links", L"Menü/Kamera rechts",
     L"Steuerkreuz hoch", L"Steuerkreuz runter", L"Steuerkreuz links", L"Steuerkreuz rechts",
-    L"Noclip ein/aus", L"Noclip: steigen", L"Noclip: sinken", L"Noclip: schneller (halten)"};
+    L"Noclip ein/aus", L"Noclip: steigen", L"Noclip: sinken", L"Noclip: schneller (halten)", L"Freecam ein/aus"};
 static const wchar_t *const labels_english[ARRAY_COUNT(bindings)] = {
     L"Throttle", L"Brake", L"Steer left", L"Steer right", L"Handbrake", L"Shift up", L"Shift down",
     L"Clutch", L"Change camera", L"Rewind", L"Telemetry (hold)", L"Photo mode (hold)", L"Radio: previous",
@@ -291,7 +296,7 @@ static const wchar_t *const labels_english[ARRAY_COUNT(bindings)] = {
     L"Confirm (A)", L"Back (B)", L"Button X", L"Button Y", L"Tab left (LB)", L"Tab right (RB)",
     L"Menu/camera up", L"Menu/camera down", L"Menu/camera left", L"Menu/camera right",
     L"D-pad up", L"D-pad down", L"D-pad left", L"D-pad right",
-    L"Noclip on/off", L"Noclip: rise", L"Noclip: sink", L"Noclip: faster (hold)"};
+    L"Noclip on/off", L"Noclip: rise", L"Noclip: sink", L"Noclip: faster (hold)", L"Freecam on/off"};
 _Static_assert(ARRAY_COUNT(bindings) + 1 <= NOTIFY_PANEL_ROWS, "key list rows");
 
 static unsigned char *game_base;
@@ -617,6 +622,7 @@ static void keyboard_reading(PadReading *r) {
     }
     kb.steer = approach(kb.steer, clamp1(steer_target), dt, (int)values[KEY_SETTING_STEER],
                         (int)values[KEY_SETTING_RETURN]);
+    if (noclip_freecam_active() && driving_now()) nav_x = nav_y = 0.0; /* freecam looks with the arrows itself */
     if ((nav_x != 0.0 || nav_y != 0.0) && driving_now()) {
         /* camera: right stick, like looking around with the gamepad */
         if (nav_x != 0.0 && r->rx == 0.0) r->rx = clamp1(nav_x);
@@ -1110,7 +1116,9 @@ static int wide_equal(const wchar_t *a, const wchar_t *b) {
 int keyboard_held(unsigned which) {
     static const wchar_t *const names[KEYBOARD_HOLD_COUNT] = {L"Throttle", L"Brake",      L"SteerLeft",
                                                               L"SteerRight", L"NoclipUp", L"NoclipDown",
-                                                              L"NoclipFast", L"Noclip"};
+                                                              L"NoclipFast", L"Noclip", L"Freecam",
+                                                              L"ArrowUp", L"ArrowDown", L"ArrowLeft",
+                                                              L"ArrowRight"};
     static int index[KEYBOARD_HOLD_COUNT];
     if (which >= KEYBOARD_HOLD_COUNT || !loaded || !user32_ready()) return 0;
     if (!index[which]) {

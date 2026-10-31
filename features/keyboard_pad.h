@@ -45,6 +45,11 @@ enum {
     KEYBOARD_HOLD_DOWN,    /* NoclipDown */
     KEYBOARD_HOLD_FAST,    /* NoclipFast */
     KEYBOARD_HOLD_NOCLIP,  /* Noclip (on/off) */
+    KEYBOARD_HOLD_FREECAM, /* Freecam (on/off) */
+    KEYBOARD_HOLD_LOOK_UP, /* ArrowUp ... ArrowRight: freecam look */
+    KEYBOARD_HOLD_LOOK_DOWN,
+    KEYBOARD_HOLD_LOOK_LEFT,
+    KEYBOARD_HOLD_LOOK_RIGHT,
     KEYBOARD_HOLD_COUNT
 };
 int keyboard_held(unsigned which);

@@ -12,6 +12,7 @@
 #include "wheel_buttons.h"
 #include "logging.h"
 #include "support.h"
+#include "noclip.h"
 
 #define RVA_GET_STATE 0x106c320u
 #define ACTION_SWITCH_CAMERA 17
@@ -26,6 +27,14 @@ static float base[3], written[3];
 static int have_written;
 static volatile LONG64 driver_tick; /* GetTickCount64 of the last driver camera frame */
 static unsigned char button_held[4], button_taken[4];
+
+/* freecam: the camera button is pressed for the player until the driver camera is active */
+#define DRIVER_SEARCH_MS 4000u
+#define PRESS_EVERY_MS 400u
+#define PRESS_MS 150u
+static volatile LONG want_driver;
+static volatile LONG64 want_since;
+static volatile LONG press_device = -1; /* user * 2 + wheel of the controller that gets the presses */
 
 static void hook_driver_camera(unsigned char *game_image);
 
@@ -52,6 +61,27 @@ void cockpit_view_input(unsigned source, int held) {
 static int driver_active(void) {
     LONG64 seen = driver_tick;
     return seen && GetTickCount64() - (ULONGLONG)seen < DRIVER_ACTIVE_MS;
+}
+
+int cockpit_view_driver_active(void) {
+    return driver_active();
+}
+
+void cockpit_view_want_driver(int on) {
+    InterlockedExchange(&press_device, -1);
+    InterlockedExchange64(&want_since, (LONG64)GetTickCount64());
+    InterlockedExchange(&want_driver, on ? 1 : 0);
+    if (on && !driver_active()) log_append("COCKPIT VIEW: freecam - changing to the driver camera.\r\n");
+}
+
+/* 1 = press the camera button in this reading (one controller only, so the camera changes once a press) */
+static int press_for_driver(DWORD user, int wheel) {
+    if (!want_driver || driver_active()) return 0;
+    ULONGLONG t = GetTickCount64() - (ULONGLONG)want_since;
+    if (t >= DRIVER_SEARCH_MS) return 0;
+    LONG device = (LONG)(user * 2 + (wheel ? 1 : 0));
+    InterlockedCompareExchange(&press_device, device, -1);
+    return press_device == device && t % PRESS_EVERY_MS < PRESS_MS;
 }
 
 /* The camera button of one controller: 1 = hide this press from the game. */
@@ -89,6 +119,10 @@ static DWORD state_hook(DWORD user, void *device, unsigned char *state) {
     if (input < 0 || input > 15 || input == 10 || input == 11) return result; /* 10/11 are triggers */
     unsigned short buttons, mask = (unsigned short)(1u << input);
     memory_copy(&buttons, state + 4, sizeof(buttons));
+    if (press_for_driver(user, wheel)) {
+        buttons |= mask;
+        memory_copy(state + 4, &buttons, sizeof(buttons));
+    }
     static volatile LONG pressed_seen;
     if ((buttons & mask) && !InterlockedExchange(&pressed_seen, 1)) log_append_value("COCKPIT VIEW: camera button seen, input ", input);
     if (camera_button(user, (buttons & mask) != 0)) {
@@ -186,6 +220,7 @@ void cockpit_view_frame(void *camera) {
         want[1] += (float)up_mm / 1000.0f;
         want[2] += (float)forward_mm / 1000.0f;
     }
+    if (noclip_freecam_active()) want[2] += FREECAM_AHEAD; /* out of the car, see noclip.h */
     memory_copy(written, want, sizeof(written));
     have_written = 1;
     if (!memory_equal(now, want, sizeof(want)) && memory_is_writable(offset, sizeof(want)))

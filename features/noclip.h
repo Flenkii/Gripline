@@ -11,7 +11,15 @@
    watched on an own thread. The hook also gives the trip summary the own car's speed (trip.h). For
    the local car, while noclip is on, before and after the game's update, the car's rigid body (CCarDynamics, the
    object at car+0x4c08) gets the flown position, a level orientation and no speed, through
-   the body's own state setter. So the game's physics never moves the car itself. */
+   the body's own state setter. So the game's physics never moves the car itself.
+
+   Freecam (key Freecam, default F7, offline only like noclip): the camera flies without the car.
+   It uses the same flight: the driver camera is pushed FREECAM_AHEAD metres in front of the
+   steering wheel (cockpit_view.c) and the car is flown, pitched and turned so that this camera
+   point goes where the keys say; the car itself is always behind the picture. Arrow keys look
+   (turn / up / down), Throttle/Brake (W/S) fly where the camera looks, SteerLeft/SteerRight (A/D)
+   sideways, NoclipUp/NoclipDown up/down, NoclipFast faster. If the driver camera is not active,
+   Gripline presses the camera button until it is. Off again: the car is put back where it was. */
 
 #define NOCLIP_CAR_UPDATE_RVA 0x2a9400u      /* ForzaCar update (self, dt, frame dt, frame) */
 #define NOCLIP_CAR_UPDATE_SLOT_RVA 0x2c5cc00u /* its ForzaCar vtable slot (0x80) */
@@ -24,7 +32,12 @@ void noclip_start(unsigned char *game_image, void *original_update, NoclipHookFn
 /* Detour for the car update (self, dt, frame dt, frame). */
 void noclip_car_update(void *car, float dt, float frame_dt, unsigned frame);
 
-/* 1 while noclip is on. */
+enum { MODE_NOCLIP = 1, MODE_FREECAM = 2 };
+#define FREECAM_AHEAD 3.5f /* metres in front of the steering wheel: past the bumper of a long car */
+
+/* 1 while noclip or freecam is on. */
 int noclip_active(void);
+/* 1 while freecam is on (cockpit_view.c moves the camera, keyboard_pad.c keeps the arrows). */
+int noclip_freecam_active(void);
 
 #endif

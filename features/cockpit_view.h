@@ -18,6 +18,11 @@ int cockpit_view_second(void);
 /* Every frame with the active driver camera (from the FOV hook). */
 void cockpit_view_frame(void *camera);
 
+/* Freecam (noclip.h): 1 while the driver camera is active; want_driver(1) presses the camera
+   button for the player (for a few seconds) until it is. */
+int cockpit_view_driver_active(void);
+void cockpit_view_want_driver(int on);
+
 /* Game start: hooks the game's controller state read so the camera button gets the extra step. */
 void cockpit_view_start(unsigned char *game_image);
 

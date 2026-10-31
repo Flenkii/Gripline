@@ -19,6 +19,7 @@
 #include "game_language.h"
 #include "trip.h"
 #include "wheel_watch.h"
+#include "cockpit_view.h"
 
 #define RVA_DYNAMICS_VTABLE 0x2eb4bb8u
 #define RVA_DYNAMICS_REF_VTABLE 0x2eb5e18u
@@ -30,6 +31,20 @@
 #define CLIMB 10.0f      /* m/s up/down */
 #define FAST 4.0f        /* NoclipFast held */
 #define TURN 1.8f        /* rad/s */
+
+/* freecam: slower, for camera shots */
+#define FREE_SPEED 8.0f      /* m/s (29 km/h) */
+#define FREE_CLIMB 5.0f      /* m/s */
+#define FREE_LOOK 1.2f       /* rad/s, arrow keys */
+#define FREE_PITCH_MAX 1.4f  /* about 80 degrees up / down */
+/* The driver camera sits FREECAM_AHEAD metres in front of the steering wheel (cockpit_view.c),
+   so the car is always behind the picture. The steering wheel itself is roughly FREE_WHEEL_UP
+   above and FREE_WHEEL_AHEAD in front of the body's position (a guess, the same for every car:
+   only used so that turning the view turns about the camera, not about the car). */
+#define FREE_WHEEL_UP 0.6f
+#define FREE_WHEEL_AHEAD 0.3f
+#define FREE_PARK_MS 2000u   /* after freecam: the car is held at its place while the world loads */
+#define FREE_DRIVER_WAIT_MS 5000u
 
 typedef struct {
     __m128 position, velocity, spin, right, up, forward;
@@ -45,8 +60,8 @@ typedef void (*SetStateFn)(void *, const BodyState *);
 
 static unsigned char *game;
 static CarUpdateFn original;
-static volatile LONG on;
-static int key_held, warned;
+static volatile LONG on; /* 0, MODE_NOCLIP or MODE_FREECAM */
+static int key_held, free_key_held, warned;
 static ULONGLONG next_online_check;
 static int online, online_known;
 
@@ -54,6 +69,14 @@ static int online, online_known;
 static void *volatile body;  /* the body being flown */
 static float pos[3], dir[2]; /* position, heading (x, z) */
 static float mirror;         /* +1: right row = (z, 0, -x) of the heading, -1: the other way */
+static float pitch_sin, pitch_cos = 1.0f, pitch; /* freecam only, noclip stays level */
+static float cam[3];          /* freecam: the camera's place (the car is moved behind it) */
+
+/* freecam: the car's place before, put back when freecam goes off */
+static _Alignas(16) BodyState parked;
+static void *volatile parked_body;
+static volatile LONG64 park_until;
+static ULONGLONG driver_wait;
 
 /* info card (height, speed) */
 #define INFO_TAG 0x0c11b000u
@@ -64,6 +87,10 @@ static ULONGLONG info_from, info_next, info_time;
 
 int noclip_active(void) {
     return on != 0;
+}
+
+int noclip_freecam_active(void) {
+    return on == MODE_FREECAM;
 }
 
 static int in_game(const void *address) {
@@ -149,11 +176,21 @@ static int begin(void *dynamics) {
     }
     if (!heading_from(f, r)) return 0;
     pos[0] = p[0], pos[1] = p[1] + 0.5f, pos[2] = p[2]; /* a little off the road */
+    pitch = 0.0f, pitch_sin = 0.0f, pitch_cos = 1.0f;
+    if (on == MODE_FREECAM) {
+        parked = state;
+        parked.velocity = _mm_setzero_ps();
+        parked.spin = _mm_setzero_ps();
+        parked_body = dynamics;
+        /* the camera starts where the car would put it; the car does not move */
+        float ahead = FREE_WHEEL_AHEAD + FREECAM_AHEAD;
+        cam[0] = pos[0] + dir[0] * ahead, cam[1] = pos[1] + FREE_WHEEL_UP, cam[2] = pos[2] + dir[1] * ahead;
+    }
     body = dynamics;
     return 1;
 }
 
-/* the flown state: level, no speed, so the game's physics has nothing to move */
+/* the flown state: level (freecam: pitched), no speed, so the game's physics has nothing to move */
 static void place(void *dynamics) {
     SetStateFn set = (SetStateFn)slot(dynamics, SLOT_SET_STATE);
     if (!set) return;
@@ -162,9 +199,30 @@ static void place(void *dynamics) {
     state.velocity = _mm_setzero_ps();
     state.spin = _mm_setzero_ps();
     state.right = _mm_setr_ps(mirror * dir[1], 0.0f, -mirror * dir[0], 0.0f);
-    state.up = _mm_setr_ps(0.0f, 1.0f, 0.0f, 0.0f);
-    state.forward = _mm_setr_ps(dir[0], 0.0f, dir[1], 0.0f);
+    state.up = _mm_setr_ps(-pitch_sin * dir[0], pitch_cos, -pitch_sin * dir[1], 0.0f);
+    state.forward = _mm_setr_ps(pitch_cos * dir[0], pitch_sin, pitch_cos * dir[1], 0.0f);
     set(dynamics, &state);
+}
+
+static void put_back(void *dynamics) {
+    SetStateFn set = (SetStateFn)slot(dynamics, SLOT_SET_STATE);
+    if (set) set(dynamics, &parked);
+}
+
+static void sin_cos(float a, float *s, float *c) {
+    float a2 = a * a; /* |a| <= 1.4: the series is exact to about 1e-4 */
+    *s = a * (1.0f - a2 / 6.0f * (1.0f - a2 / 20.0f * (1.0f - a2 / 42.0f * (1.0f - a2 / 72.0f))));
+    *c = 1.0f - a2 / 2.0f * (1.0f - a2 / 12.0f * (1.0f - a2 / 30.0f * (1.0f - a2 / 56.0f)));
+}
+
+/* turns the heading by a small angle (positive = left, away from the right row) */
+static void turn_heading(float a) {
+    float a2 = a * a;
+    float s = a * (1.0f - a2 / 6.0f + a2 * a2 / 120.0f), c = 1.0f - a2 / 2.0f + a2 * a2 / 24.0f;
+    float left_x = -mirror * dir[1], left_z = mirror * dir[0];
+    float x = dir[0] * c + left_x * s, z = dir[1] * c + left_z * s;
+    float length = root(x * x + z * z);
+    if (length > 0.5f) dir[0] = x / length, dir[1] = z / length;
 }
 
 static void fly(float dt) {
@@ -174,18 +232,39 @@ static void fly(float dt) {
     float turn = (float)(keyboard_held(KEYBOARD_HOLD_LEFT) - keyboard_held(KEYBOARD_HOLD_RIGHT));
     float ahead = (float)(keyboard_held(KEYBOARD_HOLD_FORWARD) - keyboard_held(KEYBOARD_HOLD_BACK));
     float climb = (float)(keyboard_held(KEYBOARD_HOLD_UP) - keyboard_held(KEYBOARD_HOLD_DOWN));
-    if (turn != 0.0f) {
-        /* left = minus the right row; small angle per update, so a short series is exact enough */
-        float a = turn * TURN * dt, a2 = a * a;
-        float s = a * (1.0f - a2 / 6.0f + a2 * a2 / 120.0f), c = 1.0f - a2 / 2.0f + a2 * a2 / 24.0f;
-        float left_x = -mirror * dir[1], left_z = mirror * dir[0];
-        float x = dir[0] * c + left_x * s, z = dir[1] * c + left_z * s;
-        float length = root(x * x + z * z);
-        if (length > 0.5f) dir[0] = x / length, dir[1] = z / length;
-    }
+    /* left = minus the right row; small angle per update, so a short series is exact enough */
+    if (turn != 0.0f) turn_heading(turn * TURN * dt);
     pos[0] += dir[0] * ahead * SPEED * boost * dt;
     pos[2] += dir[1] * ahead * SPEED * boost * dt;
     pos[1] += climb * CLIMB * boost * dt;
+}
+
+/* Freecam: arrow keys look (turn, pitch), W/S fly where the camera looks, A/D sideways,
+   Space/Ctrl up/down. The camera point moves; the car is put behind it. */
+static void fly_free(float dt) {
+    if (!(dt > 0.0f)) return;
+    if (dt > 0.1f) dt = 0.1f;
+    float boost = keyboard_held(KEYBOARD_HOLD_FAST) ? FAST : 1.0f;
+    float yaw = (float)(keyboard_held(KEYBOARD_HOLD_LOOK_LEFT) - keyboard_held(KEYBOARD_HOLD_LOOK_RIGHT));
+    float tilt = (float)(keyboard_held(KEYBOARD_HOLD_LOOK_UP) - keyboard_held(KEYBOARD_HOLD_LOOK_DOWN));
+    float ahead = (float)(keyboard_held(KEYBOARD_HOLD_FORWARD) - keyboard_held(KEYBOARD_HOLD_BACK));
+    float side = (float)(keyboard_held(KEYBOARD_HOLD_RIGHT) - keyboard_held(KEYBOARD_HOLD_LEFT));
+    float climb = (float)(keyboard_held(KEYBOARD_HOLD_UP) - keyboard_held(KEYBOARD_HOLD_DOWN));
+    if (yaw != 0.0f) turn_heading(yaw * FREE_LOOK * dt);
+    if (tilt != 0.0f) {
+        pitch += tilt * FREE_LOOK * dt;
+        if (pitch > FREE_PITCH_MAX) pitch = FREE_PITCH_MAX;
+        if (pitch < -FREE_PITCH_MAX) pitch = -FREE_PITCH_MAX;
+    }
+    sin_cos(pitch, &pitch_sin, &pitch_cos);
+    float f[3] = {pitch_cos * dir[0], pitch_sin, pitch_cos * dir[1]};
+    float r[3] = {mirror * dir[1], 0.0f, -mirror * dir[0]};
+    float u[3] = {-pitch_sin * dir[0], pitch_cos, -pitch_sin * dir[1]};
+    float step = FREE_SPEED * boost * dt;
+    for (unsigned i = 0; i < 3; ++i) cam[i] += (f[i] * ahead + r[i] * side) * step;
+    cam[1] += climb * FREE_CLIMB * boost * dt;
+    float behind = FREE_WHEEL_AHEAD + FREECAM_AHEAD;
+    for (unsigned i = 0; i < 3; ++i) pos[i] = cam[i] - f[i] * behind - u[i] * FREE_WHEEL_UP;
 }
 
 static void card(const char *german, const char *english) {
@@ -205,6 +284,18 @@ static void set_on(LONG value) {
         log_append("NOCLIP: the car update hook is not on.\r\n");
         return;
     }
+    LONG before = on;
+    if (before == MODE_FREECAM && value != MODE_FREECAM) {
+        /* the car back to where freecam started, held there a moment */
+        InterlockedExchange64(&park_until, (LONG64)(GetTickCount64() + FREE_PARK_MS));
+        cockpit_view_want_driver(0);
+    }
+    if (value == MODE_FREECAM) {
+        parked_body = NULL;
+        InterlockedExchange64(&park_until, 0);
+        driver_wait = GetTickCount64() + FREE_DRIVER_WAIT_MS;
+        cockpit_view_want_driver(1); /* the freecam is the driver camera, moved out of the car */
+    }
     body = NULL;
     InterlockedExchange(&on, value);
 }
@@ -219,44 +310,69 @@ static void handle_toggle(void) {
             /* like Nitro: a card when the session goes online (noclip locked) and back offline */
             if (online) {
                 if (on) set_on(0);
-                log_append("NOCLIP: online session - noclip locked.\r\n");
-                tinted("Noclip gesperrt\nOnline-Sitzung (FH2MP)", "Noclip locked\nOnline session (FH2MP)",
+                log_append("NOCLIP: online session - noclip and freecam locked.\r\n");
+                tinted("Noclip/Freecam gesperrt\nOnline-Sitzung (FH2MP)", "Noclip/freecam locked\nOnline session (FH2MP)",
                        NOTIFY_COLOR_ORANGE);
             } else {
-                log_append("NOCLIP: offline again - noclip available.\r\n");
-                tinted("Noclip wieder verf\xc3\xbcgbar\nOffline - Taste F6", "Noclip available again\nOffline - key F6",
-                       NOTIFY_COLOR_GREEN);
+                log_append("NOCLIP: offline again - noclip and freecam available.\r\n");
+                tinted("Noclip/Freecam wieder verf\xc3\xbcgbar\nOffline - Taste F6 / F7",
+                       "Noclip/freecam available again\nOffline - key F6 / F7", NOTIFY_COLOR_GREEN);
             }
         }
         online_known = 1;
     }
     if (on && online) { /* the first check already online */
         set_on(0);
-        log_append("NOCLIP: online session - noclip off.\r\n");
-        tinted("Noclip gesperrt\nOnline-Sitzung (FH2MP)", "Noclip locked\nOnline session (FH2MP)", NOTIFY_COLOR_ORANGE);
+        log_append("NOCLIP: online session - noclip / freecam off.\r\n");
+        tinted("Noclip/Freecam gesperrt\nOnline-Sitzung (FH2MP)", "Noclip/freecam locked\nOnline session (FH2MP)",
+               NOTIFY_COLOR_ORANGE);
     }
-    int held = keyboard_held(KEYBOARD_HOLD_NOCLIP);
-    int pressed = held && !key_held;
-    key_held = held;
-    if (!pressed) return;
-    if (!on && !game_simulation_running()) {
+    if (on == MODE_FREECAM && driver_wait && now >= driver_wait) {
+        driver_wait = 0;
+        if (!cockpit_view_driver_active()) {
+            log_append("NOCLIP: freecam - the driver camera did not come (camera change not taken).\r\n");
+            card("Freecam: bitte Cockpit-Kamera w\xc3\xa4hlen\n(Kamera wechseln, Tab)",
+                 "Freecam: please pick the cockpit camera\n(change camera, Tab)");
+        }
+    }
+    int held = keyboard_held(KEYBOARD_HOLD_NOCLIP), free_held = keyboard_held(KEYBOARD_HOLD_FREECAM);
+    int pressed = held && !key_held, free_pressed = free_held && !free_key_held;
+    key_held = held, free_key_held = free_held;
+    if (!pressed && !free_pressed) return;
+    LONG mode = pressed ? MODE_NOCLIP : MODE_FREECAM;
+    if (on) { /* either key ends what is on */
+        LONG was = on;
+        set_on(0);
+        log_append(was == MODE_FREECAM ? "NOCLIP: freecam off\r\n" : "NOCLIP: off\r\n");
+        if (was == MODE_FREECAM) card("Freecam aus\nAuto steht wieder am Startpunkt", "Freecam off\nCar back where it was");
+        else card("Noclip aus", "Noclip off");
+        return;
+    }
+    if (!game_simulation_running()) {
         log_append("NOCLIP: not now - the game is in a menu or loading.\r\n");
         return;
     }
     if (online) {
         log_append("NOCLIP: refused - online session.\r\n");
-        tinted("Noclip gesperrt\nNur offline (nicht in FH2MP)", "Noclip locked\nOffline only (not in FH2MP)",
-               NOTIFY_COLOR_ORANGE);
+        if (mode == MODE_FREECAM)
+            tinted("Freecam gesperrt\nNur offline (nicht in FH2MP)", "Freecam locked\nOffline only (not in FH2MP)",
+                   NOTIFY_COLOR_ORANGE);
+        else
+            tinted("Noclip gesperrt\nNur offline (nicht in FH2MP)", "Noclip locked\nOffline only (not in FH2MP)",
+                   NOTIFY_COLOR_ORANGE);
         return;
     }
-    set_on(!on);
-    log_append(on ? "NOCLIP: on\r\n" : "NOCLIP: off\r\n");
-    if (on) {
-        info_from = GetTickCount64() + INFO_DELAY_MS;
+    set_on(mode);
+    if (!on) return;
+    info_from = GetTickCount64() + INFO_DELAY_MS;
+    if (mode == MODE_FREECAM) {
+        log_append("NOCLIP: freecam on\r\n");
+        card("Freecam an\nPfeile schauen, W/S/A/D fliegen, Leertaste/Strg hoch/runter",
+             "Freecam on\nArrows look, W/S/A/D fly, Space/Ctrl up/down");
+    } else {
+        log_append("NOCLIP: on\r\n");
         card("Noclip an\nW/S fliegen, A/D drehen, Leertaste/Strg hoch/runter",
              "Noclip on\nW/S fly, A/D turn, Space/Ctrl up/down");
-    } else {
-        card("Noclip aus", "Noclip off");
     }
 }
 
@@ -284,12 +400,23 @@ void noclip_car_update(void *car, float dt, float frame_dt, unsigned frame) {
             card("Noclip geht nicht\nAuto nicht erkannt (Gripline.log)", "Noclip not working\nCar not recognised (Gripline.log)");
         }
         if (dynamics) {
-            fly(dt);
+            if (on == MODE_FREECAM) fly_free(dt);
+            else fly(dt);
             place(dynamics); /* the update starts from the flown place ... */
+        }
+    }
+    void *park = NULL;
+    if (!on && local && park_until) {
+        if (GetTickCount64() < (ULONGLONG)park_until && parked_body && parked_body == car_body(car)) {
+            park = parked_body;
+            put_back(park);
+        } else {
+            InterlockedExchange64(&park_until, 0);
         }
     }
     original(car, dt, frame_dt, frame);
     if (dynamics && on) place(dynamics); /* ... and what the game moved in it is taken back */
+    else if (park) put_back(park);
     else if (local && !on) sample_trip(car, dt);
 }
 
@@ -323,7 +450,8 @@ static void info_step(ULONGLONG now) {
     }
     if (now < info_from || now < info_next) return;
     info_next = now + INFO_EVERY_MS;
-    float p[3] = {pos[0], pos[1], pos[2]};
+    int free = on == MODE_FREECAM;
+    float p[3] = {free ? cam[0] : pos[0], free ? cam[1] : pos[1], free ? cam[2] : pos[2]};
     int kmh = 0;
     if (info_have && now > info_time) {
         float dx = p[0] - info_pos[0], dy = p[1] - info_pos[1], dz = p[2] - info_pos[2];
@@ -341,7 +469,7 @@ static void info_step(ULONGLONG now) {
     char text[96];
     size_t n = 0;
     text[0] = 0;
-    put_text(text, &n, "Noclip - ");
+    put_text(text, &n, free ? "Freecam - " : "Noclip - ");
     put_int(text, &n, imperial ? (int)(kmh / 1.609344f + 0.5f) : kmh);
     put_text(text, &n, imperial ? " mph\n" : " km/h\n");
     put_text(text, &n, de ? "H\xc3\xb6he " : "Height ");
@@ -385,5 +513,20 @@ __declspec(dllexport) int Fh2TestNoclipFly(unsigned char *game_image, void *dyna
     fly((float)dt_ms / 1000.0f);
     place(dynamics);
     return 1;
+}
+/* freecam flight without a body (tests/test_freecam.py): reset = start at the origin, heading +z;
+   out = position, camera, forward, up (3 floats each) */
+__declspec(dllexport) void Fh2TestFreecamStep(int reset, unsigned dt_ms, float *out) {
+    if (reset) {
+        on = MODE_FREECAM;
+        dir[0] = 0.0f, dir[1] = 1.0f, mirror = 1.0f;
+        pitch = 0.0f, pitch_sin = 0.0f, pitch_cos = 1.0f;
+        pos[0] = pos[1] = pos[2] = 0.0f;
+        cam[0] = 0.0f, cam[1] = FREE_WHEEL_UP, cam[2] = FREE_WHEEL_AHEAD + FREECAM_AHEAD;
+    }
+    fly_free((float)dt_ms / 1000.0f);
+    float f[3] = {pitch_cos * dir[0], pitch_sin, pitch_cos * dir[1]};
+    float u[3] = {-pitch_sin * dir[0], pitch_cos, -pitch_sin * dir[1]};
+    for (unsigned i = 0; i < 3; ++i) out[i] = pos[i], out[3 + i] = cam[i], out[6 + i] = f[i], out[9 + i] = u[i];
 }
 #endif
