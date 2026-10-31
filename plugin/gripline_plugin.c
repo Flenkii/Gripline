@@ -23,6 +23,7 @@
 #include "features/cockpit.h"
 #include "features/cockpit_view.h"
 #include "features/keyboard_pad.h"
+#include "features/key_menu.h"
 #include "features/mod_scan.h"
 #include "features/nitro_link.h"
 #include "features/notify.h"
@@ -483,6 +484,7 @@ static void start_features(void) {
     if (!keyboard_pad_late()) platform_log("keyboard: not active (off in FH2_Keyboard.ini, Mapper running, or no hook)");
     if (!notify_install_late()) platform_log("cards: could not hook the game picture");
     notify_show_deferred_call(start_card); /* the keys as bound now (the key menu can change them) */
+    notify_show_deferred_call(key_menu_start_card); /* own card: "Press F8 to change your keys" */
     InterlockedExchange(&started, 1);
     if (row_count) sync_rows();
     /* Extra Options mounts mods\Gripline\media; the game's steering angle follows once the files are there */

@@ -11,4 +11,6 @@
 /* Starts the menu's own thread (after the keyboard settings were loaded). */
 void key_menu_start(void);
 int key_menu_open(void);
+/* NotifyTextFn for notify_show_deferred_call: own start card naming the menu key */
+int key_menu_start_card(char *out, unsigned size);
 #endif

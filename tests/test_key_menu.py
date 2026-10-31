@@ -104,6 +104,10 @@ LEVEL_CLOSED, LEVEL_GROUPS, LEVEL_LIST, LEVEL_BINDING, LEVEL_CAPTURE = 0, 1, 2, 
 
 check(e.call('Fh2TestKeyMenuCover') == 43, 'jede der 43 Tasten steht genau einmal im Menue')
 check(tick() == LEVEL_CLOSED and panel() == 0, 'Menue anfangs zu')
+card = e.alloc(256)
+ok = e.call('Fh2TestKeyMenuStartCard', card, 256)
+card_text = bytes(e.mu.mem_read(card, 256)).split(b'\0')[0].decode('utf-8')
+check(ok == 1 and card_text == 'Press F8 to change your keys\nKey menu: arrows, Enter, Esc', f'eigene Startkarte: {card_text!r}')
 check(e.call('Fh2TestKeyboardBinding', 42, 0) == F8, 'KeyMenu = F8 (Standard)')
 
 press(F8)

@@ -549,6 +549,32 @@ static void key_menu_tick(ULONGLONG now) {
     }
 }
 
+/* start card of its own (plugin start): "Press F8 to change your keys" with the key bound now */
+int key_menu_start_card(char *out, unsigned size) {
+    int index = menu_key_index();
+    unsigned char vk[4] = {0};
+    if (index >= 0) keyboard_binding_vks((unsigned)index, vk);
+    if (!vk[0] || size < 64) return 0;
+    vk[1] = vk[2] = vk[3] = 0;
+    int german = game_language_is_german(keyboard_game_image());
+    wchar_t key[24], line[128];
+    keyboard_keys_text(vk, german, key, 24);
+    unsigned n = 0;
+    if (german) {
+        n = wcopy(line, n, 128, L"Tasten ändern: ");
+        n = wcopy(line, n, 128, key);
+        n = wcopy(line, n, 128, L" drücken\nTastenmenü mit Pfeilen, Enter und Esc");
+    } else {
+        n = wcopy(line, n, 128, L"Press ");
+        n = wcopy(line, n, 128, key);
+        n = wcopy(line, n, 128, L" to change your keys\nKey menu: arrows, Enter, Esc");
+    }
+    unsigned t = 0;
+    utf8(line, out, size, &t);
+    out[t] = 0;
+    return 1;
+}
+
 int key_menu_open(void) {
     return m.level != LEVEL_CLOSED;
 }
@@ -587,6 +613,9 @@ __declspec(dllexport) int Fh2TestKeyMenuTick(unsigned now_ms) {
     return m.level;
 }
 /* bindings in the menu's pages: count of distinct ones, -1 if one is listed twice or unknown */
+__declspec(dllexport) int Fh2TestKeyMenuStartCard(char *out, unsigned size) {
+    return key_menu_start_card(out, size);
+}
 __declspec(dllexport) int Fh2TestKeyMenuCover(void) {
     unsigned char seen[64] = {0};
     int n = 0;
