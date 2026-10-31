@@ -114,6 +114,7 @@ static DWORD state_hook(DWORD user, void *device, unsigned char *state) {
     static volatile LONG seen;
     if (!InterlockedExchange(&seen, 1)) log_append("COCKPIT VIEW: the game reads a controller through the camera hook.\r\n");
     int wheel = wheel_buttons_wheel_reads() != wheel_before;
+    if (!wheel) noclip_pad_input(user, state + 4); /* noclip / freecam on the controller */
     int input = wheel ? wheel_buttons_action_input(ACTION_SWITCH_CAMERA)
                       : controller_action_input(ACTION_SWITCH_CAMERA);
     if (input < 0 || input > 15 || input == 10 || input == 11) return result; /* 10/11 are triggers */

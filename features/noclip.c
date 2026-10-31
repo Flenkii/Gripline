@@ -93,6 +93,93 @@ int noclip_freecam_active(void) {
     return on == MODE_FREECAM;
 }
 
+/* ------------------------------------------------------------------ controller */
+
+/* XINPUT_GAMEPAD bits */
+#define XI_DPAD_UP 0x0001u
+#define XI_DPAD_DOWN 0x0002u
+#define XI_LS 0x0040u
+#define XI_A 0x1000u
+#define PAD_FRESH_MS 250u
+#define STICK_DEAD 0.24f
+#define TRIGGER_DEAD 0.12f
+
+/* the last reading of each controller (game input thread), used in the car update */
+static volatile struct {
+    float lx, ly, rx, ry, lt, rt;
+    LONG fast;
+    LONG64 tick;
+} pads[4];
+static unsigned short pad_buttons[4];
+static volatile LONG pad_request; /* MODE_* asked for with LS + D-pad, handled on the watch thread */
+
+static float stick(short value) {
+    float v = (float)value / 32767.0f, a = v < 0.0f ? -v : v;
+    if (a < STICK_DEAD) return 0.0f;
+    a = (a - STICK_DEAD) / (1.0f - STICK_DEAD);
+    if (a > 1.0f) a = 1.0f;
+    return v < 0.0f ? -a : a;
+}
+
+static float trigger(unsigned char value) {
+    float v = (float)value / 255.0f;
+    return v < TRIGGER_DEAD ? 0.0f : (v - TRIGGER_DEAD) / (1.0f - TRIGGER_DEAD);
+}
+
+void noclip_pad_input(unsigned user, unsigned char *gamepad) {
+    if (user >= 4 || !gamepad) return;
+    unsigned short buttons;
+    short axes[4];
+    memory_copy(&buttons, gamepad, sizeof(buttons));
+    memory_copy(axes, gamepad + 4, sizeof(axes));
+    unsigned short pressed = (unsigned short)(buttons & ~pad_buttons[user]);
+    pad_buttons[user] = buttons;
+    if (buttons & XI_LS) {
+        /* LS held + D-pad up = noclip, + D-pad down = freecam; the D-pad press stays away from the game */
+        if (pressed & XI_DPAD_UP) InterlockedExchange(&pad_request, MODE_NOCLIP);
+        if (pressed & XI_DPAD_DOWN) InterlockedExchange(&pad_request, MODE_FREECAM);
+        buttons &= (unsigned short)~(XI_DPAD_UP | XI_DPAD_DOWN);
+        memory_copy(gamepad, &buttons, sizeof(buttons));
+    }
+    pads[user].lx = stick(axes[0]), pads[user].ly = stick(axes[1]);
+    pads[user].rx = stick(axes[2]), pads[user].ry = stick(axes[3]);
+    pads[user].lt = trigger(gamepad[2]), pads[user].rt = trigger(gamepad[3]);
+    pads[user].fast = (buttons & XI_A) != 0;
+    pads[user].tick = (LONG64)GetTickCount64();
+    if (on == MODE_FREECAM) { /* the right stick looks for the freecam, not for the game's camera */
+        short zero[2] = {0, 0};
+        memory_copy(gamepad + 8, zero, sizeof(zero));
+    }
+}
+
+/* all controllers read lately: the strongest of each axis */
+typedef struct {
+    float lx, ly, rx, ry, lt, rt;
+    int fast;
+} PadAxes;
+
+static float stronger(float a, float b) {
+    return (b < 0.0f ? -b : b) > (a < 0.0f ? -a : a) ? b : a;
+}
+
+static PadAxes pad_axes(void) {
+    PadAxes p = {0};
+    ULONGLONG now = GetTickCount64();
+    for (unsigned i = 0; i < 4; ++i) {
+        LONG64 tick = pads[i].tick;
+        if (!tick || now - (ULONGLONG)tick > PAD_FRESH_MS) continue;
+        p.lx = stronger(p.lx, pads[i].lx), p.ly = stronger(p.ly, pads[i].ly);
+        p.rx = stronger(p.rx, pads[i].rx), p.ry = stronger(p.ry, pads[i].ry);
+        p.lt = stronger(p.lt, pads[i].lt), p.rt = stronger(p.rt, pads[i].rt);
+        p.fast |= pads[i].fast != 0;
+    }
+    return p;
+}
+
+static float limit1(float x) {
+    return x > 1.0f ? 1.0f : x < -1.0f ? -1.0f : x;
+}
+
 static int in_game(const void *address) {
     return (const unsigned char *)address >= game && (const unsigned char *)address < game + GAME_IMAGE_SIZE;
 }
@@ -228,10 +315,11 @@ static void turn_heading(float a) {
 static void fly(float dt) {
     if (!(dt > 0.0f)) return;
     if (dt > 0.1f) dt = 0.1f;
-    float boost = keyboard_held(KEYBOARD_HOLD_FAST) ? FAST : 1.0f;
-    float turn = (float)(keyboard_held(KEYBOARD_HOLD_LEFT) - keyboard_held(KEYBOARD_HOLD_RIGHT));
-    float ahead = (float)(keyboard_held(KEYBOARD_HOLD_FORWARD) - keyboard_held(KEYBOARD_HOLD_BACK));
-    float climb = (float)(keyboard_held(KEYBOARD_HOLD_UP) - keyboard_held(KEYBOARD_HOLD_DOWN));
+    PadAxes pad = pad_axes(); /* left stick: forward/back and turn, RT/LT up/down, A faster */
+    float boost = keyboard_held(KEYBOARD_HOLD_FAST) || pad.fast ? FAST : 1.0f;
+    float turn = limit1((float)(keyboard_held(KEYBOARD_HOLD_LEFT) - keyboard_held(KEYBOARD_HOLD_RIGHT)) - pad.lx);
+    float ahead = limit1((float)(keyboard_held(KEYBOARD_HOLD_FORWARD) - keyboard_held(KEYBOARD_HOLD_BACK)) + pad.ly);
+    float climb = limit1((float)(keyboard_held(KEYBOARD_HOLD_UP) - keyboard_held(KEYBOARD_HOLD_DOWN)) + pad.rt - pad.lt);
     /* left = minus the right row; small angle per update, so a short series is exact enough */
     if (turn != 0.0f) turn_heading(turn * TURN * dt);
     pos[0] += dir[0] * ahead * SPEED * boost * dt;
@@ -244,12 +332,13 @@ static void fly(float dt) {
 static void fly_free(float dt) {
     if (!(dt > 0.0f)) return;
     if (dt > 0.1f) dt = 0.1f;
-    float boost = keyboard_held(KEYBOARD_HOLD_FAST) ? FAST : 1.0f;
-    float yaw = (float)(keyboard_held(KEYBOARD_HOLD_LOOK_LEFT) - keyboard_held(KEYBOARD_HOLD_LOOK_RIGHT));
-    float tilt = (float)(keyboard_held(KEYBOARD_HOLD_LOOK_UP) - keyboard_held(KEYBOARD_HOLD_LOOK_DOWN));
-    float ahead = (float)(keyboard_held(KEYBOARD_HOLD_FORWARD) - keyboard_held(KEYBOARD_HOLD_BACK));
-    float side = (float)(keyboard_held(KEYBOARD_HOLD_RIGHT) - keyboard_held(KEYBOARD_HOLD_LEFT));
-    float climb = (float)(keyboard_held(KEYBOARD_HOLD_UP) - keyboard_held(KEYBOARD_HOLD_DOWN));
+    PadAxes pad = pad_axes(); /* left stick flies, right stick looks, RT/LT up/down, A faster */
+    float boost = keyboard_held(KEYBOARD_HOLD_FAST) || pad.fast ? FAST : 1.0f;
+    float yaw = limit1((float)(keyboard_held(KEYBOARD_HOLD_LOOK_LEFT) - keyboard_held(KEYBOARD_HOLD_LOOK_RIGHT)) - pad.rx);
+    float tilt = limit1((float)(keyboard_held(KEYBOARD_HOLD_LOOK_UP) - keyboard_held(KEYBOARD_HOLD_LOOK_DOWN)) + pad.ry);
+    float ahead = limit1((float)(keyboard_held(KEYBOARD_HOLD_FORWARD) - keyboard_held(KEYBOARD_HOLD_BACK)) + pad.ly);
+    float side = limit1((float)(keyboard_held(KEYBOARD_HOLD_RIGHT) - keyboard_held(KEYBOARD_HOLD_LEFT)) + pad.lx);
+    float climb = limit1((float)(keyboard_held(KEYBOARD_HOLD_UP) - keyboard_held(KEYBOARD_HOLD_DOWN)) + pad.rt - pad.lt);
     if (yaw != 0.0f) turn_heading(yaw * FREE_LOOK * dt);
     if (tilt != 0.0f) {
         pitch += tilt * FREE_LOOK * dt;
@@ -338,6 +427,9 @@ static void handle_toggle(void) {
     int held = keyboard_held(KEYBOARD_HOLD_NOCLIP), free_held = keyboard_held(KEYBOARD_HOLD_FREECAM);
     int pressed = held && !key_held, free_pressed = free_held && !free_key_held;
     key_held = held, free_key_held = free_held;
+    LONG request = InterlockedExchange(&pad_request, 0); /* controller: LS + D-pad up / down */
+    if (request == MODE_NOCLIP) pressed = 1;
+    if (request == MODE_FREECAM) free_pressed = 1;
     if (!pressed && !free_pressed) return;
     LONG mode = pressed ? MODE_NOCLIP : MODE_FREECAM;
     if (on) { /* either key ends what is on */
@@ -367,12 +459,12 @@ static void handle_toggle(void) {
     info_from = GetTickCount64() + INFO_DELAY_MS;
     if (mode == MODE_FREECAM) {
         log_append("NOCLIP: freecam on\r\n");
-        card("Freecam an\nPfeile schauen, W/S/A/D fliegen, Leertaste/Strg hoch/runter",
-             "Freecam on\nArrows look, W/S/A/D fly, Space/Ctrl up/down");
+        card("Freecam an\nPfeile/rechter Stick schauen, WASD/linker Stick fliegen, Leertaste/Strg/RT/LT hoch/runter",
+             "Freecam on\nArrows/right stick look, WASD/left stick fly, Space/Ctrl/RT/LT up/down");
     } else {
         log_append("NOCLIP: on\r\n");
-        card("Noclip an\nW/S fliegen, A/D drehen, Leertaste/Strg hoch/runter",
-             "Noclip on\nW/S fly, A/D turn, Space/Ctrl up/down");
+        card("Noclip an\nW/S/linker Stick fliegen, A/D drehen, Leertaste/Strg/RT/LT hoch/runter",
+             "Noclip on\nW/S/left stick fly, A/D turn, Space/Ctrl/RT/LT up/down");
     }
 }
 
@@ -513,6 +605,11 @@ __declspec(dllexport) int Fh2TestNoclipFly(unsigned char *game_image, void *dyna
     fly((float)dt_ms / 1000.0f);
     place(dynamics);
     return 1;
+}
+/* one controller reading (XINPUT_GAMEPAD, 12 bytes) as the game's controller hook gives it */
+__declspec(dllexport) unsigned Fh2TestNoclipPad(unsigned user, unsigned char *gamepad) {
+    noclip_pad_input(user, gamepad);
+    return (unsigned)InterlockedExchange(&pad_request, 0);
 }
 /* freecam flight without a body (tests/test_freecam.py): reset = start at the origin, heading +z;
    out = position, camera, forward, up (3 floats each) */

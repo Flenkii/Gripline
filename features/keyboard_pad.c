@@ -577,9 +577,13 @@ static void keyboard_reading(PadReading *r) {
     kb.last = now;
     int focused = game_has_focus();
     double steer_target = 0.0, nav_x = 0.0, nav_y = 0.0;
+    int flying = noclip_active() && driving_now();
     for (unsigned i = 0; i < ARRAY_COUNT(bindings); ++i) {
         const Binding *b = &bindings[i];
         int pressed = focused && b->vk[0] && down(b);
+        /* noclip / freecam: the driving keys only fly (noclip.c), so they do not look like a controller there */
+        if (flying && (b->kind == KIND_ACTION || b->kind == KIND_STEER || (b->kind == KIND_NAV && noclip_freecam_active())))
+            pressed = 0; /* noclip keeps the arrows for the game's camera, freecam looks with them itself */
         switch (b->kind) {
             case KIND_STEER:
                 if (pressed) steer_target += b->target ? 1.0 : -1.0;
@@ -622,7 +626,6 @@ static void keyboard_reading(PadReading *r) {
     }
     kb.steer = approach(kb.steer, clamp1(steer_target), dt, (int)values[KEY_SETTING_STEER],
                         (int)values[KEY_SETTING_RETURN]);
-    if (noclip_freecam_active() && driving_now()) nav_x = nav_y = 0.0; /* freecam looks with the arrows itself */
     if ((nav_x != 0.0 || nav_y != 0.0) && driving_now()) {
         /* camera: right stick, like looking around with the gamepad */
         if (nav_x != 0.0 && r->rx == 0.0) r->rx = clamp1(nav_x);

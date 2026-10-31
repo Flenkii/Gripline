@@ -35,6 +35,12 @@ void noclip_car_update(void *car, float dt, float frame_dt, unsigned frame);
 enum { MODE_NOCLIP = 1, MODE_FREECAM = 2 };
 #define FREECAM_AHEAD 3.5f /* metres in front of the steering wheel: past the bumper of a long car */
 
+/* Controller (cockpit_view.c's controller hook, every reading of a gamepad, not of a wheel;
+   gamepad = XINPUT_GAMEPAD): left stick click held + D-pad up = noclip on/off, + D-pad down =
+   freecam on/off. Flying: left stick (noclip: forward/back and turn; freecam: fly and sideways),
+   right stick looks (freecam; kept from the game's camera then), RT/LT up/down, A held faster. */
+void noclip_pad_input(unsigned user, unsigned char *gamepad);
+
 /* 1 while noclip or freecam is on. */
 int noclip_active(void);
 /* 1 while freecam is on (cockpit_view.c moves the camera, keyboard_pad.c keeps the arrows). */

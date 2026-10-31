@@ -83,5 +83,45 @@ c0 = c
 p, c, f, u = step(500)
 check(near([c[i] - c0[i] for i in range(3)], [x * 16.0 for x in f], 2e-3), 'LShift: 4x schneller')
 
+
+# controller (XINPUT_GAMEPAD as the game's controller hook gives it)
+pad = e.alloc(16)
+def gp(buttons=0, lt=0, rt=0, lx=0, ly=0, rx=0, ry=0, user=0):
+    e.mu.mem_write(pad, struct.pack('<HBBhhhh', buttons, lt, rt, lx, ly, rx, ry))
+    return e.call('Fh2TestNoclipPad', user, pad), struct.unpack('<HBBhhhh', bytes(e.mu.mem_read(pad, 12)))
+keys.clear()
+check(gp()[0] == 0 and gp(0x40)[0] == 0, 'Controller: nur LS gedrueckt fragt nichts an')
+req, st = gp(0x41)
+check(req == 1 and st[0] == 0x40, f'LS + Steuerkreuz hoch = Noclip, Steuerkreuz bleibt vom Spiel weg: {req} {st[0]:#x}')
+check(gp(0x41)[0] == 0, 'gehalten: nur einmal')
+gp(0x40)
+req, st = gp(0x42)
+check(req == 2 and st[0] == 0x40, f'LS + Steuerkreuz runter = Freecam: {req}')
+check(gp(0x02)[1][0] == 0x02 and gp(0x01)[0] == 0, 'Steuerkreuz ohne LS geht normal ans Spiel')
+p, c, f, u = step(16, reset=1)
+req, st = gp(rx=20000, ry=-15000)
+check(st[5] == 0 and st[6] == 0, f'Freecam: rechter Stick geht nicht an die Spiel-Kamera: {st}')
+c0 = c
+p, c, f, u = step(500)
+check(near(c, c0) and f[1] < -0.1 and f[0] > 0.05,
+      f'rechter Stick rechts/unten: schaut nach rechts und runter, Kamera bleibt: {f}')
+gp(ly=32767)
+c0 = c
+p, c, f, u = step(500)
+check(near([c[i] - c0[i] for i in range(3)], [x * 4.0 for x in f]), f'linker Stick voll vor: fliegt wie W: {c}')
+gp(ly=4000)
+c0 = c
+p, c, f, u = step(500)
+check(near(c, c0), 'Stick in der Totzone: bleibt stehen')
+gp(rt=255)
+c0 = c
+p, c, f, u = step(1000)
+check(abs(c[1] - c0[1] - 5.0) < 1e-3, f'RT: 5 m/s hoch: {c[1] - c0[1]}')
+gp(lt=255, buttons=0x1000)
+c0 = c
+p, c, f, u = step(500)
+check(abs(c[1] - c0[1] + 10.0) < 1e-3, f'LT + A: 4x schneller runter: {c[1] - c0[1]}')
+gp()
+
 print('ALLE TESTS OK (%d Pruefungen)' % checks[0] if not fails else '%d FEHLER' % len(fails))
 sys.exit(1 if fails else 0)
