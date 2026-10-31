@@ -40,7 +40,7 @@ check(names[0] == 'Gripline_Report.txt', f'summary first: {names}')
 for name, data in content.items():
     check(name in names and z.read(name) == data, 'packed unchanged: ' + name)
 summary = z.read('Gripline_Report.txt').decode()
-check(summary.startswith('Gripline V6.4 problem report') and 'NitroSystem' in summary and 'Gripline,' not in summary,
+check(summary.startswith('Gripline V7 Test problem report') and 'NitroSystem' in summary and 'Gripline,' not in summary,
       'summary: version and mods: ' + summary.replace('\r\n', ' | '))
 check(z.infolist()[0].date_time == (2026, 10, 25, 14, 30, 10), f'date and time: {z.infolist()[0].date_time}')
 e.call('Fh2TestReport', d)
