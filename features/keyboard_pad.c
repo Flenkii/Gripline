@@ -441,7 +441,7 @@ static void settings_load(void) {
         if (v < setting_min[id] || v > setting_max[id]) v = setting_defaults[id];
         values[id] = v;
     }
-    /* V7: mouse steering like Euro Truck Simulator 2 (0 = off, 1..100 = sensitivity) */
+    /* V7: mouse steering (0 = off, 1..100 = sensitivity) */
     mouse_sensitivity = read_int(L"MouseSteering", 0);
     if (mouse_sensitivity < 0 || mouse_sensitivity > 100) mouse_sensitivity = 0;
     if (mouse_sensitivity) log_append_value("KEYBOARD: mouse steering on, sensitivity ", mouse_sensitivity);
@@ -619,7 +619,7 @@ static void apply_input(PadReading *r, int input, double amount) {
 
 /* ------------------------------------------------------------------ mouse steering (V7) */
 
-/* Like Euro Truck Simulator 2: moving the mouse left or right turns the wheel and it stays where you
+/* Moving the mouse left or right turns the wheel and it stays where you
    left it (no spring back; optional: back to straight after MouseCenter seconds of rest).
    The movement comes from DirectInput (the mouse's own counts, see below) - not from the cursor
    position, which Azimuth holds in place itself.
@@ -791,9 +791,8 @@ static double mouse_steer(int focused, double dt) {
         mouse.set_pos((int)centre.x, (int)centre.y);
     } else {
         LONG dx = di_dx();
-        /* Medium (40): about 3000 mouse counts (10 cm at 800 dpi) from full left to full right */
         if (dx) {
-            mouse.target = clamp1(mouse.target + (double)dx * (double)mouse_sensitivity / 60000.0);
+            mouse.target = clamp1(mouse.target + (double)dx * (double)mouse_sensitivity / 200000.0); /* Medium (45): about 15 cm at 1600 dpi from lock to lock */
             mouse.moved = GetTickCount64();
         }
         if (mouse.get_pos(&now) && (now.x != centre.x || now.y != centre.y)) mouse.set_pos((int)centre.x, (int)centre.y);
@@ -891,6 +890,13 @@ static void keyboard_reading(PadReading *r) {
         nav_x = nav_y = 0.0;
     }
     double ms = mouse_steer(focused, dt);
+    /* curve: fine around the middle, full lock still at the end (|x|^1.6) */
+    if (ms != 0.0) {
+        double a = ms < 0.0 ? -ms : ms, c = a * a;
+        double r = a > 0.0 ? c / (a * 0.6 + 0.4 * 1.0) : 0.0; /* about a^1.6 without a maths library */
+        if (r > 1.0) r = 1.0;
+        ms = ms < 0.0 ? -r : r;
+    }
     /* the game ignores the inner part of the stick (Marvin's test: nothing until about 140 of 450 degrees),
        so mouse steering starts right behind that dead zone: the first mouse movement already turns the car */
     if (ms > 0.003) ms = MOUSE_DEAD_ZONE + (1.0 - MOUSE_DEAD_ZONE) * ms;

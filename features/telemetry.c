@@ -43,11 +43,11 @@ int telemetry_show(void) {
 }
 
 static const wchar_t *const item_german[TELEMETRY_SHOW_COUNT] = {
-    L"Tempo", L"Grip / Rutschwinkel", L"Querkraft", L"Bremsen / Beschleunigen", L"Drehrate",
-    L"Steigung", L"0-100-Zeit", L"Höchsttempo", L"Bestwerte (Querkraft, Drift)"};
+    L"Tempo", L"Grip / Rutschwinkel", L"Querkraft", L"Bremsen / Gas", L"Drehrate",
+    L"Steigung", L"0-100-Zeit", L"Höchsttempo", L"Bestwerte"};
 static const wchar_t *const item_english[TELEMETRY_SHOW_COUNT] = {
-    L"Speed", L"Grip / slip angle", L"Side force", L"Braking / accelerating", L"Turn rate",
-    L"Slope", L"0-60 time", L"Top speed", L"Best values (side force, drift)"};
+    L"Speed", L"Grip / slip angle", L"Side force", L"Brake / throttle", L"Turn rate",
+    L"Slope", L"0-60 time", L"Top speed", L"Best values"};
 
 const wchar_t *telemetry_item_name(unsigned item, int german) {
     return item < TELEMETRY_SHOW_COUNT ? (german ? item_german[item] : item_english[item]) : L"";

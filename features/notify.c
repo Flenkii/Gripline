@@ -923,7 +923,7 @@ static int draw_panel_v7(const wchar_t *title, const NotifyPanelRow *rows, unsig
                 s >= 1.5f ? 2 : 1);
     for (unsigned i = 0; i < count; ++i) {
         int y = first_row + (int)i * l->panel_row;
-        RECT left_clip = {tx, y, kx - l->pad / 2, y + l->panel_row};
+        RECT left_clip = {tx, y, rows[i].keys[0] ? kx - l->pad / 2 : right - l->pad, y + l->panel_row}; /* no value: the label may use the whole row */
         int style = rows[i].style;
         COLORREF label_color = RGB(205, 212, 224), keys_color = RGB(tone[1][0], tone[1][1], tone[1][2]);
         if (style == NOTIFY_ROW_SELECTED) {
@@ -1185,7 +1185,7 @@ static int draw_panel_classic(const wchar_t *title, const NotifyPanelRow *rows, 
     gdi.ExtTextOutW(dc, tx, (int)(28 * s), ETO_CLIPPED, &clip, title, (UINT)text_width_chars(title), NULL);
     for (unsigned i = 0; i < count; ++i) {
         int y = l->panel_header + (int)i * l->panel_row;
-        RECT left = {tx, y, kx - l->pad / 2, y + l->panel_row};
+        RECT left = {tx, y, rows[i].keys[0] ? kx - l->pad / 2 : w - l->pad, y + l->panel_row};
         RECT right = {kx, y, w - l->pad, y + l->panel_row};
         int style = rows[i].style;
         COLORREF label_color = RGB(200, 207, 218), keys_color = RGB(tone[1][0], tone[1][1], tone[1][2]);

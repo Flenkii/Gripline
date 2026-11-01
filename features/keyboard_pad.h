@@ -78,7 +78,7 @@ size_t keyboard_start_keys(char *out, size_t capacity); /* start card line */
 /* game action -> controller input of the active controller layout (wheel_buttons.c) */
 int controller_action_input(unsigned action);
 int wheel_buttons_install(unsigned char *game_image);
-/* Mouse steering like ETS2 (V7): FH2_Keyboard.ini [Keyboard] MouseSteering, 0 = off, 1..100 sensitivity */
+/* Mouse steering (V7): FH2_Keyboard.ini [Keyboard] MouseSteering, 0 = off, 1..100 sensitivity */
 int keyboard_mouse_steering(void);
 void keyboard_set_mouse_steering(int sensitivity);
 /* [Keyboard] MouseCenter: seconds until the wheel turns back straight when the mouse rests, 0 = never */

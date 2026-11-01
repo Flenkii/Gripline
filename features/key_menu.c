@@ -25,10 +25,10 @@ enum { LEVEL_CLOSED, LEVEL_GROUPS, LEVEL_LIST, LEVEL_BINDING, LEVEL_CAPTURE, LEV
 enum { TOP_STYLE = 100, TOP_RESET = 101, TOP_MOUSE = 102, TOP_TELEMETRY = 103 };
 
 /* mouse steering choices: FH2_Keyboard.ini MouseSteering values */
-#define MOUSE_CHOICES 5
-static const int mouse_values[MOUSE_CHOICES] = {0, 20, 40, 65, 90};
-static const wchar_t *const mouse_german[MOUSE_CHOICES] = {L"Aus", L"Sanft", L"Mittel", L"Schnell", L"Sehr schnell"};
-static const wchar_t *const mouse_english[MOUSE_CHOICES] = {L"Off", L"Gentle", L"Medium", L"Fast", L"Very fast"};
+#define MOUSE_CHOICES 6
+static const int mouse_values[MOUSE_CHOICES] = {0, 10, 25, 45, 70, 100};
+static const wchar_t *const mouse_german[MOUSE_CHOICES] = {L"Aus", L"Sehr sanft", L"Sanft", L"Mittel", L"Schnell", L"Sehr schnell"};
+static const wchar_t *const mouse_english[MOUSE_CHOICES] = {L"Off", L"Very gentle", L"Gentle", L"Medium", L"Fast", L"Very fast"};
 /* back to the middle when the mouse rests: FH2_Keyboard.ini MouseCenter seconds (actions CENTER_FIRST + i) */
 #define CENTER_FIRST 10
 #define CENTER_CHOICES 5
@@ -467,16 +467,14 @@ static void build_page(wchar_t *title) {
             break;
         case LEVEL_MOUSE:
             wcopy(title, 0, 64, tr(L"Maus-Lenkung", L"Mouse steering"));
-            row_add(tr(L"Lenken mit der Maus wie in ETS2", L"Steer with the mouse like ETS2"), L"", NOTIFY_ROW_INFO, -1);
+            row_add(tr(L"Empfindlichkeit", L"Sensitivity"), L"", NOTIFY_ROW_INFO, -1);
             for (int i = 0; i < MOUSE_CHOICES; ++i)
                 row_add(tr(mouse_german[i], mouse_english[i]), i == mouse_choice() ? tr(L"✓ aktiv", L"✓ active") : L"", 0, i);
-            row_add(tr(L"Totzone überspringen", L"Skip dead zone"), tr(L"ab wann das Auto lenkt", L"where the car starts to steer"),
-                    NOTIFY_ROW_INFO, -1);
+            row_add(tr(L"Totzone überspringen", L"Skip dead zone"), L"", NOTIFY_ROW_INFO, -1);
             for (int i = 0; i < DEAD_CHOICES; ++i)
                 row_add(dead_names[i], i == dead_choice() ? tr(L"✓ aktiv", L"✓ active") : (i == 3 ? tr(L"Standard", L"default") : L""), 0,
                         DEAD_FIRST + i);
-            row_add(tr(L"Lenkrad automatisch gerade", L"Wheel back to straight"), tr(L"wenn die Maus ruht", L"when the mouse rests"),
-                    NOTIFY_ROW_INFO, -1);
+            row_add(tr(L"Zur Mitte, wenn Maus ruht", L"Centre when mouse rests"), L"", NOTIFY_ROW_INFO, -1);
             for (int i = 0; i < CENTER_CHOICES; ++i)
                 row_add(tr(center_german[i], center_english[i]), i == center_choice() ? tr(L"✓ aktiv", L"✓ active") : L"", 0,
                         CENTER_FIRST + i);
