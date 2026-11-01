@@ -23,6 +23,8 @@ enum {
     RIG_GRIP_CARD_COLOR,                 /* CardColor          0..7, notify.h NOTIFY_COLOR_* */
     RIG_GRIP_SPEED_CAMERAS,              /* SpeedCameras       0/1, next game start (V7) */
     RIG_GRIP_CAR_LABELS,                 /* CarLabels          0/1, next game start (V7) */
+    RIG_GRIP_EVENT_ICONS,                /* EventIcons         0/1, next game start (V7) */
+    RIG_GRIP_TELEMETRY,                  /* Telemetry          0/1, live card while driving (V7) */
     RIG_GRIP_END,
     RIG_TRAFFIC_PRESET = RIG_GRIP_END,   /* traffic preset: not stored, derived from level + rush hour */
     RIG_GRIP_REPORT,                     /* problem report: an action (On = write Gripline_Report.zip), not stored */
@@ -63,7 +65,7 @@ void rig_settings_start(const wchar_t *settings_directory);
 /* [Gripline] values read from Gripline.ini at the game start */
 void rig_settings_gripline(int notifications, int steering_animation, int view_forward, int view_up, int card_color);
 /* [Gripline] SpeedCameras / CarLabels read at the game start (V7) */
-void rig_settings_world(int speed_cameras, int car_labels);
+void rig_settings_world(int speed_cameras, int car_labels, int telemetry, int event_icons);
 /* game image for the language of the confirmation cards (a card names every change made in the menu) */
 void rig_settings_set_game(unsigned char *game_image);
 void rig_settings_flush(void);

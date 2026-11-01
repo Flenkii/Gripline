@@ -24,6 +24,7 @@ PLUGIN_SOURCES = [
     "features/traffic_tunables.c",
     "features/traffic_files.c",
     "features/world_files.c",
+    "features/telemetry.c",
     "features/ini_edit.c",
     "features/ini_migrate.c",
     "features/rig_settings.c",

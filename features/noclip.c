@@ -18,6 +18,7 @@
 #include "game_units.h"
 #include "game_language.h"
 #include "trip.h"
+#include "telemetry.h"
 #include "wheel_watch.h"
 #include "cockpit_view.h"
 
@@ -477,7 +478,13 @@ static void sample_trip(void *car, float dt) {
     get(dynamics, &state);
     _Alignas(16) float v[4];
     _mm_store_ps(v, state.velocity);
-    if (float_is_finite(v[0]) && float_is_finite(v[1]) && float_is_finite(v[2])) trip_sample(dt, v);
+    if (!(float_is_finite(v[0]) && float_is_finite(v[1]) && float_is_finite(v[2]))) return;
+    trip_sample(dt, v);
+    _Alignas(16) float r[4], f[4];
+    _mm_store_ps(r, state.right);
+    _mm_store_ps(f, state.forward);
+    if (float_is_finite(r[0]) && float_is_finite(r[2]) && float_is_finite(f[0]) && float_is_finite(f[2]))
+        telemetry_sample(dt, v, r, f);
 }
 
 void noclip_car_update(void *car, float dt, float frame_dt, unsigned frame) {
@@ -579,6 +586,7 @@ static DWORD WINAPI watch_thread(LPVOID unused) {
         ULONGLONG now = GetTickCount64();
         info_step(now);
         trip_step(now);
+        telemetry_step(now);
         wheel_watch_step(game, now);
         Sleep(30);
     }
@@ -589,6 +597,7 @@ void noclip_start(unsigned char *game_image, void *original_update, NoclipHookFn
     game = game_image;
     switch_hook = hook_switch;
     trip_start(game_image);
+    telemetry_start(game_image);
     /* on for the whole session: noclip and the trip summary both follow the own car */
     hooked = switch_hook && switch_hook(1);
     if (!hooked) log_append("NOCLIP: the car update hook could not be switched on - noclip and trip card off.\r\n");

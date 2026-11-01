@@ -8,6 +8,10 @@
  *   Car labels off     media\GameTunableSettings.zip GameTunableSettings.ini HUD\CarLabelMaxDistance 110
  *                      (and CarLabelMaxFadeDistance) is how near a car must be for its name label;
  *                      0 = never shown.
+ *   Event icons off    EntityModel.zip Templates/templates_races.xml and templates_locations.xml: every
+ *                      HUDStatusARActivationProviderComponent (the race / event symbols standing on the
+ *                      road in free roam) draws on HudID "ar_hud"; Gripline points them at the game's own
+ *                      "debug_hud", which is never shown. Checkpoints in races (ARCheckpoint) stay.
  * The game files are never changed. Option back on = Gripline deletes its copy. Read once by the game:
  * applies after a restart. */
 #include "gripline.h"
@@ -25,6 +29,47 @@ static const char empty_cameras[] =
     "    <entity_group id=\"speed_zones\">\r\n"
     "    </entity_group>\r\n"
     "</entity_group>\r\n";
+
+static const char *const icon_files[] = {"Templates/templates_races.xml", "Templates/templates_locations.xml"};
+
+static const char *find(const char *from, const char *end, const char *what) {
+    size_t len = 0;
+    while (what[len]) ++len;
+    for (const char *p = from; p + len <= end; ++p)
+        if (memory_equal(p, what, len)) return p;
+    return NULL;
+}
+
+/* HUDStatusARActivationProviderComponent ... value="ar_hud" -> value="debug_hud"; NULL when nothing changed */
+static char *icons_off(const char *in, uint32_t size, size_t *out_length, int *changed) {
+    static const char component[] = "type=\"HUDStatusARActivationProviderComponent\"";
+    static const char from[] = "value=\"ar_hud\"", to[] = "value=\"debug_hud\"";
+    char *out = (char *)HeapAlloc(GetProcessHeap(), 0, (SIZE_T)size + 64 * 4);
+    if (!out) return NULL;
+    const char *end = in + size, *p = in;
+    size_t n = 0;
+    *changed = 0;
+    for (;;) {
+        const char *c = find(p, end, component);
+        const char *close = c ? find(c, end, "</component>") : NULL;
+        const char *v = close ? find(c, close, from) : NULL;
+        if (!v || *changed >= 64) break;
+        memory_copy(out + n, p, (size_t)(v - p));
+        n += (size_t)(v - p);
+        memory_copy(out + n, to, sizeof(to) - 1);
+        n += sizeof(to) - 1;
+        p = v + sizeof(from) - 1;
+        ++*changed;
+    }
+    memory_copy(out + n, p, (size_t)(end - p));
+    n += (size_t)(end - p);
+    *out_length = n;
+    if (!*changed) {
+        HeapFree(GetProcessHeap(), 0, out);
+        return NULL;
+    }
+    return out;
+}
 
 static const char *const camera_files[] = {"speed_cameras.xml", "speed_cameras_island.xml"};
 
@@ -99,7 +144,7 @@ static char *labels_off(const char *in, uint32_t size, size_t *out_length, int *
     return out;
 }
 
-void world_files_start(const wchar_t *mount_dir, int speed_cameras, int car_labels) {
+void world_files_start(const wchar_t *mount_dir, int speed_cameras, int car_labels, int event_icons) {
     const wchar_t *root = gripline_output_root();
     if (!root || !root[0]) {
         if (!speed_cameras || !car_labels) log_append("WORLD: no media folder - speed cameras / car labels stay original.\r\n");
@@ -113,6 +158,27 @@ void world_files_start(const wchar_t *mount_dir, int speed_cameras, int car_labe
         if (!speed_cameras)
             log_append_value("WORLD: speed cameras off (empty speed camera files written): ", (int)placed);
 
+        if (event_icons) {
+            for (unsigned i = 0; i < ARRAY_COUNT(icon_files); ++i) place(root, "EntityModel/", icon_files[i], NULL, 0, 0);
+        } else {
+            static wchar_t zip[PATH_CAPACITY];
+            int total = 0;
+            /* like the traffic files: the old More Traffic script keeps the original zip next to it */
+            if (mount_dir && path_join(zip, mount_dir, L"media\\EntityModel.zip.moretraffic-original") &&
+                GetFileAttributesW(zip) == INVALID_FILE_ATTRIBUTES)
+                path_join(zip, mount_dir, L"media\\EntityModel.zip");
+            for (unsigned i = 0; mount_dir && i < ARRAY_COUNT(icon_files); ++i) {
+                uint32_t size = 0;
+                unsigned char *data = gripline_zip_extract(zip, icon_files[i], &size);
+                size_t length = 0;
+                int changed = 0;
+                char *out = data ? icons_off((const char *)data, size, &length, &changed) : NULL;
+                if (out && place(root, "EntityModel/", icon_files[i], out, length, 1)) total += changed;
+                if (out) HeapFree(GetProcessHeap(), 0, out);
+                if (data) gripline_zip_free(data);
+            }
+            log_append_value("WORLD: event icons on the road off (activation symbols moved to the debug HUD): ", total);
+        }
         if (car_labels) {
             place(root, "GameTunableSettings/", "GameTunableSettings.ini", NULL, 0, 0);
         } else {

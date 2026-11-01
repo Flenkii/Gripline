@@ -126,7 +126,7 @@ check(os.path.isdir(os.path.join(root, 'mods', 'Gripline', 'media')), 'mods\\Gri
 
 print('Mods page rows:')
 rows = seen['rows']
-check(len(rows) == 11, '%d rows (keyboard, traffic, cockpit, Gripline)' % len(rows))
+check(len(rows) == 15, '%d rows (keyboard, traffic, cockpit, Gripline)' % len(rows))
 check(not any(w in r['label'] for r in rows for w in ('Wheel', 'Weather', 'Time of Day', 'Profile')),
       'no wheel, weather, time of day or profile rows (Azimuth / Extra Options do those)')
 keys = [r['key'] for r in rows]

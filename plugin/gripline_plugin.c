@@ -200,7 +200,7 @@ static void describe(unsigned row) {
 static int needs_restart(unsigned id) {
     return id == RIG_KEY_ENABLED || id == RIG_GRIP_STEERING || id == RIG_TRAFFIC_LEVEL ||
            id == RIG_TRAFFIC_ALL_DAY || id == RIG_TRAFFIC_PRESET || id == RIG_GRIP_SPEED_CAMERAS ||
-           id == RIG_GRIP_CAR_LABELS;
+           id == RIG_GRIP_CAR_LABELS || id == RIG_GRIP_EVENT_ICONS;
 }
 
 static int row_of(const char *key) {
@@ -474,7 +474,7 @@ static void start_features(void) {
     noclip_install();
     gripline_set_output_root(media_dir);
     traffic_files_start(mount_dir, options.traffic_level);
-    world_files_start(mount_dir, options.speed_cameras, options.car_labels);
+    world_files_start(mount_dir, options.speed_cameras, options.car_labels, options.event_icons);
     cockpit_start(game, mount_dir, options.steering_animation, azimuth_rotation(), 10 /* linear */);
     notify_set_enabled(options.notifications);
     notify_set_style(options.card_style);
@@ -485,7 +485,7 @@ static void start_features(void) {
     rig_settings_set_game(game);
     rig_settings_gripline(options.notifications, options.steering_animation, options.cockpit_view_forward,
                           options.cockpit_view_up, options.card_color);
-    rig_settings_world(options.speed_cameras, options.car_labels);
+    rig_settings_world(options.speed_cameras, options.car_labels, options.telemetry, options.event_icons);
     rig_settings_start(directory);
     /* the platform may have loaded Gripline after Azimuth set up gamepads and swap chain */
     if (!keyboard_pad_late()) platform_log("keyboard: not active (off in FH2_Keyboard.ini, Mapper running, or no hook)");

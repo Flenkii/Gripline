@@ -25,6 +25,6 @@ typedef struct {
     int card_color;                            /* [Gripline] 0 blue (original) .. 7, notify.h */
     int card_style; /* NOTIFY_STYLE_*: 0 Classic, 1 Enhanced, 2 Overdrive (V7) */
     int update_check; /* [Gripline] UpdateCheck: ask GitHub for a newer release at start (V7) */
-    int speed_cameras, car_labels; /* [Gripline] SpeedCameras / CarLabels: 0 = off (V7, world_files.c) */
+    int speed_cameras, car_labels, telemetry, event_icons; /* [Gripline] SpeedCameras / CarLabels: 0 = off (V7, world_files.c) */
 } ModOptions;
 #endif

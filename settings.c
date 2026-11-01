@@ -16,6 +16,8 @@ const SettingDefinition setting_definitions[] = {
     SETTING("Gripline", "UpdateCheck", update_check, SETTING_BOOLEAN),
     SETTING("Gripline", "SpeedCameras", speed_cameras, SETTING_BOOLEAN),
     SETTING("Gripline", "CarLabels", car_labels, SETTING_BOOLEAN),
+    SETTING("Gripline", "Telemetry", telemetry, SETTING_BOOLEAN),
+    SETTING("Gripline", "EventIcons", event_icons, SETTING_BOOLEAN),
 };
 
 const size_t setting_count = ARRAY_COUNT(setting_definitions);
@@ -33,6 +35,7 @@ void settings_defaults(ModOptions *options) {
         .update_check = 1,
         .speed_cameras = 1,
         .car_labels = 1,
+        .event_icons = 1,
     };
 }
 

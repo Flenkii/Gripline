@@ -8,6 +8,7 @@
  * Saving happens on a background thread shortly after the last change, by editing only the
  * affected lines (comments and every other key stay untouched). When the launcher changes
  * one of the files while the game runs, the new values are picked up within a second. */
+#include "telemetry.h"
 #include "rig_settings.h"
 #include "ini_edit.h"
 #include "report.h"
@@ -46,6 +47,8 @@ static const RigSettingInfo infos[RIG_SETTING_COUNT] = {
     [RIG_GRIP_CARD_COLOR] = {"EoGripCardColor", "CardColor", 0, NOTIFY_COLOR_COUNT - 1, RIG_KIND_COLOR, 0, 1, NULL},
     [RIG_GRIP_SPEED_CAMERAS] = {"EoGripSpeedCameras", "SpeedCameras", 0, 1, RIG_KIND_TOGGLE, 0, 1, NULL},
     [RIG_GRIP_CAR_LABELS] = {"EoGripCarLabels", "CarLabels", 0, 1, RIG_KIND_TOGGLE, 0, 1, NULL},
+    [RIG_GRIP_EVENT_ICONS] = {"EoGripEventIcons", "EventIcons", 0, 1, RIG_KIND_TOGGLE, 0, 1, NULL},
+    [RIG_GRIP_TELEMETRY] = {"EoGripTelemetry", "Telemetry", 0, 1, RIG_KIND_TOGGLE, 0, 1, NULL},
 };
 
 /* Rows of the menu. */
@@ -53,7 +56,7 @@ static const unsigned char order[] = {
     RIG_KEY_ENABLED,     RIG_KEY_STEER,     RIG_KEY_RETURN,     RIG_KEY_PEDAL,
     RIG_TRAFFIC_ALL_DAY, /* preset and amount: the Traffic page (plugin), with names instead of numbers */
     RIG_GRIP_STEERING,   RIG_GRIP_VIEW_FORWARD, RIG_GRIP_VIEW_UP, RIG_GRIP_NOTIFICATIONS, RIG_GRIP_CARD_COLOR,
-    RIG_GRIP_SPEED_CAMERAS, RIG_GRIP_CAR_LABELS,
+    RIG_GRIP_SPEED_CAMERAS, RIG_GRIP_CAR_LABELS, RIG_GRIP_EVENT_ICONS, RIG_GRIP_TELEMETRY,
     RIG_GRIP_REPORT,
 };
 _Static_assert(sizeof(order) <= RIG_SETTING_COUNT, "menu rows");
@@ -162,6 +165,12 @@ static const RigText german[RIG_SETTING_COUNT] = {
     [RIG_GRIP_CAR_LABELS] = {"Welt: Namen über Autos",
                              "Aus = keine Namen mehr über Drivataren und anderen Autos, wenn du nah dran bist. "
                              "Nach einem Neustart des Spiels."},
+    [RIG_GRIP_EVENT_ICONS] = {"Welt: Event-Symbole auf der Straße",
+                              "Aus = keine Rennen- und Event-Symbole mehr auf der Straße in der offenen Welt. "
+                              "Events starten weiter über die Karte. Nach einem Neustart des Spiels."},
+    [RIG_GRIP_TELEMETRY] = {"Gripline: Live-Telemetrie",
+                            "Karte oben rechts beim Fahren: Tempo, Grip (haftet / rutscht / Drift mit "
+                            "Rutschwinkel) und g-Kräfte quer und längs. Wirkt sofort."},
     [RIG_GRIP_REPORT] = {"Gripline: Fehlerbericht erstellen",
                          "Auf An stellen: packt Logs und Einstellungen in Gripline_Report.zip "
                          "neben azimuth.exe. Die Datei bei einem Problem auf GitHub unter Issues "
@@ -220,6 +229,12 @@ static const RigText english[RIG_SETTING_COUNT] = {
     [RIG_GRIP_CAR_LABELS] = {"World: Names Above Cars",
                              "Off = no more name labels above Drivatars and other cars when you get "
                              "close. Restart the game to apply."},
+    [RIG_GRIP_EVENT_ICONS] = {"World: Event Symbols on the Road",
+                              "Off = no more race and event symbols standing on the road in free roam. "
+                              "Events still start from the map. Restart the game to apply."},
+    [RIG_GRIP_TELEMETRY] = {"Gripline: Live Telemetry",
+                            "Card at the top right while driving: speed, grip (gripping / sliding / "
+                            "drifting with slip angle) and side and length g-forces. Applies immediately."},
     [RIG_GRIP_REPORT] = {"Gripline: Create Problem Report",
                          "Set to On: packs logs and settings into Gripline_Report.zip next to "
                          "azimuth.exe. Attach that file to a GitHub issue when something goes "
@@ -290,9 +305,12 @@ static int is_gripline(unsigned id) {
     return id >= RIG_GRIP_FIRST && id < RIG_GRIP_END;
 }
 
-static volatile LONG gripline_values[RIG_GRIP_END - RIG_GRIP_FIRST] = {1, 0, 35, -5, NOTIFY_COLOR_BLUE, 1, 1};
+static volatile LONG gripline_values[RIG_GRIP_END - RIG_GRIP_FIRST] = {1, 0, 35, -5, NOTIFY_COLOR_BLUE, 1, 1, 1, 0};
 
-void rig_settings_world(int speed_cameras, int car_labels) {
+void rig_settings_world(int speed_cameras, int car_labels, int telemetry, int event_icons) {
+    gripline_values[RIG_GRIP_EVENT_ICONS - RIG_GRIP_FIRST] = event_icons ? 1 : 0;
+    gripline_values[RIG_GRIP_TELEMETRY - RIG_GRIP_FIRST] = telemetry ? 1 : 0;
+    telemetry_set_enabled(telemetry);
     gripline_values[RIG_GRIP_SPEED_CAMERAS - RIG_GRIP_FIRST] = speed_cameras ? 1 : 0;
     gripline_values[RIG_GRIP_CAR_LABELS - RIG_GRIP_FIRST] = car_labels ? 1 : 0;
 }
@@ -354,6 +372,8 @@ static void forward(unsigned id, int value) {
         } else if (id == RIG_GRIP_VIEW_FORWARD || id == RIG_GRIP_VIEW_UP) {
             cockpit_view_set_offset((int)gripline_values[RIG_GRIP_VIEW_FORWARD - RIG_GRIP_FIRST],
                                     (int)gripline_values[RIG_GRIP_VIEW_UP - RIG_GRIP_FIRST]);
+        } else if (id == RIG_GRIP_TELEMETRY) {
+            telemetry_set_enabled(value);
         } else if (id == RIG_GRIP_CARD_COLOR) {
             notify_set_color(value);
         }
@@ -401,7 +421,7 @@ static void confirm_text(unsigned id, int value, char *text, size_t capacity) {
         default: card_append(text, capacity, &used, ini_format_int(value, number)); break;
     }
     if (id == RIG_KEY_ENABLED || id == RIG_GRIP_STEERING || id == RIG_TRAFFIC_LEVEL || id == RIG_TRAFFIC_PRESET ||
-        id == RIG_GRIP_SPEED_CAMERAS || id == RIG_GRIP_CAR_LABELS)
+        id == RIG_GRIP_SPEED_CAMERAS || id == RIG_GRIP_CAR_LABELS || id == RIG_GRIP_EVENT_ICONS)
         card_append(text, capacity, &used, de ? " - nach Neustart" : " - after a restart");
 }
 
