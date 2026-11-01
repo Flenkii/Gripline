@@ -678,7 +678,10 @@ static void open_menu(void) {
     log_append("KEYMENU: opened\r\n");
 }
 
+static volatile LONG pad_swallow; /* after closing: the controller's buttons stay away from the game until released */
+
 static void close_menu(void) {
+    InterlockedExchange(&pad_swallow, 1);
     m.level = LEVEL_CLOSED;
     keyboard_block_input(0);
     keyboard_key_list_restore();
@@ -934,6 +937,51 @@ static void captured(unsigned char key) {
 
 /* ------------------------------------------------------------------ input */
 
+/* controller (key_menu_pad_input): bits below, written on the game's input thread */
+#define PAD_UP 1
+#define PAD_DOWN 2
+#define PAD_A 4
+#define PAD_B 8
+static volatile LONG pad_now, pad_toggle;
+static volatile LONG64 pad_tick;
+static LONG pad_was;
+
+int key_menu_pad_input(unsigned char *gamepad) {
+    if (!gamepad) return 0;
+    unsigned short buttons;
+    short ly;
+    memory_copy(&buttons, gamepad, sizeof(buttons));
+    memory_copy(&ly, gamepad + 6, sizeof(ly));
+    static unsigned short before;
+    unsigned short pressed = (unsigned short)(buttons & ~before);
+    before = buttons;
+    if ((buttons & 0x0040u) && (pressed & 0x0008u)) InterlockedExchange(&pad_toggle, 1); /* LS + D-pad right */
+    LONG bits = 0;
+    if ((buttons & 0x0001u) || ly > 20000) bits |= PAD_UP;
+    if ((buttons & 0x0002u) || ly < -20000) bits |= PAD_DOWN;
+    if (buttons & 0x1000u) bits |= PAD_A;
+    if (buttons & 0x2000u) bits |= PAD_B;
+    InterlockedExchange(&pad_now, bits);
+    InterlockedExchange64(&pad_tick, (LONG64)GetTickCount64());
+    int take = m.level != LEVEL_CLOSED || (buttons & 0x0040u);
+    if (m.level != LEVEL_CLOSED) {
+        unsigned char zero[12] = {0}; /* buttons, triggers, sticks: nothing for the game */
+        memory_copy(gamepad, zero, sizeof(zero));
+    } else if (pad_swallow) {
+        if (buttons & 0x300fu) { /* A, B, D-pad still held from the menu */
+            buttons &= (unsigned short)~0x300fu;
+            memory_copy(gamepad, &buttons, sizeof(buttons));
+        } else {
+            InterlockedExchange(&pad_swallow, 0);
+        }
+    } else if (buttons & 0x0040u) {
+        buttons &= (unsigned short)~0x0008u; /* the D-pad right of the combination stays away from the game */
+        memory_copy(gamepad, &buttons, sizeof(buttons));
+        take = 0;
+    }
+    return take;
+}
+
 static int edge(unsigned char vk, int now_down) {
     int was = m.held[vk];
     m.held[vk] = (unsigned char)now_down;
@@ -949,11 +997,18 @@ static void key_menu_tick(ULONGLONG now) {
     int menu_pressed = menu_down && !m.menu_key_held;
     m.menu_key_held = menu_down;
 
+    /* the controller counts like the arrow keys, Enter and Esc */
+    LONG pad = GetTickCount64() - (ULONGLONG)pad_tick < 300 ? pad_now : 0;
+    LONG pad_pressed = pad & ~pad_was;
+    pad_was = pad;
+    if (InterlockedExchange(&pad_toggle, 0)) menu_pressed = 1;
     int up = keyboard_key_down(VK_UP_), down = keyboard_key_down(VK_DOWN_);
-    int enter = edge(VK_ENTER_, keyboard_key_down(VK_ENTER_));
-    int esc = edge(VK_ESC_, keyboard_key_down(VK_ESC_));
+    int enter = edge(VK_ENTER_, keyboard_key_down(VK_ENTER_)) || (pad_pressed & PAD_A);
+    int esc = edge(VK_ESC_, keyboard_key_down(VK_ESC_)) || (pad_pressed & PAD_B);
     int bs = edge(VK_BACK_, keyboard_key_down(VK_BACK_));
-    int up_pressed = edge(VK_UP_, up), down_pressed = edge(VK_DOWN_, down);
+    int up_pressed = edge(VK_UP_, up) || (pad_pressed & PAD_UP), down_pressed = edge(VK_DOWN_, down) || (pad_pressed & PAD_DOWN);
+    up = up || (pad & PAD_UP);
+    down = down || (pad & PAD_DOWN);
 
     if (m.level == LEVEL_CLOSED) {
         if (menu_pressed && !notify_enabled()) {
@@ -1061,6 +1116,17 @@ void key_menu_start(void) {
 }
 
 #ifdef FH2_TWEAKS_TEST
+__declspec(dllexport) int Fh2TestKeyMenuPad(unsigned buttons, int ly) {
+    unsigned char pad[12] = {0};
+    unsigned short b = (unsigned short)buttons;
+    short y = (short)ly;
+    memory_copy(pad, &b, 2);
+    memory_copy(pad + 6, &y, 2);
+    int taken = key_menu_pad_input(pad);
+    unsigned short after;
+    memory_copy(&after, pad, 2);
+    return taken | (after ? 0 : 2); /* 2: nothing left for the game */
+}
 __declspec(dllexport) int Fh2TestKeyMenuTick(unsigned now_ms) {
     if (!ini_path[0]) set_path();
     key_menu_tick(now_ms);

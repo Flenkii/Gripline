@@ -22,6 +22,7 @@
 #include "logbook.h"
 #include "cruise.h"
 #include "records.h"
+#include "key_menu.h"
 #include "wheel_watch.h"
 #include "cockpit_view.h"
 
@@ -132,6 +133,10 @@ static float trigger(unsigned char value) {
 
 void noclip_pad_input(unsigned user, unsigned char *gamepad) {
     if (user >= 4 || !gamepad) return;
+    if (key_menu_pad_input(gamepad)) { /* the Gripline menu has the controller */
+        pads[user].tick = 0;
+        return;
+    }
     unsigned short buttons;
     short axes[4];
     memory_copy(&buttons, gamepad, sizeof(buttons));

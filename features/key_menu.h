@@ -11,6 +11,10 @@
 /* Starts the menu's own thread (after the keyboard settings were loaded). */
 void key_menu_start(void);
 int key_menu_open(void);
+/* Controller (noclip.c's gamepad hook, game input thread; gamepad = XINPUT_GAMEPAD): left stick click
+   held + D-pad right opens/closes the menu; inside D-pad or left stick up/down move, A chooses, B goes
+   back. Returns 1 while the menu has the controller: the reading is then emptied for the game. */
+int key_menu_pad_input(unsigned char *gamepad);
 /* NotifyTextFn for notify_show_deferred_call: own start card naming the menu key */
 int key_menu_start_card(char *out, unsigned size);
 #endif

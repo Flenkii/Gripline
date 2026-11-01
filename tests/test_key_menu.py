@@ -305,6 +305,30 @@ check('Set start here' in rows and 'Set finish here' in rows and 'Delete sprint'
 press(ESC); press(ESC)
 check(tick() == LEVEL_CLOSED, 'Rekorde/Sprint: zu')
 
+# controller: LS + D-pad right opens, D-pad down moves, A chooses, B back / close
+def pad(buttons, ly=0):
+    r = e.call('Fh2TestKeyMenuPad', buttons, ly & 0xffffffff)
+    tick()
+    return r
+pad(0)
+pad(0x0040); pad(0x0040 | 0x0008); pad(0)
+check(tick() == LEVEL_GROUPS, 'Controller: LS + Steuerkreuz rechts oeffnet')
+check(pad(0x0002) & 1, 'Controller im Menue: Spiel bekommt nichts')
+pad(0)
+check(selected() == 'Camera & view', selected())
+pad(0, -30000); pad(0)
+check(selected() == 'Gripline features', f'linker Stick runter: {selected()}')
+pad(0x1000); pad(0)
+check(tick() == LEVEL_LIST, 'A waehlt')
+pad(0x2000); pad(0)
+check(tick() == LEVEL_GROUPS, 'B zurueck')
+pad(0x2000)
+check(tick() == LEVEL_CLOSED, 'B auf der ersten Seite schliesst')
+check(pad(0x2000) & 2, 'B noch gehalten: Spiel bekommt es nicht')
+pad(0)
+check(not (pad(0x2000) & 2), 'danach wieder normal')
+pad(0)
+
 def pretty(stem):
     b = e.alloc(128)
     e.call('Fh2TestLogbookPretty', e.put_bytes(stem.encode() + b'\0'), b, 48)
