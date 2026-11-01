@@ -707,6 +707,7 @@ static struct {
 } mouse;
 
 #define MOUSE_CARD_TAG 0x3a05e000u
+#define MOUSE_DEAD_ZONE 0.30 /* the game's stick dead zone, skipped by the mouse */
 #define MOUSE_WHEEL_DEGREES 900.0 /* the card shows degrees of a 900 degree wheel (like the G920) */
 
 static void mouse_put(char *out, size_t *n, size_t cap, const char *text) {
@@ -878,7 +879,13 @@ static void keyboard_reading(PadReading *r) {
         if (nav_y != 0.0 && r->ry == 0.0) r->ry = clamp1(nav_y);
         nav_x = nav_y = 0.0;
     }
-    double lx = clamp1(kb.steer + nav_x + mouse_steer(focused, dt));
+    double ms = mouse_steer(focused, dt);
+    /* the game ignores the inner part of the stick (Marvin's test: nothing until about 140 of 450 degrees),
+       so mouse steering starts right behind that dead zone: the first mouse movement already turns the car */
+    if (ms > 0.003) ms = MOUSE_DEAD_ZONE + (1.0 - MOUSE_DEAD_ZONE) * ms;
+    else if (ms < -0.003) ms = -MOUSE_DEAD_ZONE + (1.0 - MOUSE_DEAD_ZONE) * ms;
+    else ms = 0.0;
+    double lx = clamp1(kb.steer + nav_x + ms);
     if (lx != 0.0) r->lx = lx;
     if (nav_y != 0.0) r->ly = clamp1(nav_y);
 }
