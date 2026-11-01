@@ -7,7 +7,7 @@
 #include "telemetry.h"
 
 #define TELEMETRY_TAG 0x7e1e0000u
-#define TELEMETRY_EVERY_MS 200u
+#define TELEMETRY_EVERY_MS 30u
 
 static unsigned char *game;
 static volatile LONG enabled;

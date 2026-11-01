@@ -792,7 +792,7 @@ static double mouse_steer(int focused, double dt) {
     if (mouse.out > -0.002 && mouse.out < 0.002 && mouse.target == 0.0) mouse.out = 0.0;
     /* live card while the mouse steers, while the wheel turns back and a moment after */
     if (mouse.active && tick >= mouse.card_next && (tick - mouse.moved < 1500 || returning)) {
-        mouse.card_next = tick + 100;
+        mouse.card_next = tick + 33;
         mouse_card(mouse.out, returning);
     }
     return mouse.out;

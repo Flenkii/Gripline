@@ -300,6 +300,7 @@ typedef COLORREF(WINAPI *SetTextColorFn)(HDC, COLORREF);
 typedef int(WINAPI *SetBkModeFn)(HDC, int);
 typedef BOOL(WINAPI *ExtTextOutWFn)(HDC, int, int, UINT, const RECT *, LPCWSTR, UINT, const INT *);
 typedef BOOL(WINAPI *GdiFlushFn)(void);
+typedef BOOL(WINAPI *GetTextExtentPoint32WFn)(HDC, LPCWSTR, int, SIZE *);
 
 static struct {
     CreateCompatibleDCFn CreateCompatibleDC;
@@ -312,6 +313,7 @@ static struct {
     SetBkModeFn SetBkMode;
     ExtTextOutWFn ExtTextOutW;
     GdiFlushFn GdiFlush;
+    GetTextExtentPoint32WFn GetTextExtentPoint32W; /* optional: key caps in the panel */
 } gdi;
 
 static int gdi_ready(void) {
@@ -329,6 +331,7 @@ static int gdi_ready(void) {
     LOAD(SetBkMode);
     LOAD(ExtTextOutW);
     LOAD(GdiFlush);
+    LOAD(GetTextExtentPoint32W);
 #undef LOAD
     return gdi.CreateCompatibleDC && gdi.CreateDIBSection && gdi.SelectObject && gdi.DeleteObject &&
            gdi.DeleteDC && gdi.CreateFontW && gdi.SetTextColor && gdi.SetBkMode && gdi.ExtTextOutW &&
@@ -807,6 +810,34 @@ static int draw_cards_v7(const Card *list, unsigned count, const Layout *l, unsi
     return 1;
 }
 
+/* key cap / badge behind a short value in the panel: a rounded pill in the card colour with a light rim */
+static int is_bar_text(const wchar_t *t) {
+    for (; *t; ++t)
+        if (*t == 0x25a0 || *t == 0x25a1) return 1;
+    return 0;
+}
+
+static void paint_pill(unsigned char *px, int w, int x0, int y0, int pw, int ph, const unsigned char accent[3], float fill,
+                       float rim) {
+    int r = ph / 2;
+    for (int y = 0; y < ph; ++y) {
+        unsigned char *row = px + (size_t)(y0 + y) * w * 4;
+        for (int x = 0; x < pw; ++x) {
+            float c = card_coverage(x, y, pw, ph, r);
+            if (c <= 0.0f) continue;
+            /* rim: the outer pixel ring, brighter at the top */
+            float inner = card_coverage(x - 1, y - 1, pw - 2, ph - 2, r - 1 > 1 ? r - 1 : 1);
+            float edge = (x == 0 || y == 0 || x == pw - 1 || y == ph - 1) ? 1.0f : 1.0f - inner;
+            float top = 1.0f - (float)y / (float)ph;
+            unsigned char *p = row + (size_t)(x0 + x) * 4;
+            for (int k = 0; k < 3; ++k) {
+                unsigned char body = mix8(p[k], mix8(accent[k], 255, 0.10f * top), fill * c);
+                p[k] = mix8(body, mix8(accent[k], 255, 0.55f), rim * edge * c * (0.55f + 0.45f * top));
+            }
+        }
+    }
+}
+
 /* height in pixels of the key list panel with `count` rows (with its glow margin) */
 static int panel_pixels(const Layout *l, unsigned count) {
     return l->panel_header + (int)count * l->panel_row + l->pad + 2 * l->glow;
@@ -893,7 +924,6 @@ static int draw_panel_v7(const wchar_t *title, const NotifyPanelRow *rows, unsig
     for (unsigned i = 0; i < count; ++i) {
         int y = first_row + (int)i * l->panel_row;
         RECT left_clip = {tx, y, kx - l->pad / 2, y + l->panel_row};
-        RECT right_clip = {kx, y, right - l->pad, y + l->panel_row};
         int style = rows[i].style;
         COLORREF label_color = RGB(205, 212, 224), keys_color = RGB(tone[1][0], tone[1][1], tone[1][2]);
         if (style == NOTIFY_ROW_SELECTED) {
@@ -918,12 +948,42 @@ static int draw_panel_v7(const wchar_t *title, const NotifyPanelRow *rows, unsig
         } else if (style == NOTIFY_ROW_HINT) {
             label_color = keys_color = RGB(135, 143, 156);
         }
+        int key_x = kx;
+        if (style == NOTIFY_ROW_HINT) { /* hint line: a thin rule above it */
+            gdi.GdiFlush();
+            unsigned char *row = px + (size_t)(y - (int)(2 * s)) * w * 4;
+            for (int x = left + l->pad / 2; x < right - l->pad / 2; ++x)
+                for (int k = 0; k < 3; ++k) row[x * 4 + k] = mix8(row[x * 4 + k], 255, 0.10f);
+        } else if (rows[i].keys[0] && !is_bar_text(rows[i].keys) && text_width_chars(rows[i].keys) <= 16) {
+            /* short values (keys, choices) sit on a key cap */
+            gdi.SelectObject(dc, keys);
+            SIZE size = {0, 0};
+            int n = text_width_chars(rows[i].keys);
+            if (!gdi.GetTextExtentPoint32W || !gdi.GetTextExtentPoint32W(dc, rows[i].keys, n, &size) || size.cx <= 0)
+                size.cx = (LONG)((float)n * 8.5f * s);
+            int pad = (int)(7 * s), ph = l->panel_row - (int)(3 * s);
+            int pw = (int)size.cx + 2 * pad, px0 = kx - pad / 2;
+            if (px0 + pw > right - l->pad) pw = right - l->pad - px0;
+            gdi.GdiFlush();
+            if (pw > ph) paint_pill(px, w, px0, y + (l->panel_row - ph) / 2, pw, ph, accent,
+                                    style == NOTIFY_ROW_SELECTED ? 0.10f : style == NOTIFY_ROW_INFO ? 0.14f : 0.26f,
+                                    style == NOTIFY_ROW_SELECTED ? 0.70f : 0.45f);
+            key_x = px0 + pad;
+            if (style != NOTIFY_ROW_SELECTED && style != NOTIFY_ROW_INFO) keys_color = RGB(240, 244, 250);
+        }
         gdi.SelectObject(dc, style == NOTIFY_ROW_HINT ? small_bold : label);
         gdi.SetTextColor(dc, label_color);
         gdi.ExtTextOutW(dc, tx, y, ETO_CLIPPED, &left_clip, rows[i].label, (UINT)text_width_chars(rows[i].label), NULL);
         gdi.SelectObject(dc, style == NOTIFY_ROW_HINT ? small_bold : keys);
         gdi.SetTextColor(dc, keys_color);
-        gdi.ExtTextOutW(dc, kx, y, ETO_CLIPPED, &right_clip, rows[i].keys, (UINT)text_width_chars(rows[i].keys), NULL);
+        RECT key_clip = {key_x, y, right - l->pad, y + l->panel_row};
+        gdi.ExtTextOutW(dc, key_x, y, ETO_CLIPPED, &key_clip, rows[i].keys, (UINT)text_width_chars(rows[i].keys), NULL);
+        if (style == NOTIFY_ROW_SELECTED) { /* chevron at the end of the chosen row */
+            RECT end_clip = {right - l->pad - (int)(12 * s), y, right - l->pad / 2, y + l->panel_row};
+            gdi.SelectObject(dc, keys);
+            gdi.SetTextColor(dc, RGB(255, 255, 255));
+            gdi.ExtTextOutW(dc, end_clip.left, y, ETO_CLIPPED, &end_clip, L"\x203a", 1, NULL);
+        }
     }
     gdi.SelectObject(dc, old_font);
     gdi.GdiFlush();
