@@ -610,69 +610,84 @@ static void apply_input(PadReading *r, int input, double amount) {
 
 /* Like Euro Truck Simulator 2: moving the mouse left or right turns the wheel and it stays where you
    left it (no spring back; optional: back to straight after MouseCenter seconds of rest).
-   The movement comes from Raw Input (the mouse's own counts, like games read it), on an own thread
-   with a message-only window - not from the cursor position, which the game holds in place itself.
+   The movement comes from DirectInput (the mouse's own counts, see below) - not from the cursor
+   position, which Azimuth holds in place itself.
    Only while driving with the game window in front; the cursor is parked in the middle of the window
    then so a click cannot land outside. In menus and the pause menu the wheel goes back to the middle. */
-typedef ATOM(WINAPI *RegisterClassFn)(const WNDCLASSW *);
-typedef HWND(WINAPI *CreateWindowFn)(DWORD, LPCWSTR, LPCWSTR, DWORD, int, int, int, int, HWND, HMENU, HINSTANCE, LPVOID);
-typedef LRESULT(WINAPI *DefWindowProcFn)(HWND, UINT, WPARAM, LPARAM);
-typedef BOOL(WINAPI *GetMessageFn)(MSG *, HWND, UINT, UINT);
-typedef LRESULT(WINAPI *DispatchMessageFn)(const MSG *);
-typedef BOOL(WINAPI *RegisterRawFn)(const RAWINPUTDEVICE *, UINT, UINT);
-typedef UINT(WINAPI *GetRawDataFn)(HRAWINPUT, UINT, LPVOID, PUINT, UINT);
+/* DirectInput mouse, non-exclusive and in the background: Azimuth reads the mouse with DirectInput
+   itself (which takes the process's Raw Input registration and holds the cursor), so Gripline asks
+   DirectInput as well - several DirectInput devices share one process without taking anything away.
+   dinput8.dll is loaded at run time (no new import). */
+typedef struct { const GUID *guid; DWORD offset, type, flags; } DiObjectFormat;
+typedef struct { DWORD size, object_size, flags, data_size, count; DiObjectFormat *objects; } DiDataFormat;
+typedef struct { LONG x, y, z; BYTE buttons[4]; } DiMouseState;
+typedef HRESULT(WINAPI *DirectInput8CreateFn)(HINSTANCE, DWORD, const GUID *, void **, void *);
+typedef HRESULT(WINAPI *DiCreateDeviceFn)(void *, const GUID *, void **, void *);
+typedef HRESULT(WINAPI *DiDeviceFn)(void *);
+typedef HRESULT(WINAPI *DiStateFn)(void *, DWORD, void *);
+typedef HRESULT(WINAPI *DiFormatFn)(void *, const DiDataFormat *);
+typedef HRESULT(WINAPI *DiCoopFn)(void *, HWND, DWORD);
+
+static const GUID IID_DirectInput8W = {0xbf798031, 0x483a, 0x4da2, {0xaa, 0x99, 0x5d, 0x64, 0xed, 0x36, 0x97, 0x00}};
+static const GUID GUID_SysMouse_ = {0x6f1d2b60, 0xd5a0, 0x11cf, {0xbf, 0xc7, 0x44, 0x45, 0x53, 0x54, 0x00, 0x00}};
+static const GUID GUID_XAxis_ = {0xa36d02e0, 0xc9f3, 0x11cf, {0xbf, 0xc7, 0x44, 0x45, 0x53, 0x54, 0x00, 0x00}};
+static const GUID GUID_YAxis_ = {0xa36d02e1, 0xc9f3, 0x11cf, {0xbf, 0xc7, 0x44, 0x45, 0x53, 0x54, 0x00, 0x00}};
+static const GUID GUID_ZAxis_ = {0xa36d02e2, 0xc9f3, 0x11cf, {0xbf, 0xc7, 0x44, 0x45, 0x53, 0x54, 0x00, 0x00}};
+#define DIDFT_AXIS_ANY 0x00ffff03u     /* DIDFT_AXIS | DIDFT_ANYINSTANCE */
+#define DIDFT_BUTTON_ANY 0x00ffff0cu   /* DIDFT_BUTTON | DIDFT_ANYINSTANCE */
+#define DIDFT_OPTIONAL_ 0x80000000u
+static DiObjectFormat mouse_objects[] = {
+    {&GUID_XAxis_, 0, DIDFT_AXIS_ANY, 0},
+    {&GUID_YAxis_, 4, DIDFT_AXIS_ANY, 0},
+    {&GUID_ZAxis_, 8, DIDFT_AXIS_ANY | DIDFT_OPTIONAL_, 0},
+    {NULL, 12, DIDFT_BUTTON_ANY, 0},
+    {NULL, 13, DIDFT_BUTTON_ANY, 0},
+    {NULL, 14, DIDFT_BUTTON_ANY | DIDFT_OPTIONAL_, 0},
+    {NULL, 15, DIDFT_BUTTON_ANY | DIDFT_OPTIONAL_, 0},
+};
+static const DiDataFormat mouse_format = {sizeof(DiDataFormat), sizeof(DiObjectFormat), 2 /* DIDF_RELAXIS */,
+                                         sizeof(DiMouseState), ARRAY_COUNT(mouse_objects), mouse_objects};
 
 static struct {
-    DefWindowProcFn def_proc;
-    GetRawDataFn get_data;
-    volatile LONG dx;  /* counts since the last reading */
-    volatile LONG state; /* 0 not started, 1 running, -1 failed */
-} raw;
+    void *device;
+    int state; /* 0 not tried, 1 ready, -1 failed */
+    HWND window;
+} di;
 
-static LRESULT CALLBACK raw_window(HWND window, UINT message, WPARAM w, LPARAM l) {
-    if (message == WM_INPUT) {
-        _Alignas(8) unsigned char buffer[sizeof(RAWINPUT) + 16];
-        UINT size = sizeof(buffer);
-        if (raw.get_data((HRAWINPUT)l, RID_INPUT, buffer, &size, sizeof(RAWINPUTHEADER)) != (UINT)-1) {
-            const RAWINPUT *input = (const RAWINPUT *)buffer;
-            if (input->header.dwType == RIM_TYPEMOUSE && !(input->data.mouse.usFlags & MOUSE_MOVE_ABSOLUTE))
-                InterlockedExchangeAdd(&raw.dx, input->data.mouse.lLastX);
-        }
+#define DI_SLOT(object, index) ((*(void ***)(object))[index])
+
+static int di_open(HWND window) {
+    if (di.state) return di.state > 0;
+    di.state = -1;
+    HMODULE dll = LoadLibraryExW(L"dinput8.dll", NULL, LOAD_LIBRARY_SEARCH_SYSTEM32);
+    DirectInput8CreateFn create = dll ? (DirectInput8CreateFn)(uintptr_t)GetProcAddress(dll, "DirectInput8Create") : NULL;
+    void *input = NULL, *device = NULL;
+    HRESULT hr = create ? create(GetModuleHandleW(NULL), 0x0800, &IID_DirectInput8W, &input, NULL) : E_FAIL;
+    if (SUCCEEDED(hr)) hr = ((DiCreateDeviceFn)DI_SLOT(input, 3))(input, &GUID_SysMouse_, &device, NULL);
+    if (SUCCEEDED(hr)) hr = ((DiFormatFn)DI_SLOT(device, 11))(device, &mouse_format);
+    if (SUCCEEDED(hr)) hr = ((DiCoopFn)DI_SLOT(device, 13))(device, window, 0x2 | 0x8); /* NONEXCLUSIVE | BACKGROUND */
+    if (FAILED(hr)) {
+        log_append_value("KEYBOARD: mouse steering - DirectInput mouse not available, error ", (int)hr);
+        return 0;
     }
-    return raw.def_proc(window, message, w, l);
+    ((DiDeviceFn)DI_SLOT(device, 7))(device); /* Acquire */
+    di.device = device;
+    di.window = window;
+    di.state = 1;
+    log_append("KEYBOARD: mouse steering - DirectInput mouse ready.\r\n");
+    return 1;
 }
 
-static DWORD WINAPI raw_thread(LPVOID unused) {
-    (void)unused;
-    RegisterClassFn register_class = (RegisterClassFn)(uintptr_t)GetProcAddress(user32, "RegisterClassW");
-    CreateWindowFn create_window = (CreateWindowFn)(uintptr_t)GetProcAddress(user32, "CreateWindowExW");
-    GetMessageFn get_message = (GetMessageFn)(uintptr_t)GetProcAddress(user32, "GetMessageW");
-    DispatchMessageFn dispatch = (DispatchMessageFn)(uintptr_t)GetProcAddress(user32, "DispatchMessageW");
-    RegisterRawFn register_raw = (RegisterRawFn)(uintptr_t)GetProcAddress(user32, "RegisterRawInputDevices");
-    raw.def_proc = (DefWindowProcFn)(uintptr_t)GetProcAddress(user32, "DefWindowProcW");
-    raw.get_data = (GetRawDataFn)(uintptr_t)GetProcAddress(user32, "GetRawInputData");
-    if (!register_class || !create_window || !get_message || !dispatch || !register_raw || !raw.def_proc || !raw.get_data) {
-        InterlockedExchange(&raw.state, -1);
-        log_append("KEYBOARD: mouse steering - Raw Input not available.\r\n");
+/* mouse counts left/right since the last call */
+static LONG di_dx(void) {
+    DiMouseState state;
+    memory_copy(&state, &(DiMouseState){0}, sizeof(state));
+    HRESULT hr = ((DiStateFn)DI_SLOT(di.device, 9))(di.device, sizeof(state), &state);
+    if (FAILED(hr)) { /* lost or not acquired: once more next reading */
+        ((DiDeviceFn)DI_SLOT(di.device, 7))(di.device);
         return 0;
     }
-    WNDCLASSW cls;
-    memory_copy(&cls, &(WNDCLASSW){0}, sizeof(cls));
-    cls.lpfnWndProc = raw_window;
-    cls.hInstance = GetModuleHandleW(NULL);
-    cls.lpszClassName = L"GriplineMouseSteering";
-    register_class(&cls);
-    HWND window = create_window(0, cls.lpszClassName, L"", 0, 0, 0, 0, 0, HWND_MESSAGE, NULL, cls.hInstance, NULL);
-    RAWINPUTDEVICE device = {0x01, 0x02, RIDEV_INPUTSINK, window}; /* generic desktop, mouse; also in the background */
-    if (!window || !register_raw(&device, 1, sizeof(device))) {
-        InterlockedExchange(&raw.state, -1);
-        log_append("KEYBOARD: mouse steering - Raw Input could not be registered.\r\n");
-        return 0;
-    }
-    log_append("KEYBOARD: mouse steering - Raw Input ready.\r\n");
-    MSG message;
-    while (get_message(&message, NULL, 0, 0) > 0) dispatch(&message);
-    return 0;
+    return state.x;
 }
 
 typedef struct { LONG x, y; } MousePoint;
@@ -738,12 +753,7 @@ static int mouse_ready(void) {
     mouse.client_rect = (ClientRectFn)(uintptr_t)GetProcAddress(user32, "GetClientRect");
     mouse.to_screen = (ClientToScreenFn)(uintptr_t)GetProcAddress(user32, "ClientToScreen");
     if (mouse.get_pos && mouse.set_pos && mouse.client_rect && mouse.to_screen) mouse.ready = 1;
-    if (mouse.ready > 0 && InterlockedCompareExchange(&raw.state, 1, 0) == 0) {
-        HANDLE thread = CreateThread(NULL, 0, raw_thread, NULL, 0, NULL);
-        if (thread) CloseHandle(thread);
-        else InterlockedExchange(&raw.state, -1);
-    }
-    return mouse.ready > 0 && raw.state > 0;
+    return mouse.ready > 0;
 }
 
 static double mouse_steer(int focused, double dt) {
@@ -759,15 +769,16 @@ static double mouse_steer(int focused, double dt) {
     } else {
         window = NULL;
     }
+    if (window && !di_open(window)) window = NULL;
     if (!window) {
         mouse.active = 0;
         mouse.target = 0.0;
     } else if (!mouse.active) { /* first reading: only park the cursor, forget older movement */
         mouse.active = 1;
-        InterlockedExchange(&raw.dx, 0);
+        di_dx(); /* forget older movement */
         mouse.set_pos((int)centre.x, (int)centre.y);
     } else {
-        LONG dx = InterlockedExchange(&raw.dx, 0);
+        LONG dx = di_dx();
         /* Medium (40): about 3000 mouse counts (10 cm at 800 dpi) from full left to full right */
         if (dx) {
             mouse.target = clamp1(mouse.target + (double)dx * (double)mouse_sensitivity / 60000.0);
@@ -775,7 +786,6 @@ static double mouse_steer(int focused, double dt) {
         }
         if (mouse.get_pos(&now) && (now.x != centre.x || now.y != centre.y)) mouse.set_pos((int)centre.x, (int)centre.y);
     }
-    if (!window) InterlockedExchange(&raw.dx, 0);
     /* back to the middle after MouseCenter seconds without moving the mouse (about 0.7 s from full lock) */
     ULONGLONG tick = GetTickCount64();
     int returning = 0;

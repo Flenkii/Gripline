@@ -72,7 +72,7 @@ static volatile LONG card_style = NOTIFY_STYLE_OVERDRIVE;
 static wchar_t panel_title[TEXT_CAPACITY];
 static NotifyPanelRow panel_rows[NOTIFY_PANEL_ROWS];
 static volatile LONG panel_count; /* 0 = panel off */
-static volatile LONG panel_at_top; /* key menu: top right instead of centred */
+static volatile LONG panel_at_top; /* 1 key menu: top right instead of centred; 2 telemetry: centred, cards stay */
 static unsigned panel_id; /* changes with every notify_panel_set: the panel is drawn again */
 
 /* ------------------------------------------------------------------ public */
@@ -256,7 +256,7 @@ void notify_panel_show(const wchar_t *title, const NotifyPanelRow *rows, unsigne
     panel_title[n] = 0;
     for (unsigned i = 0; i < count; ++i) panel_rows[i] = rows[i];
     ++panel_id;
-    InterlockedExchange(&panel_at_top, at_top ? 1 : 0);
+    InterlockedExchange(&panel_at_top, at_top == 2 ? 2 : at_top ? 1 : 0);
     InterlockedExchange(&panel_count, (LONG)count);
     InterlockedExchange(&cards_changed, 1);
     ReleaseSRWLockExclusive(&lock);
@@ -269,7 +269,7 @@ unsigned notify_panel_show_owned(const wchar_t *title, const NotifyPanelRow *row
     int free = panel_count == 0 || (owner && panel_id == owner);
     ReleaseSRWLockShared(&lock);
     if (!free) return 0;
-    notify_panel_show(title, rows, count, 0);
+    notify_panel_show(title, rows, count, 2); /* centred right, the cards keep their place above it */
     AcquireSRWLockShared(&lock);
     unsigned id = (unsigned)panel_id;
     ReleaseSRWLockShared(&lock);
@@ -1650,8 +1650,10 @@ static void render(IDXGISwapChain *swapchain) {
     if (panel) {
         float ph = (float)panel_pixels(l, panel);
         float x0 = (float)width - l->margin - l->width;
-        float y0 = panel_at_top ? (float)l->margin : ((float)height - ph) * 0.5f;
+        float y0 = panel_at_top == 1 ? (float)l->margin : ((float)height - ph) * 0.5f;
         if (y0 < (float)l->margin) y0 = (float)l->margin;
+        if (panel_at_top == 2 && y0 < (float)(l->margin + (int)count * (l->height + l->gap)))
+            y0 = (float)(l->margin + (int)count * (l->height + l->gap)); /* telemetry: below the cards */
         float c[12] = {x0 / width * 2.0f - 1.0f,
                        1.0f - y0 / height * 2.0f,
                        (x0 + l->width) / width * 2.0f - 1.0f,
@@ -1663,7 +1665,7 @@ static void render(IDXGISwapChain *swapchain) {
                        1.0f, 0.0f, 0.0f, 0.0f};
         ID3D12GraphicsCommandList_SetGraphicsRoot32BitConstants(gpu.list, 1, 12, c, 0);
         ID3D12GraphicsCommandList_DrawInstanced(gpu.list, 4, 1, 0, 0);
-        shift = (float)(l->width + l->gap);
+        if (panel_at_top != 2) shift = (float)(l->width + l->gap);
     }
     float y = (float)l->margin;
     for (unsigned i = 0; i < count; ++i) {
@@ -1895,11 +1897,13 @@ static DWORD WINAPI overlay_thread(void *unused) {
         int shift = 0;
         if (panel) {
             int ph = panel_pixels(&l, panel);
-            int y0 = panel_at_top ? l.margin : (screen_h - ph) / 2;
+            int y0 = panel_at_top == 1 ? l.margin : (screen_h - ph) / 2;
             if (y0 < l.margin) y0 = l.margin;
+            if (panel_at_top == 2 && y0 < l.margin + (int)count * (l.height + l.gap))
+                y0 = l.margin + (int)count * (l.height + l.gap); /* telemetry: below the cards */
             blend_block(frame, frame_w, frame_h, frame_w - l.margin - l.width, y0, scratch_panel, l.width * 4, l.width,
                         ph, 1.0f);
-            shift = l.width + l.gap;
+            if (panel_at_top != 2) shift = l.width + l.gap;
         }
         int y = l.margin;
         for (unsigned i = 0; i < count; ++i) {
