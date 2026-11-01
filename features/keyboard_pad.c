@@ -61,6 +61,7 @@ static const GUID IID_Gamepad = {0xbc7bb43c, 0x0a69, 0x3903, {0x9e, 0x9d, 0xa5, 
 
 static wchar_t ini_path[PATH_CAPACITY];
 static int mouse_sensitivity; /* [Keyboard] MouseSteering, 0 = off */
+static int mouse_dead = 30;   /* [Keyboard] MouseDeadZone: percent of the game's stick dead zone the mouse skips */
 static int mouse_center;      /* [Keyboard] MouseCenter: seconds without mouse movement until the wheel turns back straight, 0 = never */
 static volatile LONG values[KEY_SETTING_COUNT];
 static int loaded;
@@ -445,6 +446,8 @@ static void settings_load(void) {
     if (mouse_sensitivity < 0 || mouse_sensitivity > 100) mouse_sensitivity = 0;
     if (mouse_sensitivity) log_append_value("KEYBOARD: mouse steering on, sensitivity ", mouse_sensitivity);
     mouse_center = read_int(L"MouseCenter", 0);
+    mouse_dead = read_int(L"MouseDeadZone", 30);
+    if (mouse_dead < 0 || mouse_dead > 60) mouse_dead = 30;
     if (mouse_center < 0 || mouse_center > 30) mouse_center = 0;
     for (unsigned i = 0; i < ARRAY_COUNT(bindings); ++i) {
         wchar_t text[96];
@@ -470,6 +473,14 @@ int keyboard_mouse_steering(void) {
 void keyboard_set_mouse_steering(int sensitivity) {
     if (sensitivity < 0 || sensitivity > 100) return;
     mouse_sensitivity = sensitivity;
+}
+
+int keyboard_mouse_dead_zone(void) {
+    return mouse_dead;
+}
+
+void keyboard_set_mouse_dead_zone(int percent) {
+    if (percent >= 0 && percent <= 60) mouse_dead = percent;
 }
 
 int keyboard_mouse_center(void) {
@@ -707,7 +718,7 @@ static struct {
 } mouse;
 
 #define MOUSE_CARD_TAG 0x3a05e000u
-#define MOUSE_DEAD_ZONE 0.30 /* the game's stick dead zone, skipped by the mouse */
+#define MOUSE_DEAD_ZONE (mouse_dead / 100.0) /* the game's stick dead zone, skipped by the mouse */
 #define MOUSE_WHEEL_DEGREES 900.0 /* the card shows degrees of a 900 degree wheel (like the G920) */
 
 static void mouse_put(char *out, size_t *n, size_t cap, const char *text) {

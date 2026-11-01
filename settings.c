@@ -17,6 +17,7 @@ const SettingDefinition setting_definitions[] = {
     SETTING("Gripline", "SpeedCameras", speed_cameras, SETTING_BOOLEAN),
     SETTING("Gripline", "CarLabels", car_labels, SETTING_BOOLEAN),
     SETTING("Gripline", "Telemetry", telemetry, SETTING_BOOLEAN),
+    SETTING("Gripline", "TelemetryShow", telemetry_show, SETTING_MASK),
     SETTING("Gripline", "EventIcons", event_icons, SETTING_BOOLEAN),
 };
 
@@ -36,6 +37,7 @@ void settings_defaults(ModOptions *options) {
         .speed_cameras = 1,
         .car_labels = 1,
         .event_icons = 1,
+        .telemetry_show = -1, /* telemetry.c default */
     };
 }
 
@@ -101,6 +103,17 @@ static int parse_value(const SettingDefinition *definition, const char *text, in
             return 1;
         }
         return 0;
+    }
+    if (definition->type == SETTING_MASK) { /* 0 .. 65535 */
+        int number = 0;
+        if (!*text) return 0;
+        for (const char *digit = text; *digit; ++digit) {
+            if (*digit < '0' || *digit > '9' || number > 65535) return 0;
+            number = number * 10 + (*digit - '0');
+        }
+        if (number > 65535) return 0;
+        *value = number;
+        return 1;
     }
     if (definition->type == SETTING_CARD_STYLE) {
         if (text[0] >= '0' && text[0] <= '2' && !text[1]) {

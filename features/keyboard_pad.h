@@ -82,6 +82,9 @@ int wheel_buttons_install(unsigned char *game_image);
 int keyboard_mouse_steering(void);
 void keyboard_set_mouse_steering(int sensitivity);
 /* [Keyboard] MouseCenter: seconds until the wheel turns back straight when the mouse rests, 0 = never */
+/* [Keyboard] MouseDeadZone: 0..60 percent */
+int keyboard_mouse_dead_zone(void);
+void keyboard_set_mouse_dead_zone(int percent);
 int keyboard_mouse_center(void);
 void keyboard_set_mouse_center(int seconds);
 

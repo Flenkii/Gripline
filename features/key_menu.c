@@ -5,6 +5,8 @@
 #include "game_language.h"
 #include "ini_edit.h"
 #include "logging.h"
+#include "telemetry.h"
+#include "rig_settings.h"
 #include "support.h"
 
 #define VK_UP_ 0x26
@@ -17,10 +19,10 @@
 #define FILE_LIMIT 32768u
 #define MAX_ROWS (NOTIFY_PANEL_ROWS - 1)
 
-enum { LEVEL_CLOSED, LEVEL_GROUPS, LEVEL_LIST, LEVEL_BINDING, LEVEL_CAPTURE, LEVEL_RESET_ALL, LEVEL_STYLE, LEVEL_MOUSE, LEVEL_COUNT };
+enum { LEVEL_CLOSED, LEVEL_GROUPS, LEVEL_LIST, LEVEL_BINDING, LEVEL_CAPTURE, LEVEL_RESET_ALL, LEVEL_STYLE, LEVEL_MOUSE, LEVEL_TELEMETRY, LEVEL_COUNT };
 
 /* first page: rows after the binding pages */
-enum { TOP_STYLE = 100, TOP_RESET = 101, TOP_MOUSE = 102 };
+enum { TOP_STYLE = 100, TOP_RESET = 101, TOP_MOUSE = 102, TOP_TELEMETRY = 103 };
 
 /* mouse steering choices: FH2_Keyboard.ini MouseSteering values */
 #define MOUSE_CHOICES 5
@@ -33,6 +35,11 @@ static const wchar_t *const mouse_english[MOUSE_CHOICES] = {L"Off", L"Gentle", L
 static const int center_values[CENTER_CHOICES] = {0, 1, 2, 3, 5};
 static const wchar_t *const center_german[CENTER_CHOICES] = {L"Nie", L"nach 1 Sekunde", L"nach 2 Sekunden",
                                                              L"nach 3 Sekunden", L"nach 5 Sekunden"};
+/* dead zone the mouse skips: FH2_Keyboard.ini MouseDeadZone percent (actions DEAD_FIRST + i) */
+#define DEAD_FIRST 20
+#define DEAD_CHOICES 6
+static const int dead_values[DEAD_CHOICES] = {0, 10, 20, 30, 40, 50};
+static const wchar_t *const dead_names[DEAD_CHOICES] = {L"0 %", L"10 %", L"20 %", L"30 %", L"40 %", L"50 %"};
 static const wchar_t *const center_english[CENTER_CHOICES] = {L"Never", L"after 1 second", L"after 2 seconds",
                                                               L"after 3 seconds", L"after 5 seconds"};
 
@@ -274,6 +281,37 @@ static int mouse_choice(void) {
     return value ? (best ? best : 1) : 0;
 }
 
+static int dead_choice(void) {
+    int value = keyboard_mouse_dead_zone(), best = 0;
+    for (int i = 1; i < DEAD_CHOICES; ++i) {
+        int d = dead_values[i] - value, b = dead_values[best] - value;
+        if ((d < 0 ? -d : d) < (b < 0 ? -b : b)) best = i;
+    }
+    return best;
+}
+
+/* Gripline.ini [Gripline] key = number */
+static int save_gripline_int(const char *key, int value) {
+    static wchar_t path[PATH_CAPACITY];
+    unsigned n = wcopy(path, 0, PATH_CAPACITY, ini_path), cut = 0;
+    for (unsigned i = 0; i < n; ++i)
+        if (path[i] == L'\\' || path[i] == L'/') cut = i + 1;
+    if (!cut) return 0;
+    path[cut] = 0;
+    wcopy(path, cut, PATH_CAPACITY, L"Gripline.ini");
+    size_t length;
+    if (!read_file_at(path, &length)) return 0;
+    char text[12];
+    unsigned d = 0, v = value < 0 ? 0u : (unsigned)value;
+    char digits[12];
+    do digits[d++] = (char)('0' + v % 10); while ((v /= 10) && d < sizeof(digits));
+    unsigned t = 0;
+    while (d) text[t++] = digits[--d];
+    text[t] = 0;
+    size_t written = ini_set_value(file_text, length, "Gripline", key, text, edit_text[0], FILE_LIMIT + 1);
+    return written && written <= FILE_LIMIT && write_file_at(path, edit_text[0], written);
+}
+
 static int center_choice(void) {
     int value = keyboard_mouse_center();
     for (int i = 0; i < CENTER_CHOICES; ++i)
@@ -383,6 +421,8 @@ static void build_page(wchar_t *title) {
             for (unsigned g = 0; g < GROUP_COUNT; ++g) row_add(tr(groups[g].german, groups[g].english), L"›", 0, (int)g);
             row_add(tr(L"Maus-Lenkung", L"Mouse steering"), tr(mouse_german[mouse_choice()], mouse_english[mouse_choice()]), 0,
                     TOP_MOUSE);
+            row_add(tr(L"Live-Telemetrie", L"Live telemetry"), telemetry_enabled() ? tr(L"An", L"On") : tr(L"Aus", L"Off"), 0,
+                    TOP_TELEMETRY);
             row_add(tr(L"Karten-Design", L"Card design"), style_names[notify_style()], 0, TOP_STYLE);
             row_add(tr(L"Alle auf Standard", L"Reset all to default"), L"›", 0, TOP_RESET);
             hint(1);
@@ -430,6 +470,11 @@ static void build_page(wchar_t *title) {
             row_add(tr(L"Lenken mit der Maus wie in ETS2", L"Steer with the mouse like ETS2"), L"", NOTIFY_ROW_INFO, -1);
             for (int i = 0; i < MOUSE_CHOICES; ++i)
                 row_add(tr(mouse_german[i], mouse_english[i]), i == mouse_choice() ? tr(L"✓ aktiv", L"✓ active") : L"", 0, i);
+            row_add(tr(L"Totzone überspringen", L"Skip dead zone"), tr(L"ab wann das Auto lenkt", L"where the car starts to steer"),
+                    NOTIFY_ROW_INFO, -1);
+            for (int i = 0; i < DEAD_CHOICES; ++i)
+                row_add(dead_names[i], i == dead_choice() ? tr(L"✓ aktiv", L"✓ active") : (i == 3 ? tr(L"Standard", L"default") : L""), 0,
+                        DEAD_FIRST + i);
             row_add(tr(L"Lenkrad automatisch gerade", L"Wheel back to straight"), tr(L"wenn die Maus ruht", L"when the mouse rests"),
                     NOTIFY_ROW_INFO, -1);
             for (int i = 0; i < CENTER_CHOICES; ++i)
@@ -437,6 +482,17 @@ static void build_page(wchar_t *title) {
                         CENTER_FIRST + i);
             hint(0);
             break;
+        case LEVEL_TELEMETRY: {
+            wcopy(title, 0, 64, tr(L"Live-Telemetrie", L"Live telemetry"));
+            row_add(tr(L"Telemetrie-Tafel", L"Telemetry panel"), telemetry_enabled() ? tr(L"An", L"On") : tr(L"Aus", L"Off"), 0, 0);
+            row_add(tr(L"Anzeigen (Enter = an/aus)", L"Shown (Enter = on/off)"), L"", NOTIFY_ROW_INFO, -1);
+            int mask = telemetry_show();
+            for (unsigned i = 0; i < TELEMETRY_SHOW_COUNT; ++i)
+                row_add(telemetry_item_name(i, m.german), (mask & (1 << i)) ? tr(L"✓ an", L"✓ on") : tr(L"aus", L"off"), 0,
+                        1 + (int)i);
+            hint(0);
+            break;
+        }
         case LEVEL_RESET_ALL:
             wcopy(title, 0, 64, tr(L"Alle Tasten auf Standard?", L"All keys to default?"));
             row_add(tr(L"Nein, zurück", L"No, back"), L"", 0, 0);
@@ -483,6 +539,7 @@ static void back(void) {
         case LEVEL_RESET_ALL: m.level = LEVEL_GROUPS; break;
         case LEVEL_STYLE: m.level = LEVEL_GROUPS; break;
         case LEVEL_MOUSE: m.level = LEVEL_GROUPS; break;
+        case LEVEL_TELEMETRY: m.level = LEVEL_GROUPS; break;
         case LEVEL_BINDING: m.level = LEVEL_LIST; break;
         case LEVEL_CAPTURE: m.level = LEVEL_BINDING; break;
     }
@@ -504,6 +561,9 @@ static void choose(void) {
             if (action == TOP_RESET) {
                 m.level = LEVEL_RESET_ALL;
                 m.sel[LEVEL_RESET_ALL] = 0;
+            } else if (action == TOP_TELEMETRY) {
+                m.level = LEVEL_TELEMETRY;
+                m.sel[LEVEL_TELEMETRY] = 0;
             } else if (action == TOP_MOUSE) {
                 m.level = LEVEL_MOUSE;
                 m.sel[LEVEL_MOUSE] = mouse_choice();
@@ -541,7 +601,36 @@ static void choose(void) {
             }
             break;
         }
+        case LEVEL_TELEMETRY: {
+            if (action == 0) {
+                int on = !telemetry_enabled();
+                if (!rig_setting_set(RIG_GRIP_TELEMETRY, on)) telemetry_set_enabled(on); /* rig_settings saves it */
+                log_append(on ? "KEYMENU: telemetry on\r\n" : "KEYMENU: telemetry off\r\n");
+            } else {
+                int mask = telemetry_show() ^ (1 << (action - 1));
+                telemetry_set_show(mask);
+                if (!save_gripline_int("TelemetryShow", mask)) log_append("KEYMENU: Gripline.ini could not be written - telemetry rows not saved.\r\n");
+            }
+            break;
+        }
         case LEVEL_MOUSE: {
+            if (action >= DEAD_FIRST) {
+                int i = action - DEAD_FIRST;
+                keyboard_set_mouse_dead_zone(dead_values[i]);
+                int saved = save_mouse("MouseDeadZone", dead_values[i]);
+                char text[192];
+                unsigned t = 0;
+                wchar_t line[128];
+                unsigned n = wcopy(line, 0, 128, tr(L"Totzone überspringen: ", L"Skip dead zone: "));
+                n = wcopy(line, n, 128, dead_names[i]);
+                wcopy(line, n, 128, saved ? tr(L"\nHöher = Auto lenkt früher", L"\nHigher = the car steers sooner")
+                                          : tr(L"\nNur bis zum Spielende (nicht gespeichert)", L"\nUntil the game closes (not saved)"));
+                utf8(line, text, sizeof(text), &t);
+                text[t] = 0;
+                notify_show(text);
+                log_append_value("KEYMENU: mouse dead zone percent ", dead_values[i]);
+                break;
+            }
             if (action >= CENTER_FIRST) {
                 int i = action - CENTER_FIRST;
                 keyboard_set_mouse_center(center_values[i]);

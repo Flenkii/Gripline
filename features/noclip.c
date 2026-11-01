@@ -480,11 +480,13 @@ static void sample_trip(void *car, float dt) {
     _mm_store_ps(v, state.velocity);
     if (!(float_is_finite(v[0]) && float_is_finite(v[1]) && float_is_finite(v[2]))) return;
     trip_sample(dt, v);
-    _Alignas(16) float r[4], f[4];
+    _Alignas(16) float r[4], f[4], w[4];
     _mm_store_ps(r, state.right);
     _mm_store_ps(f, state.forward);
-    if (float_is_finite(r[0]) && float_is_finite(r[2]) && float_is_finite(f[0]) && float_is_finite(f[2]))
-        telemetry_sample(dt, v, r, f);
+    _mm_store_ps(w, state.spin);
+    if (float_is_finite(r[0]) && float_is_finite(r[2]) && float_is_finite(f[0]) && float_is_finite(f[1]) &&
+        float_is_finite(f[2]) && float_is_finite(w[1]))
+        telemetry_sample(dt, v, r, f, w);
 }
 
 void noclip_car_update(void *car, float dt, float frame_dt, unsigned frame) {

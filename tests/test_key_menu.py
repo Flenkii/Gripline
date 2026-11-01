@@ -111,7 +111,7 @@ check(ok == 1 and card_text == 'Press F8 to change your keys\nKey menu: arrows, 
 check(e.call('Fh2TestKeyboardBinding', 42, 0) == F8, 'KeyMenu = F8 (Standard)')
 
 press(F8)
-check(tick() == LEVEL_GROUPS and panel() == 8, f'F8 oeffnet das Menue (4 Seiten + Maus-Lenkung + Karten-Design + Alle auf Standard + Hinweis): {panel()}')
+check(tick() == LEVEL_GROUPS and panel() == 9, f'F8 oeffnet das Menue (4 Seiten + Maus-Lenkung + Telemetrie + Karten-Design + Alle auf Standard + Hinweis): {panel()}')
 check(selected() == 'Driving', f'erste Zeile gewaehlt: {selected()}')
 
 # while open: the game and noclip get no key
@@ -231,7 +231,7 @@ check(tick() == LEVEL_CLOSED, 'Esc, Esc: zu')
 
 # mouse steering page: Off by default, Medium chosen -> FH2_Keyboard.ini MouseSteering=40
 press(0x79)
-press(UP); press(UP); press(UP)
+press(UP); press(UP); press(UP); press(UP)
 check(selected() == 'Mouse steering' and panel_rows().get('Mouse steering') == 'Off', f'Maus-Zeile zeigt Aus: {panel_rows()}')
 press(ENTER)
 check(selected() == 'Off' and panel_rows().get('Off') == '\u2713 active', f'Maus-Seite: Aus gewaehlt {panel_rows()}')
@@ -241,6 +241,25 @@ press(UP); press(UP); press(ENTER)
 check('MouseSteering=0\r\n' in ini(), 'wieder Aus')
 press(ESC); press(ESC)
 check(tick() == LEVEL_CLOSED, 'Maus: Esc, Esc: zu')
+
+# telemetry page: Turn rate on -> Gripline.ini TelemetryShow, dead zone 40 % -> FH2_Keyboard.ini
+press(0x79)
+press(UP); press(UP); press(UP)
+check(selected() == 'Live telemetry', selected())
+press(ENTER)
+check(selected() == 'Telemetry panel', selected())
+for _ in range(5): press(DOWN)
+check(selected() == 'Turn rate' and panel_rows().get('Turn rate') == 'off', f'Drehrate aus: {panel_rows()}')
+press(ENTER)
+gi = open(os.path.join(root, 'Gripline.ini'), 'rb').read()
+check(panel_rows().get('Turn rate') == '\u2713 on' and b'TelemetryShow=' in gi, f'Drehrate an und gespeichert: {gi!r}')
+press(ESC); press(UP); press(ENTER)
+for _ in range(9): press(DOWN)
+check(selected() == '40 %', selected())
+press(ENTER)
+check('MouseDeadZone=40\r\n' in ini(), 'Totzone 40 % gespeichert')
+press(ESC); press(ESC)
+check(tick() == LEVEL_CLOSED, 'Telemetrie/Totzone: zu')
 
 # "all to default" with confirmation
 press(0x79)

@@ -31,6 +31,7 @@
 #include "features/rig_settings.h"
 #include "features/traffic_files.h"
 #include "features/world_files.h"
+#include "features/telemetry.h"
 #include "features/game_language.h"
 #include "features/noclip.h"
 #include "features/version_check.h"
@@ -485,6 +486,7 @@ static void start_features(void) {
     rig_settings_set_game(game);
     rig_settings_gripline(options.notifications, options.steering_animation, options.cockpit_view_forward,
                           options.cockpit_view_up, options.card_color);
+    telemetry_set_show(options.telemetry_show);
     rig_settings_world(options.speed_cameras, options.car_labels, options.telemetry, options.event_icons);
     rig_settings_start(directory);
     /* the platform may have loaded Gripline after Azimuth set up gamepads and swap chain */
