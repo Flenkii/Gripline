@@ -9,6 +9,7 @@
 #include "cockpit_view.h"
 #include "noclip.h"
 #include "notify.h"
+#include "cruise.h"
 #include "game_language.h"
 #include "key_menu.h"
 
@@ -142,6 +143,7 @@ static Binding bindings[] = {
     {L"NoclipFast", KIND_NOCLIP, 0, L"LShift", {0}},
     {L"Freecam", KIND_NOCLIP, 0, L"F7", {0}},
     {L"KeyMenu", KIND_MENU, 0, L"F8", {0}},
+    {L"CruiseControl", KIND_NOCLIP, 0, L"K", {0}}, /* cruise.c reads it through keyboard_held */
 };
 
 static const struct {
@@ -252,7 +254,8 @@ static const char default_ini[] =
     ";   Arrow keys look, Throttle/Brake fly forward/back, SteerLeft/SteerRight sideways,\r\n"
     ";   NoclipUp/NoclipDown up/down, NoclipFast held = faster.\r\n"
     "; KeyMenu: Gripline menu to change these keys in the game (arrows, Enter, Esc/Backspace = back).\r\n"
-    ";   It saves its changes into this file.\r\n";
+    ";   It saves its changes into this file.\r\n"
+    "; CruiseControl: keeps the speed of the moment, again/brake = off (20 km/h or faster).\r\n";
 
 /* Default file text including the key bindings (also used by ini_migrate.c). Returns the
    length, 0 if it does not fit. */
@@ -296,7 +299,7 @@ static const wchar_t *const labels_german[ARRAY_COUNT(bindings)] = {
     L"Menü/Kamera hoch", L"Menü/Kamera runter", L"Menü/Kamera links", L"Menü/Kamera rechts",
     L"Steuerkreuz hoch", L"Steuerkreuz runter", L"Steuerkreuz links", L"Steuerkreuz rechts",
     L"Noclip ein/aus", L"Noclip: steigen", L"Noclip: sinken", L"Noclip: schneller (halten)", L"Freecam ein/aus",
-    L"Tastenmenü öffnen"};
+    L"Tastenmenü öffnen", L"Tempomat ein/aus"};
 static const wchar_t *const labels_english[ARRAY_COUNT(bindings)] = {
     L"Throttle", L"Brake", L"Steer left", L"Steer right", L"Handbrake", L"Shift up", L"Shift down",
     L"Clutch", L"Change camera", L"Rewind", L"Telemetry (hold)", L"Photo mode (hold)", L"Radio: previous",
@@ -306,7 +309,7 @@ static const wchar_t *const labels_english[ARRAY_COUNT(bindings)] = {
     L"Menu/camera up", L"Menu/camera down", L"Menu/camera left", L"Menu/camera right",
     L"D-pad up", L"D-pad down", L"D-pad left", L"D-pad right",
     L"Noclip on/off", L"Noclip: rise", L"Noclip: sink", L"Noclip: faster (hold)", L"Freecam on/off",
-    L"Open key menu"};
+    L"Open key menu", L"Cruise control on/off"};
 _Static_assert(ARRAY_COUNT(bindings) + 1 <= NOTIFY_PANEL_ROWS, "key list rows");
 
 static unsigned char *game_base;
@@ -1051,6 +1054,15 @@ static HRESULT WINAPI pad_reading(void *self, PadReading *out) {
         if (magnitude(k.rx, k.ry) > magnitude(r.rx, r.ry)) r.rx = k.rx, r.ry = k.ry;
     }
     ReleaseSRWLockExclusive(&pad_lock);
+    { /* cruise control: holds the throttle for the player */
+        int gas = controller_action_input(0), brake = controller_action_input(1);
+        double *g = gas == IN_LT ? &r.left_trigger : gas == IN_RT ? &r.right_trigger : NULL;
+        double *b = brake == IN_LT ? &r.left_trigger : brake == IN_RT ? &r.right_trigger : NULL;
+        if (g) {
+            double c = cruise_throttle(*g, b ? *b : 0.0);
+            if (c > *g) *g = c;
+        }
+    }
     r.timestamp = timestamp;
     *out = r;
     return S_OK;
@@ -1391,7 +1403,7 @@ int keyboard_held(unsigned which) {
                                                               L"SteerRight", L"NoclipUp", L"NoclipDown",
                                                               L"NoclipFast", L"Noclip", L"Freecam",
                                                               L"ArrowUp", L"ArrowDown", L"ArrowLeft",
-                                                              L"ArrowRight"};
+                                                              L"ArrowRight", L"CruiseControl"};
     static int index[KEYBOARD_HOLD_COUNT];
     if (which >= KEYBOARD_HOLD_COUNT || !loaded || !user32_ready()) return 0;
     if (!index[which]) {

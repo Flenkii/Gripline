@@ -5,6 +5,7 @@
 #include "game_units.h"
 #include "game_language.h"
 #include "telemetry.h"
+#include "records.h"
 
 #define TELEMETRY_TAG 0x7e1e0000u
 #define TELEMETRY_EVERY_MS 30u
@@ -77,7 +78,7 @@ static float dot(const float a[3], const float b[3]) {
 }
 
 void telemetry_sample(float dt, const float velocity[3], const float right[3], const float forward[3], const float spin[3]) {
-    if (!enabled || !(dt > 0.0005f) || dt > 0.25f) return;
+    if (!(dt > 0.0005f) || dt > 0.25f) return; /* also when the panel is off: the records count */
     float along = dot(velocity, forward), side = dot(velocity, right);
     float speed = root(velocity[0] * velocity[0] + velocity[1] * velocity[1] + velocity[2] * velocity[2]);
     AcquireSRWLockExclusive(&lock);
@@ -99,6 +100,7 @@ void telemetry_sample(float dt, const float velocity[3], const float right[3], c
     float slope = flat > 0.1f ? forward[1] / flat * 100.0f : 0.0f; /* percent, + = uphill */
     t.slope += (slope - t.slope) * k;
     if (speed > t.top && speed < 150.0f) t.top = speed;
+    if (speed > 1.0f && speed < 150.0f) records_offer(RECORD_TOP, speed);
     /* 0-100 km/h (0-60 mph): armed when standing, runs while the car speeds up */
     float goal = imperial ? 26.8224f : 27.7778f;
     if (speed < 0.3f) {
@@ -109,6 +111,7 @@ void telemetry_sample(float dt, const float velocity[3], const float right[3], c
         if (speed >= goal) {
             t.sprint_last = t.sprint_time;
             if (t.sprint_best <= 0.0f || t.sprint_time < t.sprint_best) t.sprint_best = t.sprint_time;
+            records_offer(imperial ? RECORD_SPRINT_MPH : RECORD_SPRINT, t.sprint_time);
             t.sprint_armed = 0;
         } else if (t.sprint_time > 60.0f || along < -0.5f) {
             t.sprint_armed = 0; /* too slow or backwards: not a sprint */
@@ -126,11 +129,13 @@ void telemetry_sample(float dt, const float velocity[3], const float right[3], c
             t.quarter_last = t.run_time;
             t.quarter_speed = speed;
             if (t.quarter_best <= 0.0f || t.run_time < t.quarter_best) t.quarter_best = t.run_time;
+            records_offer(RECORD_QUARTER, t.run_time);
             t.quarter_armed = 0;
         }
         if (t.s200_armed && speed >= (imperial ? 44.704f : 55.5556f)) {
             t.s200_last = t.run_time;
             if (t.s200_best <= 0.0f || t.run_time < t.s200_best) t.s200_best = t.run_time;
+            records_offer(imperial ? RECORD_SPRINT200_MPH : RECORD_SPRINT200, t.run_time);
             t.s200_armed = 0;
         }
     }
@@ -145,6 +150,7 @@ void telemetry_sample(float dt, const float velocity[3], const float right[3], c
         else if (speed < 0.3f) {
             t.brake_last = t.brake_dist;
             if (t.brake_best <= 0.0f || t.brake_dist < t.brake_best) t.brake_best = t.brake_dist;
+            records_offer(imperial ? RECORD_BRAKE_MPH : RECORD_BRAKE, t.brake_dist);
             t.braking = 0;
         }
     }
@@ -232,6 +238,12 @@ void telemetry_step(unsigned long long now) {
     float s200_armed = (float)t.s200_armed, brake_dist = t.brake_dist, brake_last = t.brake_last, brake_best = t.brake_best;
     ReleaseSRWLockShared(&lock);
     (void)run_armed;
+    /* best values: the records for ever (records.c) */
+    sprint_best = records_best(imperial ? RECORD_SPRINT_MPH : RECORD_SPRINT);
+    s200_best = records_best(imperial ? RECORD_SPRINT200_MPH : RECORD_SPRINT200);
+    quarter_best = records_best(RECORD_QUARTER);
+    brake_best = records_best(imperial ? RECORD_BRAKE_MPH : RECORD_BRAKE);
+    records_csv_line(now, speed, long_g, side_g, slip, yaw, slope);
     if (!time || now - time > 500) { /* not driving (menu, pause, noclip) */
         if (panel_owner) notify_panel_clear_owned(panel_owner), panel_owner = 0;
         return;

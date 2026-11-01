@@ -33,6 +33,7 @@
 #include "features/world_files.h"
 #include "features/telemetry.h"
 #include "features/logbook.h"
+#include "features/records.h"
 #include "features/game_language.h"
 #include "features/noclip.h"
 #include "features/version_check.h"
@@ -489,6 +490,7 @@ static void start_features(void) {
                           options.cockpit_view_up, options.card_color);
     telemetry_set_show(options.telemetry_show);
     logbook_start(game, directory, mount_dir, options.news_seen);
+    records_start(game, directory);
     rig_settings_world(options.speed_cameras, options.car_labels, options.telemetry, options.event_icons);
     rig_settings_start(directory);
     /* the platform may have loaded Gripline after Azimuth set up gamepads and swap chain */

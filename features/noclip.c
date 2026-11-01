@@ -20,6 +20,8 @@
 #include "trip.h"
 #include "telemetry.h"
 #include "logbook.h"
+#include "cruise.h"
+#include "records.h"
 #include "wheel_watch.h"
 #include "cockpit_view.h"
 
@@ -482,6 +484,12 @@ static void sample_trip(void *car, float dt) {
     if (!(float_is_finite(v[0]) && float_is_finite(v[1]) && float_is_finite(v[2]))) return;
     trip_sample(dt, v);
     logbook_sample(car, dt, v);
+    {
+        _Alignas(16) float p[4];
+        _mm_store_ps(p, state.position);
+        if (float_is_finite(p[0]) && float_is_finite(p[1]) && float_is_finite(p[2]))
+            records_sample(dt, p, root(v[0] * v[0] + v[1] * v[1] + v[2] * v[2]));
+    }
     _Alignas(16) float r[4], f[4], w[4];
     _mm_store_ps(r, state.right);
     _mm_store_ps(f, state.forward);
@@ -489,6 +497,7 @@ static void sample_trip(void *car, float dt) {
     if (float_is_finite(r[0]) && float_is_finite(r[2]) && float_is_finite(f[0]) && float_is_finite(f[1]) &&
         float_is_finite(f[2]) && float_is_finite(w[1]))
         telemetry_sample(dt, v, r, f, w);
+    if (float_is_finite(f[0]) && float_is_finite(f[1]) && float_is_finite(f[2])) cruise_sample(dt, v, f);
 }
 
 void noclip_car_update(void *car, float dt, float frame_dt, unsigned frame) {
@@ -592,6 +601,8 @@ static DWORD WINAPI watch_thread(LPVOID unused) {
         trip_step(now);
         telemetry_step(now);
         logbook_step(now);
+        cruise_step(now, game);
+        records_step(now);
         wheel_watch_step(game, now);
         Sleep(30);
     }

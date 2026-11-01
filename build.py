@@ -26,6 +26,8 @@ PLUGIN_SOURCES = [
     "features/world_files.c",
     "features/telemetry.c",
     "features/logbook.c",
+    "features/cruise.c",
+    "features/records.c",
     "features/ini_edit.c",
     "features/ini_migrate.c",
     "features/rig_settings.c",

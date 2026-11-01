@@ -102,7 +102,7 @@ def binding(index, k=0):
 
 LEVEL_CLOSED, LEVEL_GROUPS, LEVEL_LIST, LEVEL_BINDING, LEVEL_CAPTURE = 0, 1, 2, 3, 4
 
-check(e.call('Fh2TestKeyMenuCover') == 43, 'jede der 43 Tasten steht genau einmal im Menue')
+check(e.call('Fh2TestKeyMenuCover') == 44, 'jede der 44 Tasten steht genau einmal im Menue')
 check(tick() == LEVEL_CLOSED and panel() == 0, 'Menue anfangs zu')
 card = e.alloc(256)
 ok = e.call('Fh2TestKeyMenuStartCard', card, 256)
@@ -111,7 +111,7 @@ check(ok == 1 and card_text == 'Press F8 to change your keys\nKey menu: arrows, 
 check(e.call('Fh2TestKeyboardBinding', 42, 0) == F8, 'KeyMenu = F8 (Standard)')
 
 press(F8)
-check(tick() == LEVEL_GROUPS and panel() == 11, f'F8 oeffnet das Menue (4 Seiten + Maus-Lenkung + Telemetrie + Fahrtenbuch + Welt + Karten-Design + Alle auf Standard + Hinweis): {panel()}')
+check(tick() == LEVEL_GROUPS and panel() == 13, f'F8 oeffnet das Menue (4 Seiten + Maus-Lenkung + Telemetrie + Fahrtenbuch + Rekorde + Sprints + Welt + Karten-Design + Alle auf Standard + Hinweis): {panel()}')
 check(selected() == 'Driving', f'erste Zeile gewaehlt: {selected()}')
 
 # while open: the game and noclip get no key
@@ -231,7 +231,7 @@ check(tick() == LEVEL_CLOSED, 'Esc, Esc: zu')
 
 # mouse steering page: Off by default, Medium chosen -> FH2_Keyboard.ini MouseSteering=40
 press(0x79)
-press(UP); press(UP); press(UP); press(UP); press(UP); press(UP)
+for _ in range(8): press(UP)
 check(selected() == 'Mouse steering (experimental)' and panel_rows().get('Mouse steering (experimental)') == 'Off', f'Maus-Zeile zeigt Aus: {panel_rows()}')
 press(ENTER)
 check(selected() == 'Off' and panel_rows().get('Off') == '\u2713 active', f'Maus-Seite: Aus gewaehlt {panel_rows()}')
@@ -244,11 +244,11 @@ check(tick() == LEVEL_CLOSED, 'Maus: Esc, Esc: zu')
 
 # telemetry page: Turn rate on -> Gripline.ini TelemetryShow, dead zone 40 % -> FH2_Keyboard.ini
 press(0x79)
-press(UP); press(UP); press(UP); press(UP); press(UP)
+for _ in range(7): press(UP)
 check(selected() == 'Live telemetry', selected())
 press(ENTER)
 check(selected() == 'Telemetry panel', selected())
-for _ in range(5): press(DOWN)
+for _ in range(6): press(DOWN)
 check(selected() == 'Turn rate' and panel_rows().get('Turn rate') == 'off', f'Drehrate aus: {panel_rows()}')
 press(ENTER)
 gi = open(os.path.join(root, 'Gripline.ini'), 'rb').read()
@@ -279,13 +279,32 @@ check(tick() == LEVEL_CLOSED, 'Welt: zu')
 
 # logbook page: totals, nothing driven yet
 press(0x79)
-press(UP); press(UP); press(UP); press(UP)
-check(selected() == 'Logbook', selected())
+for _ in range(6): press(UP)
+check(selected() == 'Logbook', repr(selected()))
 press(ENTER)
 rows = panel_rows()
 check('Driven in total' in rows and 'Driving time' in rows and 'Top speed' in rows and 'No car past 100 m yet' in rows, f'Fahrtenbuch: {rows}')
 press(ESC); press(ESC)
 check(tick() == LEVEL_CLOSED, 'Fahrtenbuch: zu')
+# records page: empty, clear asks first
+press(0x79)
+for _ in range(5): press(UP)
+check(selected() == 'Records', selected())
+press(ENTER)
+rows = panel_rows()
+check(rows.get('0-100 km/h') == '\u2013' and 'Clear all records' in rows, f'Rekorde: {rows}')
+press(ENTER)
+check('Sure? Enter again' in panel_rows(), 'Rekorde loeschen fragt nach')
+press(ESC)
+# own sprint page: no car yet -> start not set
+press(DOWN)
+check(selected() == 'Own sprints', selected())
+press(ENTER)
+rows = panel_rows()
+check('Set start here' in rows and 'Set finish here' in rows and 'Delete sprint' not in rows, f'Sprint-Seite: {rows}')
+press(ESC); press(ESC)
+check(tick() == LEVEL_CLOSED, 'Rekorde/Sprint: zu')
+
 def pretty(stem):
     b = e.alloc(128)
     e.call('Fh2TestLogbookPretty', e.put_bytes(stem.encode() + b'\0'), b, 48)

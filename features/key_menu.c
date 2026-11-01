@@ -7,6 +7,7 @@
 #include "logging.h"
 #include "telemetry.h"
 #include "logbook.h"
+#include "records.h"
 #include "game_units.h"
 #include "rig_settings.h"
 #include "support.h"
@@ -21,10 +22,10 @@
 #define FILE_LIMIT 32768u
 #define MAX_ROWS (NOTIFY_PANEL_ROWS - 1)
 
-enum { LEVEL_CLOSED, LEVEL_GROUPS, LEVEL_LIST, LEVEL_BINDING, LEVEL_CAPTURE, LEVEL_RESET_ALL, LEVEL_STYLE, LEVEL_MOUSE, LEVEL_TELEMETRY, LEVEL_WORLD, LEVEL_LOGBOOK, LEVEL_COUNT };
+enum { LEVEL_CLOSED, LEVEL_GROUPS, LEVEL_LIST, LEVEL_BINDING, LEVEL_CAPTURE, LEVEL_RESET_ALL, LEVEL_STYLE, LEVEL_MOUSE, LEVEL_TELEMETRY, LEVEL_WORLD, LEVEL_LOGBOOK, LEVEL_RECORDS, LEVEL_SPRINT, LEVEL_COUNT };
 
 /* first page: rows after the binding pages */
-enum { TOP_STYLE = 100, TOP_RESET = 101, TOP_MOUSE = 102, TOP_TELEMETRY = 103, TOP_WORLD = 104, TOP_LOGBOOK = 105 };
+enum { TOP_STYLE = 100, TOP_RESET = 101, TOP_MOUSE = 102, TOP_TELEMETRY = 103, TOP_WORLD = 104, TOP_LOGBOOK = 105, TOP_RECORDS = 106, TOP_SPRINT = 107 };
 
 /* mouse steering choices: FH2_Keyboard.ini MouseSteering values */
 #define MOUSE_CHOICES 6
@@ -54,7 +55,7 @@ static const wchar_t *const group_driving[] = {L"Throttle", L"Brake", L"SteerLef
 static const wchar_t *const group_camera[] = {L"Camera", L"LookBack", L"LookLeft", L"LookRight", L"CockpitView",
                                               L"ArrowUp", L"ArrowDown", L"ArrowLeft", L"ArrowRight", NULL};
 static const wchar_t *const group_gripline[] = {L"Nitro", L"Noclip", L"NoclipUp", L"NoclipDown", L"NoclipFast",
-                                                L"Freecam", L"Keybinds", L"KeyMenu", NULL};
+                                                L"Freecam", L"Keybinds", L"KeyMenu", L"CruiseControl", NULL};
 static const wchar_t *const group_menu[] = {L"Pause", L"Confirm", L"Back", L"ButtonX", L"ButtonY", L"TabLeft",
                                             L"TabRight", L"DpadUp", L"DpadDown", L"DpadLeft", L"DpadRight", NULL};
 static const struct {
@@ -438,6 +439,8 @@ static void distance_text(double metres, wchar_t out[32]) {
     wcopy(out, n, 32, imperial ? L" mi" : L" km");
 }
 
+static int confirm_clear; /* records page: first Enter asks */
+
 static const unsigned world_ids[3] = {RIG_GRIP_SPEED_CAMERAS, RIG_GRIP_CAR_LABELS, RIG_GRIP_EVENT_ICONS};
 static const wchar_t *const world_german[3] = {L"Blitzer", L"Namen über Autos", L"Event-Symbole auf der Straße"};
 static const wchar_t *const world_english[3] = {L"Speed cameras", L"Names above cars", L"Event icons on the road"};
@@ -462,6 +465,13 @@ static void build_page(wchar_t *title) {
                 wchar_t dist[32];
                 distance_text(lm, dist);
                 row_add(tr(L"Fahrtenbuch", L"Logbook"), dist, 0, TOP_LOGBOOK);
+            }
+            row_add(tr(L"Rekorde", L"Records"), L"›", 0, TOP_RECORDS);
+            {
+                float sm;
+                int ss = records_sprint_state(&sm);
+                row_add(tr(L"Eigene Sprints", L"Own sprints"), ss == 2 ? tr(L"aktiv", L"active") : ss == 1 ? tr(L"Ziel fehlt", L"no finish") : L"›",
+                        0, TOP_SPRINT);
             }
             row_add(tr(L"Welt: Blitzer, Namen, Symbole", L"World: cameras, names, icons"), L"›", 0, TOP_WORLD);
             row_add(tr(L"Karten-Design", L"Card design"), style_names[notify_style()], 0, TOP_STYLE);
@@ -524,6 +534,7 @@ static void build_page(wchar_t *title) {
         case LEVEL_TELEMETRY: {
             wcopy(title, 0, 64, tr(L"Live-Telemetrie", L"Live telemetry"));
             row_add(tr(L"Telemetrie-Tafel", L"Telemetry panel"), telemetry_enabled() ? tr(L"An", L"On") : tr(L"Aus", L"Off"), 0, 0);
+            row_add(tr(L"Als CSV aufzeichnen", L"Record as CSV"), records_csv_on() ? tr(L"● läuft", L"● on") : tr(L"Aus", L"Off"), 0, 50);
             row_add(tr(L"Anzeigen (Enter = an/aus)", L"Shown (Enter = on/off)"), L"", NOTIFY_ROW_INFO, -1);
             int mask = telemetry_show();
             for (unsigned i = 0; i < TELEMETRY_SHOW_COUNT; ++i)
@@ -568,6 +579,62 @@ static void build_page(wchar_t *title) {
                 any = 1;
             }
             if (!any) row_add(tr(L"Noch kein Auto über 100 m", L"No car past 100 m yet"), L"", NOTIFY_ROW_INFO, -1);
+            hint(0);
+            break;
+        }
+        case LEVEL_RECORDS: {
+            wcopy(title, 0, 64, tr(L"Rekorde", L"Records"));
+            int imperial = game_units_imperial(keyboard_game_image());
+            static const unsigned kinds_metric[6] = {RECORD_SPRINT, RECORD_SPRINT200, RECORD_QUARTER, RECORD_BRAKE, RECORD_TOP, RECORD_OWN};
+            static const unsigned kinds_imperial[6] = {RECORD_SPRINT_MPH, RECORD_SPRINT200_MPH, RECORD_QUARTER, RECORD_BRAKE_MPH, RECORD_TOP, RECORD_OWN};
+            static const wchar_t *const names_de[6] = {L"0-100 km/h", L"0-200 km/h", L"Viertelmeile", L"Bremsweg 100-0", L"Höchsttempo", L"Eigener Sprint"};
+            static const wchar_t *const names_mph[6] = {L"0-60 mph", L"0-100 mph", L"Quarter mile", L"Braking 60-0", L"Top speed", L"Own sprint"};
+            static const wchar_t *const names_en[6] = {L"0-100 km/h", L"0-200 km/h", L"Quarter mile", L"Braking 100-0", L"Top speed", L"Own sprint"};
+            static const wchar_t *const names_de_mph[6] = {L"0-60 mph", L"0-100 mph", L"Viertelmeile", L"Bremsweg 60-0", L"Höchsttempo", L"Eigener Sprint"};
+            for (unsigned i = 0; i < 6; ++i) {
+                unsigned k = imperial ? kinds_imperial[i] : kinds_metric[i];
+                float v = records_best(k);
+                wchar_t text[32];
+                text[0] = 0;
+                if (v <= 0.0f) wcopy(text, 0, 32, L"–");
+                else if (k == RECORD_TOP) {
+                    unsigned n = wuint(text, 0, (unsigned)(v * (imperial ? 2.236936f : 3.6f) + 0.5f));
+                    wcopy(text, n, 32, imperial ? L" mph" : L" km/h");
+                } else if (k == RECORD_BRAKE_MPH) {
+                    unsigned n = wuint(text, 0, (unsigned)(v * 3.28084f + 0.5f));
+                    wcopy(text, n, 32, L" ft");
+                } else {
+                    int tenth = k == RECORD_BRAKE;
+                    unsigned h = (unsigned)(v * (tenth ? 10.0f : 100.0f) + 0.5f), n;
+                    n = wuint(text, 0, h / (tenth ? 10 : 100));
+                    n = wcopy(text, n, 32, m.german ? L"," : L".");
+                    if (!tenth && h % 100 < 10) n = wcopy(text, n, 32, L"0");
+                    n = wuint(text, n, h % (tenth ? 10 : 100));
+                    wcopy(text, n, 32, tenth ? L" m" : L" s");
+                }
+                row_add(m.german ? (imperial ? names_de_mph[i] : names_de[i]) : (imperial ? names_mph[i] : names_en[i]), text, 0, -1);
+            }
+            row_add(confirm_clear ? tr(L"Sicher? Nochmal Enter", L"Sure? Enter again") : tr(L"Alle Rekorde löschen", L"Clear all records"),
+                    L"", 0, 0);
+            hint(0);
+            break;
+        }
+        case LEVEL_SPRINT: {
+            wcopy(title, 0, 64, tr(L"Eigene Sprints", L"Own sprints"));
+            float sm;
+            int ss = records_sprint_state(&sm);
+            row_add(tr(L"Start hier setzen", L"Set start here"), ss >= 1 ? tr(L"✓ gesetzt", L"✓ set") : L"", 0, 0);
+            row_add(tr(L"Ziel hier setzen", L"Set finish here"), ss == 2 ? tr(L"✓ gesetzt", L"✓ set") : L"", 0, 1);
+            if (ss) row_add(tr(L"Sprint löschen", L"Delete sprint"), L"", 0, 2);
+            if (ss == 2) {
+                wchar_t text[32];
+                distance_text((double)sm, text);
+                row_add(tr(L"Luftlinie Start-Ziel", L"Start to finish"), text, NOTIFY_ROW_INFO, -1);
+                row_add(tr(L"Durch den Start fahren = los", L"Leave the start = clock runs"), L"", NOTIFY_ROW_INFO, -1);
+            } else {
+                row_add(tr(L"Am Start halten, Start setzen,", L"Stop at the start, set it,"), L"", NOTIFY_ROW_INFO, -1);
+                row_add(tr(L"zum Ziel fahren, Ziel setzen", L"drive to the end, set finish"), L"", NOTIFY_ROW_INFO, -1);
+            }
             hint(0);
             break;
         }
@@ -628,6 +695,8 @@ static void back(void) {
         case LEVEL_TELEMETRY: m.level = LEVEL_GROUPS; break;
         case LEVEL_WORLD: m.level = LEVEL_GROUPS; break;
         case LEVEL_LOGBOOK: m.level = LEVEL_GROUPS; break;
+        case LEVEL_RECORDS: confirm_clear = 0; m.level = LEVEL_GROUPS; break;
+        case LEVEL_SPRINT: m.level = LEVEL_GROUPS; break;
         case LEVEL_BINDING: m.level = LEVEL_LIST; break;
         case LEVEL_CAPTURE: m.level = LEVEL_BINDING; break;
     }
@@ -649,6 +718,13 @@ static void choose(void) {
             if (action == TOP_RESET) {
                 m.level = LEVEL_RESET_ALL;
                 m.sel[LEVEL_RESET_ALL] = 0;
+            } else if (action == TOP_RECORDS) {
+                m.level = LEVEL_RECORDS;
+                m.sel[LEVEL_RECORDS] = 0;
+                confirm_clear = 0;
+            } else if (action == TOP_SPRINT) {
+                m.level = LEVEL_SPRINT;
+                m.sel[LEVEL_SPRINT] = 0;
             } else if (action == TOP_LOGBOOK) {
                 m.level = LEVEL_LOGBOOK;
                 m.sel[LEVEL_LOGBOOK] = 0;
@@ -696,7 +772,13 @@ static void choose(void) {
             break;
         }
         case LEVEL_TELEMETRY: {
-            if (action == 0) {
+            if (action == 50) {
+                int on = !records_csv_on();
+                if (on && !telemetry_enabled() && !rig_setting_set(RIG_GRIP_TELEMETRY, 1)) telemetry_set_enabled(1); /* the CSV needs the panel's values */
+                records_csv_set(on);
+                notify_show(on ? (m.german ? "CSV-Aufzeichnung an\nOrdner Azimuth\\Gripline_Telemetrie" : "CSV recording on\nFolder Azimuth\\Gripline_Telemetrie")
+                               : (m.german ? "CSV-Aufzeichnung aus" : "CSV recording off"));
+            } else if (action == 0) {
                 int on = !telemetry_enabled();
                 if (!rig_setting_set(RIG_GRIP_TELEMETRY, on)) telemetry_set_enabled(on); /* rig_settings saves it */
                 log_append(on ? "KEYMENU: telemetry on\r\n" : "KEYMENU: telemetry off\r\n");
@@ -707,6 +789,31 @@ static void choose(void) {
             }
             break;
         }
+        case LEVEL_RECORDS:
+            if (action == 0) {
+                if (!confirm_clear) confirm_clear = 1;
+                else {
+                    confirm_clear = 0;
+                    records_clear();
+                    notify_show(m.german ? "Rekorde gelöscht" : "Records cleared");
+                }
+            }
+            break;
+        case LEVEL_SPRINT:
+            if (action == 0) {
+                if (records_set_start())
+                    notify_show(m.german ? "Start gesetzt\nJetzt zum Ziel fahren und Ziel setzen" : "Start set\nNow drive to the finish and set it");
+                else notify_show(m.german ? "Start nicht gesetzt\nErst losfahren (kein Auto erkannt)" : "Start not set\nDrive first (no car seen)");
+            } else if (action == 1) {
+                if (records_set_finish())
+                    notify_show(m.german ? "Ziel gesetzt\nZum Start fahren, losfahren = Zeit läuft" : "Finish set\nGo to the start, leaving it starts the clock");
+                else notify_show(m.german ? "Ziel nicht gesetzt\nErst Start setzen, Ziel 30 m+ weg" : "Finish not set\nSet the start first, 30 m+ away");
+            } else if (action == 2) {
+                records_clear_sprint();
+                notify_show(m.german ? "Sprint gelöscht" : "Sprint deleted");
+                m.sel[LEVEL_SPRINT] = 0;
+            }
+            break;
         case LEVEL_WORLD: {
             if (action >= 0 && action < 3) {
                 unsigned id = world_ids[action];
