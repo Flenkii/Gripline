@@ -460,6 +460,15 @@ void keyboard_set_setting(unsigned id, int value) {
         InterlockedExchange(&values[id], value);
 }
 
+int keyboard_mouse_steering(void) {
+    return mouse_sensitivity;
+}
+
+void keyboard_set_mouse_steering(int sensitivity) {
+    if (sensitivity < 0 || sensitivity > 100) return;
+    mouse_sensitivity = sensitivity;
+}
+
 const wchar_t *keyboard_ini_path(void) {
     return loaded ? ini_path : NULL;
 }

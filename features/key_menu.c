@@ -17,10 +17,16 @@
 #define FILE_LIMIT 32768u
 #define MAX_ROWS (NOTIFY_PANEL_ROWS - 1)
 
-enum { LEVEL_CLOSED, LEVEL_GROUPS, LEVEL_LIST, LEVEL_BINDING, LEVEL_CAPTURE, LEVEL_RESET_ALL, LEVEL_STYLE, LEVEL_COUNT };
+enum { LEVEL_CLOSED, LEVEL_GROUPS, LEVEL_LIST, LEVEL_BINDING, LEVEL_CAPTURE, LEVEL_RESET_ALL, LEVEL_STYLE, LEVEL_MOUSE, LEVEL_COUNT };
 
 /* first page: rows after the binding pages */
-enum { TOP_STYLE = 100, TOP_RESET = 101 };
+enum { TOP_STYLE = 100, TOP_RESET = 101, TOP_MOUSE = 102 };
+
+/* mouse steering choices: FH2_Keyboard.ini MouseSteering values */
+#define MOUSE_CHOICES 5
+static const int mouse_values[MOUSE_CHOICES] = {0, 20, 40, 65, 90};
+static const wchar_t *const mouse_german[MOUSE_CHOICES] = {L"Aus", L"Sanft", L"Mittel", L"Schnell", L"Sehr schnell"};
+static const wchar_t *const mouse_english[MOUSE_CHOICES] = {L"Off", L"Gentle", L"Medium", L"Fast", L"Very fast"};
 
 static const wchar_t *const style_names[NOTIFY_STYLE_COUNT] = {L"Classic", L"Enhanced", L"Overdrive"};
 
@@ -231,6 +237,35 @@ static int save_style(int style) {
     return 1;
 }
 
+/* FH2_Keyboard.ini [Keyboard] MouseSteering */
+static int save_mouse(int value) {
+    size_t length;
+    char text[4];
+    unsigned n = 0;
+    if (value >= 100) text[n++] = '1', text[n++] = '0', text[n++] = '0';
+    else {
+        if (value >= 10) text[n++] = (char)('0' + value / 10);
+        text[n++] = (char)('0' + value % 10);
+    }
+    text[n] = 0;
+    if (!read_file_at(ini_path, &length)) return 0;
+    size_t written = ini_set_value(file_text, length, "Keyboard", "MouseSteering", text, edit_text[0], FILE_LIMIT + 1);
+    if (!written || written > FILE_LIMIT || !write_file_at(ini_path, edit_text[0], written)) {
+        log_append("KEYMENU: FH2_Keyboard.ini could not be written - mouse steering not saved.\r\n");
+        return 0;
+    }
+    return 1;
+}
+
+static int mouse_choice(void) {
+    int value = keyboard_mouse_steering(), best = 0;
+    for (int i = 1; i < MOUSE_CHOICES; ++i) {
+        int d = mouse_values[i] - value, b = mouse_values[best] - value;
+        if ((d < 0 ? -d : d) < (b < 0 ? -b : b)) best = i;
+    }
+    return value ? (best ? best : 1) : 0;
+}
+
 static void log_binding(unsigned index) {
     unsigned char vk[4];
     char line[128] = "KEYMENU: ", value[64];
@@ -329,8 +364,10 @@ static void build_page(wchar_t *title) {
     wchar_t keys[32];
     switch (m.level) {
         case LEVEL_GROUPS:
-            wcopy(title, 0, 64, tr(L"Tastenbelegung ändern", L"Change key bindings"));
+            wcopy(title, 0, 64, tr(L"Gripline-Menü", L"Gripline menu"));
             for (unsigned g = 0; g < GROUP_COUNT; ++g) row_add(tr(groups[g].german, groups[g].english), L"›", 0, (int)g);
+            row_add(tr(L"Maus-Lenkung", L"Mouse steering"), tr(mouse_german[mouse_choice()], mouse_english[mouse_choice()]), 0,
+                    TOP_MOUSE);
             row_add(tr(L"Karten-Design", L"Card design"), style_names[notify_style()], 0, TOP_STYLE);
             row_add(tr(L"Alle auf Standard", L"Reset all to default"), L"›", 0, TOP_RESET);
             hint(1);
@@ -371,6 +408,13 @@ static void build_page(wchar_t *title) {
             wcopy(title, 0, 64, tr(L"Karten-Design", L"Card design"));
             for (int i = 0; i < NOTIFY_STYLE_COUNT; ++i)
                 row_add(style_names[i], i == notify_style() ? tr(L"✓ aktiv", L"✓ active") : L"", 0, i);
+            hint(0);
+            break;
+        case LEVEL_MOUSE:
+            wcopy(title, 0, 64, tr(L"Maus-Lenkung", L"Mouse steering"));
+            row_add(tr(L"Lenken mit der Maus wie in ETS2", L"Steer with the mouse like ETS2"), L"", NOTIFY_ROW_INFO, -1);
+            for (int i = 0; i < MOUSE_CHOICES; ++i)
+                row_add(tr(mouse_german[i], mouse_english[i]), i == mouse_choice() ? tr(L"✓ aktiv", L"✓ active") : L"", 0, i);
             hint(0);
             break;
         case LEVEL_RESET_ALL:
@@ -418,6 +462,7 @@ static void back(void) {
         case LEVEL_LIST: m.level = LEVEL_GROUPS; break;
         case LEVEL_RESET_ALL: m.level = LEVEL_GROUPS; break;
         case LEVEL_STYLE: m.level = LEVEL_GROUPS; break;
+        case LEVEL_MOUSE: m.level = LEVEL_GROUPS; break;
         case LEVEL_BINDING: m.level = LEVEL_LIST; break;
         case LEVEL_CAPTURE: m.level = LEVEL_BINDING; break;
     }
@@ -439,6 +484,9 @@ static void choose(void) {
             if (action == TOP_RESET) {
                 m.level = LEVEL_RESET_ALL;
                 m.sel[LEVEL_RESET_ALL] = 0;
+            } else if (action == TOP_MOUSE) {
+                m.level = LEVEL_MOUSE;
+                m.sel[LEVEL_MOUSE] = mouse_choice();
             } else if (action == TOP_STYLE) {
                 m.level = LEVEL_STYLE;
                 m.sel[LEVEL_STYLE] = notify_style();
@@ -471,6 +519,23 @@ static void choose(void) {
                 unsigned char none[4] = {0, 0, 0, 0};
                 apply((unsigned)m.binding, none);
             }
+            break;
+        }
+        case LEVEL_MOUSE: {
+            keyboard_set_mouse_steering(mouse_values[action]);
+            int saved = save_mouse(mouse_values[action]);
+            char text[192];
+            unsigned t = 0;
+            wchar_t line[128];
+            unsigned n = wcopy(line, 0, 128, tr(L"Maus-Lenkung: ", L"Mouse steering: "));
+            n = wcopy(line, n, 128, tr(mouse_german[action], mouse_english[action]));
+            wcopy(line, n, 128, !saved ? tr(L"\nNur bis zum Spielende (nicht gespeichert)", L"\nUntil the game closes (not saved)")
+                               : action ? tr(L"\nMaus links/rechts lenkt beim Fahren", L"\nMove the mouse left/right while driving")
+                                        : tr(L"\nLenken nur mit Tasten und Controller", L"\nSteering with keys and controller only"));
+            utf8(line, text, sizeof(text), &t);
+            text[t] = 0;
+            notify_show(text);
+            log_append_value("KEYMENU: mouse steering ", mouse_values[action]);
             break;
         }
         case LEVEL_STYLE: {

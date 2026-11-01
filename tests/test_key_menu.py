@@ -111,7 +111,7 @@ check(ok == 1 and card_text == 'Press F8 to change your keys\nKey menu: arrows, 
 check(e.call('Fh2TestKeyboardBinding', 42, 0) == F8, 'KeyMenu = F8 (Standard)')
 
 press(F8)
-check(tick() == LEVEL_GROUPS and panel() == 7, f'F8 oeffnet das Menue (4 Seiten + Karten-Design + Alle auf Standard + Hinweis): {panel()}')
+check(tick() == LEVEL_GROUPS and panel() == 8, f'F8 oeffnet das Menue (4 Seiten + Maus-Lenkung + Karten-Design + Alle auf Standard + Hinweis): {panel()}')
 check(selected() == 'Driving', f'erste Zeile gewaehlt: {selected()}')
 
 # while open: the game and noclip get no key
@@ -228,6 +228,19 @@ press(DOWN); press(DOWN); press(ENTER)
 check(e.call('Fh2TestNotifyStyleGet') == 2 and b'CardStyle=2' in open(os.path.join(root, 'Gripline.ini'), 'rb').read(), 'zurueck auf Overdrive')
 press(ESC); press(ESC)
 check(tick() == LEVEL_CLOSED, 'Esc, Esc: zu')
+
+# mouse steering page: Off by default, Medium chosen -> FH2_Keyboard.ini MouseSteering=40
+press(0x79)
+press(UP); press(UP); press(UP)
+check(selected() == 'Mouse steering' and panel_rows().get('Mouse steering') == 'Off', f'Maus-Zeile zeigt Aus: {panel_rows()}')
+press(ENTER)
+check(selected() == 'Off' and panel_rows().get('Off') == '\u2713 active', f'Maus-Seite: Aus gewaehlt {panel_rows()}')
+press(DOWN); press(DOWN); press(ENTER)
+check('MouseSteering=40\r\n' in ini() and panel_rows().get('Medium') == '\u2713 active', 'Mittel gewaehlt und gespeichert')
+press(UP); press(UP); press(ENTER)
+check('MouseSteering=0\r\n' in ini(), 'wieder Aus')
+press(ESC); press(ESC)
+check(tick() == LEVEL_CLOSED, 'Maus: Esc, Esc: zu')
 
 # "all to default" with confirmation
 press(0x79)
