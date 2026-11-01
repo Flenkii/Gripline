@@ -53,6 +53,10 @@ static const wchar_t *const item_english[TELEMETRY_SHOW_COUNT] = {
     L"Slope", L"0-60 time", L"Top speed", L"Best values", L"Quarter mile", L"0-100 mph time", L"Braking distance"};
 
 const wchar_t *telemetry_item_name(unsigned item, int german) {
+    /* the sprint rows follow the game's units (km/h or mph) */
+    int mph = game && game_units_imperial(game);
+    if (item == TELEMETRY_SHOW_SPRINT) return german ? (mph ? L"0-60-mph-Zeit" : L"0-100-Zeit") : (mph ? L"0-60 mph time" : L"0-100 km/h time");
+    if (item == TELEMETRY_SHOW_SPRINT200) return german ? (mph ? L"0-100-mph-Zeit" : L"0-200-Zeit") : (mph ? L"0-100 mph time" : L"0-200 km/h time");
     return item < TELEMETRY_SHOW_COUNT ? (german ? item_german[item] : item_english[item]) : L"";
 }
 
