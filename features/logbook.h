@@ -3,7 +3,7 @@
 #include <stddef.h>
 
 /* Logbook (V7, Marvin): kilometres, driving time and top speed of every car, kept for ever in
-   Gripline_Fahrtenbuch.txt next to Gripline.ini. Shown in the Gripline menu (F8) > Fahrtenbuch.
+   Gripline_Logbook.txt next to Gripline.ini. Shown in the Gripline menu (F8) > Logbook.
    A milestone card comes at 100, 500, 1000, 2500, 5000 and 10000 km (mi) with one car.
    Which car is driven: the game keeps no name Gripline knows, so the own car object is searched
    once for the name of one of the car files in media\cars (e.g. NIS_GTR_12); found, the place is

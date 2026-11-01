@@ -163,7 +163,7 @@ static void save(void) {
     static char out[FILE_LIMIT];
     size_t n = 0;
     AcquireSRWLockShared(&lock);
-    put(out, &n, sizeof(out), "# Gripline Rekorde / records (value * 1000: s, m, m/s), own sprint (cm)\r\n");
+    put(out, &n, sizeof(out), "# Gripline records (value * 1000: s, m, m/s), own sprint (cm)\r\n");
     for (unsigned k = 0; k < RECORD_COUNT; ++k) {
         if (best[k] <= 0.0f) continue;
         put(out, &n, sizeof(out), "best ");
@@ -180,7 +180,7 @@ static void save(void) {
         put(out, &n, sizeof(out), "\r\n");
     }
     ReleaseSRWLockShared(&lock);
-    if (!write_text(book_path, out, n)) log_append("RECORDS: Gripline_Rekorde.txt could not be written.\r\n");
+    if (!write_text(book_path, out, n)) log_append("RECORDS: Gripline_Records.txt could not be written.\r\n");
     dirty = 0;
 }
 
@@ -188,8 +188,8 @@ static void save(void) {
 
 void records_start(unsigned char *game_image, const wchar_t *settings_directory) {
     game = game_image;
-    if (!settings_directory || !path_join(book_path, settings_directory, L"Gripline_Rekorde.txt") ||
-        !path_join(csv_dir, settings_directory, L"Gripline_Telemetrie"))
+    if (!settings_directory || !path_join(book_path, settings_directory, L"Gripline_Records.txt") ||
+        !path_join(csv_dir, settings_directory, L"Gripline_Telemetry"))
         return;
     load();
     started = 1;
@@ -349,7 +349,7 @@ static int csv_open(void) {
     if (get) get(&lt);
     static wchar_t name[64], path[PATH_CAPACITY];
     size_t n = 0;
-    for (const wchar_t *s = L"telemetrie_"; *s; ++s) name[n++] = *s;
+    for (const wchar_t *s = L"telemetry_"; *s; ++s) name[n++] = *s;
     two(name, &n, lt.year / 100), two(name, &n, lt.year % 100), name[n++] = L'-';
     two(name, &n, lt.month), name[n++] = L'-', two(name, &n, lt.day), name[n++] = L'_';
     two(name, &n, lt.hour), name[n++] = L'-', two(name, &n, lt.minute), name[n++] = L'-', two(name, &n, lt.second);
@@ -362,7 +362,7 @@ static int csv_open(void) {
     DWORD w;
     WriteFile(csv_file, head, sizeof(head) - 1, &w, NULL);
     csv_t0 = GetTickCount64();
-    log_append("RECORDS: CSV recording started in Gripline_Telemetrie.\r\n");
+    log_append("RECORDS: CSV recording started in Gripline_Telemetry.\r\n");
     return 1;
 }
 

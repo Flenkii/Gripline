@@ -776,7 +776,7 @@ static void choose(void) {
                 int on = !records_csv_on();
                 if (on && !telemetry_enabled() && !rig_setting_set(RIG_GRIP_TELEMETRY, 1)) telemetry_set_enabled(1); /* the CSV needs the panel's values */
                 records_csv_set(on);
-                notify_show(on ? (m.german ? "CSV-Aufzeichnung an\nOrdner Azimuth\\Gripline_Telemetrie" : "CSV recording on\nFolder Azimuth\\Gripline_Telemetrie")
+                notify_show(on ? (m.german ? "CSV-Aufzeichnung an\nOrdner Azimuth\\Gripline_Telemetry" : "CSV recording on\nFolder Azimuth\\Gripline_Telemetry")
                                : (m.german ? "CSV-Aufzeichnung aus" : "CSV recording off"));
             } else if (action == 0) {
                 int on = !telemetry_enabled();

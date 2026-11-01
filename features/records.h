@@ -3,11 +3,11 @@
 
 /* Records for ever, own sprints and telemetry as CSV (V7, community ideas).
    - Records: the best 0-100 (0-60 mph), 0-200 (0-100 mph), quarter mile, braking distance, top speed and
-     own sprint time stay in Gripline_Rekorde.txt next to Gripline.ini; a new one brings a gold card.
+     own sprint time stay in Gripline_Records.txt next to Gripline.ini; a new one brings a gold card.
    - Own sprint: Gripline menu (F8) > Eigene Sprints: start and finish where the car stands; driving out
      of the start circle starts the clock, the finish circle (15 m) stops it.
-   - CSV: Gripline menu > Live-Telemetrie > "Als CSV aufzeichnen": 10 lines a second into
-     Gripline_Telemetrie\telemetrie_<date>_<time>.csv (until switched off or the game ends). */
+   - CSV: Gripline menu > Live telemetry > "Record as CSV": 10 lines a second into
+     Gripline_Telemetry\telemetry_<date>_<time>.csv (until switched off or the game ends). */
 
 enum {
     RECORD_SPRINT,    /* 0-100 km/h, s */

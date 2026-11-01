@@ -356,7 +356,7 @@ static void save_book(void) {
     static char out[FILE_LIMIT];
     size_t n = 0;
     AcquireSRWLockShared(&lock);
-    put(out, &n, sizeof(out), "# Gripline Fahrtenbuch / logbook: metres, seconds, top speed cm/s\r\ntotal ");
+    put(out, &n, sizeof(out), "# Gripline logbook: metres, seconds, top speed cm/s\r\ntotal ");
     put_uint(out, &n, sizeof(out), (unsigned long)total_metres);
     put(out, &n, sizeof(out), " ");
     put_uint(out, &n, sizeof(out), (unsigned long)total_seconds);
@@ -375,7 +375,7 @@ static void save_book(void) {
         put(out, &n, sizeof(out), "\r\n");
     }
     ReleaseSRWLockShared(&lock);
-    if (!write_text(book_path, out, n)) log_append("LOGBOOK: Gripline_Fahrtenbuch.txt could not be written.\r\n");
+    if (!write_text(book_path, out, n)) log_append("LOGBOOK: Gripline_Logbook.txt could not be written.\r\n");
     dirty = 0;
 }
 
@@ -439,9 +439,15 @@ void logbook_start(unsigned char *game_image, const wchar_t *settings_directory,
                    int news) {
     game = game_image;
     news_seen = news;
-    if (!settings_directory || !path_join(book_path, settings_directory, L"Gripline_Fahrtenbuch.txt") ||
+    if (!settings_directory || !path_join(book_path, settings_directory, L"Gripline_Logbook.txt") ||
         !path_join(ini_path, settings_directory, L"Gripline.ini"))
         return;
+    {   /* the first V7 test build used a German name */
+        static wchar_t old[PATH_CAPACITY];
+        if (path_join(old, settings_directory, L"Gripline_Fahrtenbuch.txt") &&
+            MoveFileExW(old, book_path, 0))
+            log_append("LOGBOOK: Gripline_Fahrtenbuch.txt renamed to Gripline_Logbook.txt.\r\n");
+    }
     load_stems(mount_dir);
     load_book();
     started = 1;
