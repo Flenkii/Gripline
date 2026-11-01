@@ -19,10 +19,10 @@
 #define FILE_LIMIT 32768u
 #define MAX_ROWS (NOTIFY_PANEL_ROWS - 1)
 
-enum { LEVEL_CLOSED, LEVEL_GROUPS, LEVEL_LIST, LEVEL_BINDING, LEVEL_CAPTURE, LEVEL_RESET_ALL, LEVEL_STYLE, LEVEL_MOUSE, LEVEL_TELEMETRY, LEVEL_COUNT };
+enum { LEVEL_CLOSED, LEVEL_GROUPS, LEVEL_LIST, LEVEL_BINDING, LEVEL_CAPTURE, LEVEL_RESET_ALL, LEVEL_STYLE, LEVEL_MOUSE, LEVEL_TELEMETRY, LEVEL_WORLD, LEVEL_COUNT };
 
 /* first page: rows after the binding pages */
-enum { TOP_STYLE = 100, TOP_RESET = 101, TOP_MOUSE = 102, TOP_TELEMETRY = 103 };
+enum { TOP_STYLE = 100, TOP_RESET = 101, TOP_MOUSE = 102, TOP_TELEMETRY = 103, TOP_WORLD = 104 };
 
 /* mouse steering choices: FH2_Keyboard.ini MouseSteering values */
 #define MOUSE_CHOICES 6
@@ -410,6 +410,10 @@ static void hint(int first_page) {
             first_page ? tr(L"Esc schließen", L"Esc close") : tr(L"Esc zurück", L"Esc back"), NOTIFY_ROW_HINT, -1);
 }
 
+static const unsigned world_ids[3] = {RIG_GRIP_SPEED_CAMERAS, RIG_GRIP_CAR_LABELS, RIG_GRIP_EVENT_ICONS};
+static const wchar_t *const world_german[3] = {L"Blitzer", L"Namen über Autos", L"Event-Symbole auf der Straße"};
+static const wchar_t *const world_english[3] = {L"Speed cameras", L"Names above cars", L"Event icons on the road"};
+
 static void build_page(wchar_t *title) {
     row_count = 0;
     title[0] = 0;
@@ -423,6 +427,7 @@ static void build_page(wchar_t *title) {
                     TOP_MOUSE);
             row_add(tr(L"Live-Telemetrie", L"Live telemetry"), telemetry_enabled() ? tr(L"An", L"On") : tr(L"Aus", L"Off"), 0,
                     TOP_TELEMETRY);
+            row_add(tr(L"Welt: Blitzer, Namen, Symbole", L"World: cameras, names, icons"), L"›", 0, TOP_WORLD);
             row_add(tr(L"Karten-Design", L"Card design"), style_names[notify_style()], 0, TOP_STYLE);
             row_add(tr(L"Alle auf Standard", L"Reset all to default"), L"›", 0, TOP_RESET);
             hint(1);
@@ -491,6 +496,14 @@ static void build_page(wchar_t *title) {
             hint(0);
             break;
         }
+        case LEVEL_WORLD:
+            wcopy(title, 0, 64, tr(L"Welt", L"World"));
+            for (unsigned i = 0; i < 3; ++i)
+                row_add(tr(world_german[i], world_english[i]), rig_setting_get(world_ids[i]) ? tr(L"An", L"On") : tr(L"Aus", L"Off"), 0,
+                        (int)i);
+            row_add(tr(L"Wirkt nach Spiel-Neustart", L"Takes effect after a restart"), L"", NOTIFY_ROW_INFO, -1);
+            hint(0);
+            break;
         case LEVEL_RESET_ALL:
             wcopy(title, 0, 64, tr(L"Alle Tasten auf Standard?", L"All keys to default?"));
             row_add(tr(L"Nein, zurück", L"No, back"), L"", 0, 0);
@@ -538,6 +551,7 @@ static void back(void) {
         case LEVEL_STYLE: m.level = LEVEL_GROUPS; break;
         case LEVEL_MOUSE: m.level = LEVEL_GROUPS; break;
         case LEVEL_TELEMETRY: m.level = LEVEL_GROUPS; break;
+        case LEVEL_WORLD: m.level = LEVEL_GROUPS; break;
         case LEVEL_BINDING: m.level = LEVEL_LIST; break;
         case LEVEL_CAPTURE: m.level = LEVEL_BINDING; break;
     }
@@ -559,6 +573,9 @@ static void choose(void) {
             if (action == TOP_RESET) {
                 m.level = LEVEL_RESET_ALL;
                 m.sel[LEVEL_RESET_ALL] = 0;
+            } else if (action == TOP_WORLD) {
+                m.level = LEVEL_WORLD;
+                m.sel[LEVEL_WORLD] = 0;
             } else if (action == TOP_TELEMETRY) {
                 m.level = LEVEL_TELEMETRY;
                 m.sel[LEVEL_TELEMETRY] = 0;
@@ -608,6 +625,15 @@ static void choose(void) {
                 int mask = telemetry_show() ^ (1 << (action - 1));
                 telemetry_set_show(mask);
                 if (!save_gripline_int("TelemetryShow", mask)) log_append("KEYMENU: Gripline.ini could not be written - telemetry rows not saved.\r\n");
+            }
+            break;
+        }
+        case LEVEL_WORLD: {
+            if (action >= 0 && action < 3) {
+                unsigned id = world_ids[action];
+                int on = !rig_setting_get(id);
+                rig_setting_set(id, on); /* saves Gripline.ini and shows the restart card */
+                log_append(on ? "KEYMENU: world option on\r\n" : "KEYMENU: world option off\r\n");
             }
             break;
         }

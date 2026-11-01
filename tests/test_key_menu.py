@@ -111,7 +111,7 @@ check(ok == 1 and card_text == 'Press F8 to change your keys\nKey menu: arrows, 
 check(e.call('Fh2TestKeyboardBinding', 42, 0) == F8, 'KeyMenu = F8 (Standard)')
 
 press(F8)
-check(tick() == LEVEL_GROUPS and panel() == 9, f'F8 oeffnet das Menue (4 Seiten + Maus-Lenkung + Telemetrie + Karten-Design + Alle auf Standard + Hinweis): {panel()}')
+check(tick() == LEVEL_GROUPS and panel() == 10, f'F8 oeffnet das Menue (4 Seiten + Maus-Lenkung + Telemetrie + Welt + Karten-Design + Alle auf Standard + Hinweis): {panel()}')
 check(selected() == 'Driving', f'erste Zeile gewaehlt: {selected()}')
 
 # while open: the game and noclip get no key
@@ -231,7 +231,7 @@ check(tick() == LEVEL_CLOSED, 'Esc, Esc: zu')
 
 # mouse steering page: Off by default, Medium chosen -> FH2_Keyboard.ini MouseSteering=40
 press(0x79)
-press(UP); press(UP); press(UP); press(UP)
+press(UP); press(UP); press(UP); press(UP); press(UP)
 check(selected() == 'Mouse steering (experimental)' and panel_rows().get('Mouse steering (experimental)') == 'Off', f'Maus-Zeile zeigt Aus: {panel_rows()}')
 press(ENTER)
 check(selected() == 'Off' and panel_rows().get('Off') == '\u2713 active', f'Maus-Seite: Aus gewaehlt {panel_rows()}')
@@ -244,7 +244,7 @@ check(tick() == LEVEL_CLOSED, 'Maus: Esc, Esc: zu')
 
 # telemetry page: Turn rate on -> Gripline.ini TelemetryShow, dead zone 40 % -> FH2_Keyboard.ini
 press(0x79)
-press(UP); press(UP); press(UP)
+press(UP); press(UP); press(UP); press(UP)
 check(selected() == 'Live telemetry', selected())
 press(ENTER)
 check(selected() == 'Telemetry panel', selected())
@@ -260,6 +260,22 @@ press(ENTER)
 check('MouseDeadZone=40\r\n' in ini(), 'Totzone 40 % gespeichert')
 press(ESC); press(ESC)
 check(tick() == LEVEL_CLOSED, 'Telemetrie/Totzone: zu')
+
+# world page: three on/off rows, restart note
+press(0x79)
+press(UP); press(UP); press(UP)
+check(selected() == 'World: cameras, names, icons', selected())
+press(ENTER)
+rows = panel_rows()
+check(selected() == 'Speed cameras' and 'Names above cars' in rows and 'Event icons on the road' in rows
+      and 'Takes effect after a restart' in rows, f'Welt-Seite: {rows}')
+before = rows.get('Speed cameras')
+press(ENTER)
+check(panel_rows().get('Speed cameras') != before, f'Blitzer umgeschaltet: {before} -> {panel_rows().get("Speed cameras")}')
+press(ENTER)
+check(panel_rows().get('Speed cameras') == before, 'Blitzer zurueck')
+press(ESC); press(ESC)
+check(tick() == LEVEL_CLOSED, 'Welt: zu')
 
 # "all to default" with confirmation
 press(0x79)

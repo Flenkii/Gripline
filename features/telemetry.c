@@ -16,7 +16,9 @@ static volatile LONG show_mask = TELEMETRY_SHOW_DEFAULT;
 static struct {
     float speed, slip, side_g, long_g, last_long, last_side, yaw, slope;
     float sprint_time, sprint_last, sprint_best, top; /* seconds; m/s */
-    int have_last, sprint_armed;
+    float run_time, run_dist, quarter_last, quarter_best, quarter_speed, s200_last, s200_best; /* from standstill */
+    float brake_dist, brake_last, brake_best, last_speed;
+    int have_last, sprint_armed, quarter_armed, s200_armed, braking;
     ULONGLONG time;
 } t;
 static ULONGLONG next_card, units_next;
@@ -44,10 +46,10 @@ int telemetry_show(void) {
 
 static const wchar_t *const item_german[TELEMETRY_SHOW_COUNT] = {
     L"Tempo", L"Grip / Rutschwinkel", L"Querkraft", L"Bremsen / Gas", L"Drehrate",
-    L"Steigung", L"0-100-Zeit", L"Höchsttempo", L"Bestwerte"};
+    L"Steigung", L"0-100-Zeit", L"Höchsttempo", L"Bestwerte", L"Viertelmeile", L"0-200-Zeit", L"Bremsweg"};
 static const wchar_t *const item_english[TELEMETRY_SHOW_COUNT] = {
     L"Speed", L"Grip / slip angle", L"Side force", L"Brake / throttle", L"Turn rate",
-    L"Slope", L"0-60 time", L"Top speed", L"Best values"};
+    L"Slope", L"0-60 time", L"Top speed", L"Best values", L"Quarter mile", L"0-100 mph time", L"Braking distance"};
 
 const wchar_t *telemetry_item_name(unsigned item, int german) {
     return item < TELEMETRY_SHOW_COUNT ? (german ? item_german[item] : item_english[item]) : L"";
@@ -112,6 +114,41 @@ void telemetry_sample(float dt, const float velocity[3], const float right[3], c
             t.sprint_armed = 0; /* too slow or backwards: not a sprint */
         }
     }
+    /* measuring from standstill: quarter mile (402.336 m) and 0-200 km/h (0-100 mph) */
+    if (speed < 0.3f) {
+        t.quarter_armed = t.s200_armed = 1;
+        t.run_time = t.run_dist = 0.0f;
+    } else if (t.quarter_armed || t.s200_armed) {
+        t.run_time += dt;
+        t.run_dist += speed * dt;
+        if (along < -0.5f || t.run_time > 90.0f) t.quarter_armed = t.s200_armed = 0;
+        if (t.quarter_armed && t.run_dist >= 402.336f) {
+            t.quarter_last = t.run_time;
+            t.quarter_speed = speed;
+            if (t.quarter_best <= 0.0f || t.run_time < t.quarter_best) t.quarter_best = t.run_time;
+            t.quarter_armed = 0;
+        }
+        if (t.s200_armed && speed >= (imperial ? 44.704f : 55.5556f)) {
+            t.s200_last = t.run_time;
+            if (t.s200_best <= 0.0f || t.run_time < t.s200_best) t.s200_best = t.run_time;
+            t.s200_armed = 0;
+        }
+    }
+    /* braking distance: starts when the car falls through 100 km/h (60 mph) while braking, ends at standstill */
+    float brake_from = imperial ? 26.8224f : 27.7778f;
+    if (!t.braking && t.have_last && t.last_speed >= brake_from && speed < brake_from && t.long_g < -0.3f) {
+        t.braking = 1;
+        t.brake_dist = 0.0f;
+    } else if (t.braking) {
+        t.brake_dist += speed * dt;
+        if (speed > t.last_speed + 0.5f || t.brake_dist > 400.0f) t.braking = 0; /* gas again: no braking test */
+        else if (speed < 0.3f) {
+            t.brake_last = t.brake_dist;
+            if (t.brake_best <= 0.0f || t.brake_dist < t.brake_best) t.brake_best = t.brake_dist;
+            t.braking = 0;
+        }
+    }
+    t.last_speed = speed;
     t.last_long = along, t.last_side = side;
     t.have_last = 1;
     t.time = GetTickCount64();
@@ -189,8 +226,12 @@ void telemetry_step(unsigned long long now) {
     ULONGLONG time = t.time;
     float speed = t.speed, slip = t.slip, side_g = t.side_g, long_g = t.long_g, yaw = t.yaw, slope = t.slope;
     float sprint_time = t.sprint_time, sprint_last = t.sprint_last, sprint_best = t.sprint_best, top = t.top;
-    int sprint_armed = t.sprint_armed;
+    int sprint_armed = t.sprint_armed, run_armed = t.quarter_armed || t.s200_armed, braking = t.braking;
+    float run_time = t.run_time, run_dist = t.run_dist, quarter_last = t.quarter_last, quarter_best = t.quarter_best;
+    float quarter_speed = t.quarter_speed, s200_last = t.s200_last, s200_best = t.s200_best, quarter_armed = (float)t.quarter_armed;
+    float s200_armed = (float)t.s200_armed, brake_dist = t.brake_dist, brake_last = t.brake_last, brake_best = t.brake_best;
     ReleaseSRWLockShared(&lock);
+    (void)run_armed;
     if (!time || now - time > 500) { /* not driving (menu, pause, noclip) */
         if (panel_owner) notify_panel_clear_owned(panel_owner), panel_owner = 0;
         return;
@@ -204,7 +245,7 @@ void telemetry_step(unsigned long long now) {
         if (slip > max_slip) max_slip = slip;
     }
     int de = game_language_is_german(game), mask = (int)show_mask;
-    static NotifyPanelRow rows[12];
+    static NotifyPanelRow rows[16];
     unsigned n = 0;
     if (mask & (1 << TELEMETRY_SHOW_SPEED)) {
         row(&rows[n], de ? L"Tempo" : L"Speed", NOTIFY_ROW_INFO);
@@ -252,6 +293,52 @@ void telemetry_step(unsigned long long now) {
                 wput(rows[n].keys, 32, L")");
             }
         } else wput(rows[n].keys, 32, de ? L"aus dem Stand" : L"from standstill");
+        ++n;
+    }
+    if (mask & (1 << TELEMETRY_SHOW_SPRINT200)) {
+        row(&rows[n], imperial ? L"0-100 mph" : L"0-200 km/h", NOTIFY_ROW_NORMAL);
+        if (s200_armed > 0.0f && run_time > 0.0f) wsec(rows[n].keys, 32, run_time);
+        else if (s200_last > 0.0f) {
+            wsec(rows[n].keys, 32, s200_last);
+            if (s200_best > 0.0f && s200_best < s200_last - 0.005f) {
+                wput(rows[n].keys, 32, de ? L"  (Best " : L"  (best ");
+                wsec(rows[n].keys, 32, s200_best);
+                wput(rows[n].keys, 32, L")");
+            }
+        } else wput(rows[n].keys, 32, de ? L"aus dem Stand" : L"from standstill");
+        ++n;
+    }
+    if (mask & (1 << TELEMETRY_SHOW_QUARTER)) {
+        row(&rows[n], de ? L"Viertelmeile" : L"Quarter mile", NOTIFY_ROW_NORMAL);
+        if (quarter_armed > 0.0f && run_time > 0.0f) {
+            wsec(rows[n].keys, 32, run_time);
+            wput(rows[n].keys, 32, L"  ");
+            wint(rows[n].keys, 32, (int)(run_dist + 0.5f));
+            wput(rows[n].keys, 32, L" m");
+        } else if (quarter_last > 0.0f) {
+            wsec(rows[n].keys, 32, quarter_last);
+            wput(rows[n].keys, 32, L"  ");
+            wspeed(rows[n].keys, 32, quarter_speed);
+        } else wput(rows[n].keys, 32, de ? L"aus dem Stand" : L"from standstill");
+        ++n;
+        if (quarter_best > 0.0f && quarter_best < quarter_last - 0.005f) {
+            row(&rows[n], de ? L"Beste Viertelmeile" : L"Best quarter mile", NOTIFY_ROW_HINT);
+            wsec(rows[n++].keys, 32, quarter_best);
+        }
+    }
+    if (mask & (1 << TELEMETRY_SHOW_BRAKING)) {
+        row(&rows[n], imperial ? (de ? L"Bremsweg 60-0 mph" : L"Braking 60-0 mph") : (de ? L"Bremsweg 100-0" : L"Braking 100-0"),
+            NOTIFY_ROW_NORMAL);
+        float d = braking ? brake_dist : brake_last;
+        if (braking || brake_last > 0.0f) {
+            wint(rows[n].keys, 32, (int)((imperial ? d * 3.28084f : d) + 0.5f));
+            wput(rows[n].keys, 32, imperial ? L" ft" : L" m");
+            if (!braking && brake_best > 0.0f && brake_best < brake_last - 0.05f) {
+                wput(rows[n].keys, 32, de ? L"  (Best " : L"  (best ");
+                wint(rows[n].keys, 32, (int)((imperial ? brake_best * 3.28084f : brake_best) + 0.5f));
+                wput(rows[n].keys, 32, imperial ? L" ft)" : L" m)");
+            }
+        } else wput(rows[n].keys, 32, de ? L"voll bremsen" : L"brake hard");
         ++n;
     }
     if (mask & (1 << TELEMETRY_SHOW_TOP)) {

@@ -18,11 +18,14 @@ enum {
     TELEMETRY_SHOW_SPRINT, /* 0-100 km/h (0-60 mph): last and best */
     TELEMETRY_SHOW_TOP,
     TELEMETRY_SHOW_BEST,   /* best side force and best drift */
+    TELEMETRY_SHOW_QUARTER, /* quarter mile from standstill: time and end speed */
+    TELEMETRY_SHOW_SPRINT200, /* 0-200 km/h (0-100 mph) */
+    TELEMETRY_SHOW_BRAKING, /* braking distance 100-0 km/h (60-0 mph) */
     TELEMETRY_SHOW_COUNT
 };
 #define TELEMETRY_SHOW_DEFAULT                                                                                       \
     ((1 << TELEMETRY_SHOW_SPEED) | (1 << TELEMETRY_SHOW_GRIP) | (1 << TELEMETRY_SHOW_SIDE) | (1 << TELEMETRY_SHOW_LONG) | \
-     (1 << TELEMETRY_SHOW_SPRINT) | (1 << TELEMETRY_SHOW_BEST))
+     (1 << TELEMETRY_SHOW_SPRINT) | (1 << TELEMETRY_SHOW_BEST) | (1 << TELEMETRY_SHOW_QUARTER) | (1 << TELEMETRY_SHOW_BRAKING))
 
 void telemetry_start(unsigned char *game_image);
 void telemetry_set_enabled(int on);
