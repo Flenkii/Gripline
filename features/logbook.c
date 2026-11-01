@@ -11,7 +11,7 @@
 #include "ini_edit.h"
 
 #define MAX_CARS 512        /* car files in media\cars (the game has about 340) */
-#define MAX_KEPT 256        /* cars in the logbook */
+#define MAX_KEPT 512        /* cars in the logbook */
 #define STEM 40
 #define MAX_SPEED 150.0f    /* m/s: faster is a teleport */
 #define MOVING 1.0f
