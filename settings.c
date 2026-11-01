@@ -19,6 +19,7 @@ const SettingDefinition setting_definitions[] = {
     SETTING("Gripline", "Telemetry", telemetry, SETTING_BOOLEAN),
     SETTING("Gripline", "TelemetryShow", telemetry_show, SETTING_MASK),
     SETTING("Gripline", "EventIcons", event_icons, SETTING_BOOLEAN),
+    SETTING("Gripline", "NewsSeen", news_seen, SETTING_MASK),
 };
 
 const size_t setting_count = ARRAY_COUNT(setting_definitions);

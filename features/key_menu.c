@@ -6,6 +6,8 @@
 #include "ini_edit.h"
 #include "logging.h"
 #include "telemetry.h"
+#include "logbook.h"
+#include "game_units.h"
 #include "rig_settings.h"
 #include "support.h"
 
@@ -19,10 +21,10 @@
 #define FILE_LIMIT 32768u
 #define MAX_ROWS (NOTIFY_PANEL_ROWS - 1)
 
-enum { LEVEL_CLOSED, LEVEL_GROUPS, LEVEL_LIST, LEVEL_BINDING, LEVEL_CAPTURE, LEVEL_RESET_ALL, LEVEL_STYLE, LEVEL_MOUSE, LEVEL_TELEMETRY, LEVEL_WORLD, LEVEL_COUNT };
+enum { LEVEL_CLOSED, LEVEL_GROUPS, LEVEL_LIST, LEVEL_BINDING, LEVEL_CAPTURE, LEVEL_RESET_ALL, LEVEL_STYLE, LEVEL_MOUSE, LEVEL_TELEMETRY, LEVEL_WORLD, LEVEL_LOGBOOK, LEVEL_COUNT };
 
 /* first page: rows after the binding pages */
-enum { TOP_STYLE = 100, TOP_RESET = 101, TOP_MOUSE = 102, TOP_TELEMETRY = 103, TOP_WORLD = 104 };
+enum { TOP_STYLE = 100, TOP_RESET = 101, TOP_MOUSE = 102, TOP_TELEMETRY = 103, TOP_WORLD = 104, TOP_LOGBOOK = 105 };
 
 /* mouse steering choices: FH2_Keyboard.ini MouseSteering values */
 #define MOUSE_CHOICES 6
@@ -410,6 +412,32 @@ static void hint(int first_page) {
             first_page ? tr(L"Esc schließen", L"Esc close") : tr(L"Esc zurück", L"Esc back"), NOTIFY_ROW_HINT, -1);
 }
 
+/* digits of v at out[n]; returns the new length */
+static unsigned wuint(wchar_t *out, unsigned n, unsigned v) {
+    wchar_t d[12];
+    unsigned k = 0;
+    do d[k++] = (wchar_t)(L'0' + v % 10); while ((v /= 10) && k < 12);
+    while (k && n + 1 < 32) out[n++] = d[--k];
+    out[n] = 0;
+    return n;
+}
+
+/* "12,3 km" below 100, else "1234 km" (miles when the game shows mph) */
+static void distance_text(double metres, wchar_t out[32]) {
+    int imperial = game_units_imperial(keyboard_game_image());
+    double units = metres / (imperial ? 1609.344 : 1000.0);
+    unsigned n;
+    if (units < 100.0) {
+        unsigned tenths = (unsigned)(units * 10.0 + 0.5);
+        n = wuint(out, 0, tenths / 10);
+        n = wcopy(out, n, 32, m.german ? L"," : L".");
+        n = wuint(out, n, tenths % 10);
+    } else {
+        n = wuint(out, 0, (unsigned)(units + 0.5));
+    }
+    wcopy(out, n, 32, imperial ? L" mi" : L" km");
+}
+
 static const unsigned world_ids[3] = {RIG_GRIP_SPEED_CAMERAS, RIG_GRIP_CAR_LABELS, RIG_GRIP_EVENT_ICONS};
 static const wchar_t *const world_german[3] = {L"Blitzer", L"Namen über Autos", L"Event-Symbole auf der Straße"};
 static const wchar_t *const world_english[3] = {L"Speed cameras", L"Names above cars", L"Event icons on the road"};
@@ -427,6 +455,14 @@ static void build_page(wchar_t *title) {
                     TOP_MOUSE);
             row_add(tr(L"Live-Telemetrie", L"Live telemetry"), telemetry_enabled() ? tr(L"An", L"On") : tr(L"Aus", L"Off"), 0,
                     TOP_TELEMETRY);
+            {
+                double lm, ls;
+                float lt;
+                logbook_total(&lm, &ls, &lt);
+                wchar_t dist[32];
+                distance_text(lm, dist);
+                row_add(tr(L"Fahrtenbuch", L"Logbook"), dist, 0, TOP_LOGBOOK);
+            }
             row_add(tr(L"Welt: Blitzer, Namen, Symbole", L"World: cameras, names, icons"), L"›", 0, TOP_WORLD);
             row_add(tr(L"Karten-Design", L"Card design"), style_names[notify_style()], 0, TOP_STYLE);
             row_add(tr(L"Alle auf Standard", L"Reset all to default"), L"›", 0, TOP_RESET);
@@ -496,6 +532,45 @@ static void build_page(wchar_t *title) {
             hint(0);
             break;
         }
+        case LEVEL_LOGBOOK: {
+            wcopy(title, 0, 64, tr(L"Fahrtenbuch", L"Logbook"));
+            double lm, ls;
+            float lt;
+            logbook_total(&lm, &ls, &lt);
+            wchar_t text[32], name[32];
+            distance_text(lm, text);
+            row_add(tr(L"Gesamt gefahren", L"Driven in total"), text, 0, -1);
+            unsigned minutes = (unsigned)(ls / 60.0 + 0.5), n = 0;
+            n = wuint(text, 0, minutes / 60);
+            n = wcopy(text, n, 32, L" h ");
+            if (minutes % 60 < 10) n = wcopy(text, n, 32, L"0");
+            n = wuint(text, n, minutes % 60);
+            wcopy(text, n, 32, L" min");
+            row_add(tr(L"Fahrzeit", L"Driving time"), text, 0, -1);
+            int imperial = game_units_imperial(keyboard_game_image());
+            n = wuint(text, 0, (unsigned)(lt * (imperial ? 2.236936f : 3.6f) + 0.5f));
+            wcopy(text, n, 32, imperial ? L" mph" : L" km/h");
+            row_add(tr(L"Höchsttempo", L"Top speed"), text, 0, -1);
+            double cm;
+            logbook_current(name, 32, &cm);
+            if (name[0]) {
+                row_add(tr(L"Jetzt im Auto", L"Car now"), L"", NOTIFY_ROW_INFO, -1);
+                distance_text(cm, text);
+                row_add(name, text, 0, -1);
+            }
+            row_add(tr(L"Meiste Kilometer", L"Most kilometres"), L"", NOTIFY_ROW_INFO, -1);
+            int any = 0;
+            for (unsigned r = 0; r < 5; ++r) {
+                double m;
+                if (!logbook_top(r, name, 32, &m)) break;
+                distance_text(m, text);
+                row_add(name, text, 0, -1);
+                any = 1;
+            }
+            if (!any) row_add(tr(L"Noch kein Auto über 100 m", L"No car past 100 m yet"), L"", NOTIFY_ROW_INFO, -1);
+            hint(0);
+            break;
+        }
         case LEVEL_WORLD:
             wcopy(title, 0, 64, tr(L"Welt", L"World"));
             for (unsigned i = 0; i < 3; ++i)
@@ -552,6 +627,7 @@ static void back(void) {
         case LEVEL_MOUSE: m.level = LEVEL_GROUPS; break;
         case LEVEL_TELEMETRY: m.level = LEVEL_GROUPS; break;
         case LEVEL_WORLD: m.level = LEVEL_GROUPS; break;
+        case LEVEL_LOGBOOK: m.level = LEVEL_GROUPS; break;
         case LEVEL_BINDING: m.level = LEVEL_LIST; break;
         case LEVEL_CAPTURE: m.level = LEVEL_BINDING; break;
     }
@@ -573,6 +649,9 @@ static void choose(void) {
             if (action == TOP_RESET) {
                 m.level = LEVEL_RESET_ALL;
                 m.sel[LEVEL_RESET_ALL] = 0;
+            } else if (action == TOP_LOGBOOK) {
+                m.level = LEVEL_LOGBOOK;
+                m.sel[LEVEL_LOGBOOK] = 0;
             } else if (action == TOP_WORLD) {
                 m.level = LEVEL_WORLD;
                 m.sel[LEVEL_WORLD] = 0;

@@ -111,7 +111,7 @@ check(ok == 1 and card_text == 'Press F8 to change your keys\nKey menu: arrows, 
 check(e.call('Fh2TestKeyboardBinding', 42, 0) == F8, 'KeyMenu = F8 (Standard)')
 
 press(F8)
-check(tick() == LEVEL_GROUPS and panel() == 10, f'F8 oeffnet das Menue (4 Seiten + Maus-Lenkung + Telemetrie + Welt + Karten-Design + Alle auf Standard + Hinweis): {panel()}')
+check(tick() == LEVEL_GROUPS and panel() == 11, f'F8 oeffnet das Menue (4 Seiten + Maus-Lenkung + Telemetrie + Fahrtenbuch + Welt + Karten-Design + Alle auf Standard + Hinweis): {panel()}')
 check(selected() == 'Driving', f'erste Zeile gewaehlt: {selected()}')
 
 # while open: the game and noclip get no key
@@ -231,7 +231,7 @@ check(tick() == LEVEL_CLOSED, 'Esc, Esc: zu')
 
 # mouse steering page: Off by default, Medium chosen -> FH2_Keyboard.ini MouseSteering=40
 press(0x79)
-press(UP); press(UP); press(UP); press(UP); press(UP)
+press(UP); press(UP); press(UP); press(UP); press(UP); press(UP)
 check(selected() == 'Mouse steering (experimental)' and panel_rows().get('Mouse steering (experimental)') == 'Off', f'Maus-Zeile zeigt Aus: {panel_rows()}')
 press(ENTER)
 check(selected() == 'Off' and panel_rows().get('Off') == '\u2713 active', f'Maus-Seite: Aus gewaehlt {panel_rows()}')
@@ -244,7 +244,7 @@ check(tick() == LEVEL_CLOSED, 'Maus: Esc, Esc: zu')
 
 # telemetry page: Turn rate on -> Gripline.ini TelemetryShow, dead zone 40 % -> FH2_Keyboard.ini
 press(0x79)
-press(UP); press(UP); press(UP); press(UP)
+press(UP); press(UP); press(UP); press(UP); press(UP)
 check(selected() == 'Live telemetry', selected())
 press(ENTER)
 check(selected() == 'Telemetry panel', selected())
@@ -276,6 +276,24 @@ press(ENTER)
 check(panel_rows().get('Speed cameras') == before, 'Blitzer zurueck')
 press(ESC); press(ESC)
 check(tick() == LEVEL_CLOSED, 'Welt: zu')
+
+# logbook page: totals, nothing driven yet
+press(0x79)
+press(UP); press(UP); press(UP); press(UP)
+check(selected() == 'Logbook', selected())
+press(ENTER)
+rows = panel_rows()
+check('Driven in total' in rows and 'Driving time' in rows and 'Top speed' in rows and 'No car past 100 m yet' in rows, f'Fahrtenbuch: {rows}')
+press(ESC); press(ESC)
+check(tick() == LEVEL_CLOSED, 'Fahrtenbuch: zu')
+def pretty(stem):
+    b = e.alloc(128)
+    e.call('Fh2TestLogbookPretty', e.put_bytes(stem.encode() + b'\0'), b, 48)
+    return e.wstr(b)
+for stem, want in [('NIS_GTR_12', "Nissan GTR '12"), ('CHE_CorvetteStingray_14', "Chevrolet Corvette Stingray '14"),
+                   ('DOD_Challenger392_H2_12', "Dodge Challenger392 H2 '12"), ('VW_Type2_63', "Volkswagen Type2 '63"),
+                   ('fer_f142_10', "Ferrari f142 '10")]:
+    check(pretty(stem) == want, f'Autoname {stem}: {pretty(stem)!r}')
 
 # "all to default" with confirmation
 press(0x79)

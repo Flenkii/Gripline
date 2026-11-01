@@ -19,6 +19,7 @@
 #include "game_language.h"
 #include "trip.h"
 #include "telemetry.h"
+#include "logbook.h"
 #include "wheel_watch.h"
 #include "cockpit_view.h"
 
@@ -480,6 +481,7 @@ static void sample_trip(void *car, float dt) {
     _mm_store_ps(v, state.velocity);
     if (!(float_is_finite(v[0]) && float_is_finite(v[1]) && float_is_finite(v[2]))) return;
     trip_sample(dt, v);
+    logbook_sample(car, dt, v);
     _Alignas(16) float r[4], f[4], w[4];
     _mm_store_ps(r, state.right);
     _mm_store_ps(f, state.forward);
@@ -589,6 +591,7 @@ static DWORD WINAPI watch_thread(LPVOID unused) {
         info_step(now);
         trip_step(now);
         telemetry_step(now);
+        logbook_step(now);
         wheel_watch_step(game, now);
         Sleep(30);
     }
