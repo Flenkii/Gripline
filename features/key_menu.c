@@ -419,7 +419,7 @@ static void build_page(wchar_t *title) {
         case LEVEL_GROUPS:
             wcopy(title, 0, 64, tr(L"Gripline-Menü", L"Gripline menu"));
             for (unsigned g = 0; g < GROUP_COUNT; ++g) row_add(tr(groups[g].german, groups[g].english), L"›", 0, (int)g);
-            row_add(tr(L"Maus-Lenkung", L"Mouse steering"), tr(mouse_german[mouse_choice()], mouse_english[mouse_choice()]), 0,
+            row_add(tr(L"Maus-Lenkung (experimentell)", L"Mouse steering (experimental)"), tr(mouse_german[mouse_choice()], mouse_english[mouse_choice()]), 0,
                     TOP_MOUSE);
             row_add(tr(L"Live-Telemetrie", L"Live telemetry"), telemetry_enabled() ? tr(L"An", L"On") : tr(L"Aus", L"Off"), 0,
                     TOP_TELEMETRY);
@@ -466,7 +466,7 @@ static void build_page(wchar_t *title) {
             hint(0);
             break;
         case LEVEL_MOUSE:
-            wcopy(title, 0, 64, tr(L"Maus-Lenkung", L"Mouse steering"));
+            wcopy(title, 0, 64, tr(L"Maus-Lenkung (experimentell)", L"Mouse steering (experimental)"));
             row_add(tr(L"Empfindlichkeit", L"Sensitivity"), L"", NOTIFY_ROW_INFO, -1);
             for (int i = 0; i < MOUSE_CHOICES; ++i)
                 row_add(tr(mouse_german[i], mouse_english[i]), i == mouse_choice() ? tr(L"✓ aktiv", L"✓ active") : L"", 0, i);

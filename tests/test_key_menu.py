@@ -232,7 +232,7 @@ check(tick() == LEVEL_CLOSED, 'Esc, Esc: zu')
 # mouse steering page: Off by default, Medium chosen -> FH2_Keyboard.ini MouseSteering=40
 press(0x79)
 press(UP); press(UP); press(UP); press(UP)
-check(selected() == 'Mouse steering' and panel_rows().get('Mouse steering') == 'Off', f'Maus-Zeile zeigt Aus: {panel_rows()}')
+check(selected() == 'Mouse steering (experimental)' and panel_rows().get('Mouse steering (experimental)') == 'Off', f'Maus-Zeile zeigt Aus: {panel_rows()}')
 press(ENTER)
 check(selected() == 'Off' and panel_rows().get('Off') == '\u2713 active', f'Maus-Seite: Aus gewaehlt {panel_rows()}')
 press(DOWN); press(DOWN); press(ENTER)
