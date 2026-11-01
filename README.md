@@ -5,7 +5,7 @@ Works offline and online with [FH2MP](https://github.com/Charelene/FH2MP).
 
 **[⬇ Download the latest version](../../releases/latest)** · current version: **V6.4**
 
-**[Join the Gripline Discord](https://discord.gg/FEnY2nvc)** · help, bug reports, ideas for V7 and showcase
+**[Join the Gripline Discord](https://discord.gg/g83eBcrq)** · problems, questions, ideas for V7 and showcase. Join to always stay up to date with every new version.
 
 Gripline is an add-on next to Azimuth, the official [Extra Options](https://github.com/RokkuDayo/ForzaHorizon2_ExtraOptions)
 by RokkuDayo and FH2MP. It is one file, `fh2-mods\Gripline.dll`, a [FH2 Mod Platform](https://github.com/Trinculo54/fh2-mod-platform)
@@ -71,7 +71,7 @@ Gripline is a mod for the [FH2 Mod Platform](https://github.com/Trinculo54/fh2-m
 2. Get the FH2 Mod Platform: download the ZIP from its [releases](https://github.com/Trinculo54/fh2-mod-platform/releases) (version 2.8.0 or newer) and copy **`DWrite.dll`** next to `azimuth.exe`. (Any other mod's ZIP that ships platform 2.8.0+ has this file too.)
 3. Copy `fh2-mods\Gripline.dll` from the release ZIP's `Azimuth` folder next to `azimuth.exe` (so it ends up in `fh2-mods`).
 4. Start the game. Check: `fh2-mods\platform.log` lists Gripline, and Pause › Settings › MODS shows it.
-   Nothing there? Send `platform.log` (or the problem report) on [Discord](https://discord.gg/FEnY2nvc) or as an issue.
+   Nothing there? Send `platform.log` (or the problem report) on [Discord](https://discord.gg/g83eBcrq) or as an issue.
 
 Updating from V5: let the FH2MP launcher put the official `winmm.dll` back and delete `mods\Gripline\plugins\GriplineTick.dll`
 if you have it. Your `[Traffic]` and `[Gripline]` settings move from `FH2_ExtraOptions.ini` to `Gripline.ini` on the first
@@ -102,6 +102,7 @@ Uninstall: delete `fh2-mods\Gripline.dll` and the folder `mods\Gripline`.
 GitHub: [**Issues → New issue**](../../issues/new/choose). Pause › Settings › MODS › *Gripline: Create Problem Report*,
 then attach `Gripline_Report.zip` (next to `azimuth.exe`). It contains `Gripline.log/.ini`, `FH2_Keyboard.ini`,
 `FH2_ExtraOptions.log/.ini`, `fh2-mods\platform.log`, `data\logs\azimuth.log` and the Extra Options load order.
+Or just join the [Discord](https://discord.gg/g83eBcrq) and post your problem and `Gripline.log` in help-and-bug-reports. Join to also stay up to date with every new version.
 Wheel problems belong to Azimuth (report them there without mods).
 
 ## Known limits
