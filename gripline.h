@@ -7,6 +7,9 @@
 
 /* Gripline: an FH2 Mod Platform mod (fh2-mods\Gripline.dll) next to the official Extra Options. */
 #define GRIPLINE_VERSION "V7 Test"
+/* this build as a release number: the update notice compares it with the newest GitHub release */
+#define GRIPLINE_RELEASE_MAJOR 7
+#define GRIPLINE_RELEASE_MINOR 0
 #define MOD_INI_NAME L"Gripline.ini"
 #define MOD_LOG_NAME L"Gripline.log"
 #define GAME_EXE_NAME L"forza_durango_release_final.exe"
@@ -21,5 +24,6 @@ typedef struct {
     int cockpit_view_forward, cockpit_view_up; /* [Gripline] second cockpit view, cm */
     int card_color;                            /* [Gripline] 0 blue (original) .. 7, notify.h */
     int card_style; /* NOTIFY_STYLE_*: 0 Classic, 1 Enhanced, 2 Overdrive (V7) */
+    int update_check; /* [Gripline] UpdateCheck: ask GitHub for a newer release at start (V7) */
 } ModOptions;
 #endif

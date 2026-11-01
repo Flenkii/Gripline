@@ -37,6 +37,7 @@ PLUGIN_SOURCES = [
     "features/trip.c",
     "features/wheel_watch.c",
     "features/version_check.c",
+    "features/update_check.c",
     "features/game_units.c",
     "features/notify.c",
     "features/cockpit.c",

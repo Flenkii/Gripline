@@ -13,6 +13,7 @@ const SettingDefinition setting_definitions[] = {
     SETTING("Gripline", "CockpitViewUp", cockpit_view_up, SETTING_CENTIMETERS),
     SETTING("Gripline", "CardColor", card_color, SETTING_CARD_COLOR),
     SETTING("Gripline", "CardStyle", card_style, SETTING_CARD_STYLE),
+    SETTING("Gripline", "UpdateCheck", update_check, SETTING_BOOLEAN),
 };
 
 const size_t setting_count = ARRAY_COUNT(setting_definitions);
@@ -27,6 +28,7 @@ void settings_defaults(ModOptions *options) {
         .cockpit_view_forward = 35,
         .cockpit_view_up = -5,
         .card_style = 2, /* Overdrive */
+        .update_check = 1,
     };
 }
 

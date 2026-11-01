@@ -33,6 +33,7 @@
 #include "features/game_language.h"
 #include "features/noclip.h"
 #include "features/version_check.h"
+#include "features/update_check.h"
 
 void keyboard_pad_game_start(unsigned char *game_image, const wchar_t *settings_directory);
 void report_init(const wchar_t *settings_directory);
@@ -476,6 +477,7 @@ static void start_features(void) {
     notify_set_style(options.card_style);
     mod_scan_start(directory);
     version_check_start(game, directory);
+    update_check_start(game, options.update_check);
     report_init(directory);
     rig_settings_set_game(game);
     rig_settings_gripline(options.notifications, options.steering_animation, options.cockpit_view_forward,
