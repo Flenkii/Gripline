@@ -70,6 +70,9 @@ typedef struct {
 void notify_panel_set(const wchar_t *title, const NotifyPanelRow *rows, unsigned count);
 /* Same panel for the key menu (key_menu.h): at_top 1 = at the top right like the cards, not centred. */
 void notify_panel_show(const wchar_t *title, const NotifyPanelRow *rows, unsigned count, int at_top);
+/* panel that gives way to the others (telemetry): see notify.c */
+unsigned notify_panel_show_owned(const wchar_t *title, const NotifyPanelRow *rows, unsigned count, unsigned owner);
+void notify_panel_clear_owned(unsigned owner);
 int notify_panel_visible(void);
 
 #endif

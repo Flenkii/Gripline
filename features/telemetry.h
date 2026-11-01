@@ -1,7 +1,7 @@
 #ifndef FH2_TELEMETRY_H
 #define FH2_TELEMETRY_H
 
-/* Live telemetry card (V7, community idea): speed, how much the car slides (slip angle, "grip"),
+/* Live telemetry panel (V7, community idea): speed, how much the car slides (slip angle, "grip"),
    side and length g-forces of the own car, at the top right while driving. Mods page row
    "Gripline: Live-Telemetrie" / Gripline.ini Telemetry=1. The game keeps tyre temperatures in
    its own code where Gripline cannot read them, so the card shows what the car's body tells. */

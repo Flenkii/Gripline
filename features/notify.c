@@ -262,6 +262,27 @@ void notify_panel_show(const wchar_t *title, const NotifyPanelRow *rows, unsigne
     ReleaseSRWLockExclusive(&lock);
 }
 
+/* A panel that gives way to the others (live telemetry): shown only while no other panel is up.
+   owner = the id this function returned last time (0 at first). Returns the new id, 0 = not shown. */
+unsigned notify_panel_show_owned(const wchar_t *title, const NotifyPanelRow *rows, unsigned count, unsigned owner) {
+    AcquireSRWLockShared(&lock);
+    int free = panel_count == 0 || (owner && panel_id == owner);
+    ReleaseSRWLockShared(&lock);
+    if (!free) return 0;
+    notify_panel_show(title, rows, count, 0);
+    AcquireSRWLockShared(&lock);
+    unsigned id = (unsigned)panel_id;
+    ReleaseSRWLockShared(&lock);
+    return id;
+}
+
+void notify_panel_clear_owned(unsigned owner) {
+    AcquireSRWLockShared(&lock);
+    int mine = owner && panel_id == owner && panel_count != 0;
+    ReleaseSRWLockShared(&lock);
+    if (mine) notify_panel_show(NULL, NULL, 0, 0);
+}
+
 int notify_panel_visible(void) {
     return panel_count != 0;
 }

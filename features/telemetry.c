@@ -71,64 +71,98 @@ void telemetry_sample(float dt, const float velocity[3], const float right[3], c
     ReleaseSRWLockExclusive(&lock);
 }
 
-static void put_text(char *out, size_t *n, size_t cap, const char *text) {
-    while (*text && *n + 1 < cap) out[(*n)++] = *text++;
-    out[*n] = 0;
+static unsigned panel_owner;
+static float max_side, max_slip;
+
+static void wput(wchar_t *out, unsigned cap, const wchar_t *text) {
+    unsigned n = 0;
+    while (out[n]) ++n;
+    while (*text && n + 1 < cap) out[n++] = *text++;
+    out[n] = 0;
 }
 
-static void put_int(char *out, size_t *n, size_t cap, int value) {
-    char digits[12];
+static void wint(wchar_t *out, unsigned cap, int value) {
+    wchar_t digits[12];
     unsigned d = 0, v = value < 0 ? (unsigned)-value : (unsigned)value;
-    do digits[d++] = (char)('0' + v % 10); while ((v /= 10) && d < sizeof(digits));
-    if (value < 0 && *n + 1 < cap) out[(*n)++] = '-';
-    while (d && *n + 1 < cap) out[(*n)++] = digits[--d];
-    out[*n] = 0;
+    do digits[d++] = (wchar_t)(L'0' + v % 10); while ((v /= 10) && d < 12);
+    unsigned n = 0;
+    while (out[n]) ++n;
+    if (value < 0 && n + 1 < cap) out[n++] = L'-';
+    while (d && n + 1 < cap) out[n++] = digits[--d];
+    out[n] = 0;
 }
 
-/* g with two decimals: 0.85 / -1.20 */
-static void put_g(char *out, size_t *n, size_t cap, float g) {
-    int h = (int)(g * 100.0f + (g < 0 ? -0.5f : 0.5f));
-    if (h < 0) {
-        put_text(out, n, cap, "-");
-        h = -h;
-    }
-    put_int(out, n, cap, h / 100);
-    put_text(out, n, cap, ".");
-    if (h % 100 < 10) put_text(out, n, cap, "0");
-    put_int(out, n, cap, h % 100);
-    put_text(out, n, cap, " g");
+/* 0.85 g */
+static void wg(wchar_t *out, unsigned cap, float g) {
+    int h = (int)(absf(g) * 100.0f + 0.5f);
+    wint(out, cap, h / 100);
+    wput(out, cap, h % 100 < 10 ? L".0" : L".");
+    wint(out, cap, h % 100);
+    wput(out, cap, L" g");
+}
+
+/* ■■■□□□□□ for 0..full */
+static void wbar(wchar_t *out, unsigned cap, float value, float full) {
+    int cells = (int)(absf(value) / full * 8.0f + 0.5f);
+    if (cells > 8) cells = 8;
+    for (int i = 0; i < 8; ++i) wput(out, cap, i < cells ? L"\x25a0" : L"\x25a1");
+    wput(out, cap, L"  ");
+}
+
+static void row(NotifyPanelRow *r, const wchar_t *label, int style) {
+    r->label[0] = 0;
+    r->keys[0] = 0;
+    wput(r->label, 32, label);
+    r->style = style;
 }
 
 void telemetry_step(unsigned long long now) {
-    if (!enabled || now < next_card) return;
+    if (!enabled) {
+        if (panel_owner) notify_panel_clear_owned(panel_owner), panel_owner = 0;
+        return;
+    }
+    if (now < next_card) return;
     next_card = now + TELEMETRY_EVERY_MS;
     AcquireSRWLockShared(&lock);
     ULONGLONG time = t.time;
     float speed = t.speed, slip = t.slip, side_g = t.side_g, long_g = t.long_g;
     ReleaseSRWLockShared(&lock);
-    if (!time || now - time > 500) return; /* not driving (menu, pause, noclip): the card runs out */
+    if (!time || now - time > 500) { /* not driving (menu, pause, noclip) */
+        if (panel_owner) notify_panel_clear_owned(panel_owner), panel_owner = 0;
+        return;
+    }
     if (now >= units_next) {
         units_next = now + 3000;
         imperial = game_units_imperial(game);
     }
+    if (speed > 5.0f) {
+        if (absf(side_g) > max_side) max_side = absf(side_g);
+        if (slip > max_slip) max_slip = slip;
+    }
     int de = game_language_is_german(game);
-    const char *grip = slip < 4.0f ? (de ? "haftet" : "gripping") : slip < 12.0f ? (de ? "rutscht" : "sliding")
-                                                                                : (de ? "Drift" : "drifting");
-    char text[160];
-    size_t n = 0;
-    text[0] = 0;
-    put_text(text, &n, sizeof(text), de ? "Telemetrie - " : "Telemetry - ");
+    static NotifyPanelRow rows[6];
     float kmh = speed * 3.6f;
-    put_int(text, &n, sizeof(text), (int)((imperial ? kmh / 1.609344f : kmh) + 0.5f));
-    put_text(text, &n, sizeof(text), imperial ? " mph\n" : " km/h\n");
-    put_text(text, &n, sizeof(text), "Grip: ");
-    put_text(text, &n, sizeof(text), grip);
-    put_text(text, &n, sizeof(text), " (");
-    put_int(text, &n, sizeof(text), (int)(slip + 0.5f));
-    put_text(text, &n, sizeof(text), "\xc2\xb0)  ");
-    put_text(text, &n, sizeof(text), de ? "Quer " : "Side ");
-    put_g(text, &n, sizeof(text), absf(side_g));
-    put_text(text, &n, sizeof(text), de ? "  L\xc3\xa4ngs " : "  Long ");
-    put_g(text, &n, sizeof(text), long_g);
-    notify_show_live(text, TELEMETRY_TAG, 700);
+    row(&rows[0], de ? L"Tempo" : L"Speed", NOTIFY_ROW_INFO);
+    wint(rows[0].keys, 32, (int)((imperial ? kmh / 1.609344f : kmh) + 0.5f));
+    wput(rows[0].keys, 32, imperial ? L" mph" : L" km/h");
+    row(&rows[1], L"Grip", NOTIFY_ROW_NORMAL);
+    wput(rows[1].keys, 32, slip < 4.0f ? (de ? L"haftet" : L"gripping") : slip < 12.0f ? (de ? L"rutscht  " : L"sliding  ")
+                                                                                     : (de ? L"Drift  " : L"drifting  "));
+    if (slip >= 4.0f) {
+        wint(rows[1].keys, 32, (int)(slip + 0.5f));
+        wput(rows[1].keys, 32, L"\x00b0");
+    }
+    row(&rows[2], de ? L"Querkraft" : L"Side force", NOTIFY_ROW_NORMAL);
+    wbar(rows[2].keys, 32, side_g, 1.5f);
+    wg(rows[2].keys, 32, side_g);
+    row(&rows[3], long_g < -0.03f ? (de ? L"Bremsen" : L"Braking") : (de ? L"Beschleunigen" : L"Accelerating"), NOTIFY_ROW_NORMAL);
+    wbar(rows[3].keys, 32, long_g, 1.5f);
+    wg(rows[3].keys, 32, long_g);
+    row(&rows[4], de ? L"Beste Querkraft" : L"Best side force", NOTIFY_ROW_HINT);
+    wg(rows[4].keys, 32, max_side);
+    row(&rows[5], de ? L"Bester Drift" : L"Best drift", NOTIFY_ROW_HINT);
+    wint(rows[5].keys, 32, (int)(max_slip + 0.5f));
+    wput(rows[5].keys, 32, L"\x00b0");
+    unsigned id = notify_panel_show_owned(de ? L"Live-Telemetrie" : L"Live telemetry", rows, 6, panel_owner);
+    panel_owner = id; /* 0: another panel (key list, Gripline menu) is up - wait until it closes */
 }

@@ -61,6 +61,7 @@ static const GUID IID_Gamepad = {0xbc7bb43c, 0x0a69, 0x3903, {0x9e, 0x9d, 0xa5, 
 
 static wchar_t ini_path[PATH_CAPACITY];
 static int mouse_sensitivity; /* [Keyboard] MouseSteering, 0 = off */
+static int mouse_center;      /* [Keyboard] MouseCenter: seconds without mouse movement until the wheel turns back straight, 0 = never */
 static volatile LONG values[KEY_SETTING_COUNT];
 static int loaded;
 static const wchar_t *const setting_keys[KEY_SETTING_COUNT] = {L"Enabled", L"SteerTime", L"ReturnTime",
@@ -443,6 +444,8 @@ static void settings_load(void) {
     mouse_sensitivity = read_int(L"MouseSteering", 0);
     if (mouse_sensitivity < 0 || mouse_sensitivity > 100) mouse_sensitivity = 0;
     if (mouse_sensitivity) log_append_value("KEYBOARD: mouse steering on, sensitivity ", mouse_sensitivity);
+    mouse_center = read_int(L"MouseCenter", 0);
+    if (mouse_center < 0 || mouse_center > 30) mouse_center = 0;
     for (unsigned i = 0; i < ARRAY_COUNT(bindings); ++i) {
         wchar_t text[96];
         GetPrivateProfileStringW(L"Keyboard", bindings[i].key, bindings[i].defaults, text, 96, ini_path);
@@ -467,6 +470,15 @@ int keyboard_mouse_steering(void) {
 void keyboard_set_mouse_steering(int sensitivity) {
     if (sensitivity < 0 || sensitivity > 100) return;
     mouse_sensitivity = sensitivity;
+}
+
+int keyboard_mouse_center(void) {
+    return mouse_center;
+}
+
+void keyboard_set_mouse_center(int seconds) {
+    if (seconds < 0 || seconds > 30) return;
+    mouse_center = seconds;
 }
 
 const wchar_t *keyboard_ini_path(void) {
@@ -597,9 +609,72 @@ static void apply_input(PadReading *r, int input, double amount) {
 /* ------------------------------------------------------------------ mouse steering (V7) */
 
 /* Like Euro Truck Simulator 2: moving the mouse left or right turns the wheel and it stays where you
-   left it (no spring back). Only while driving with the game window in front: the cursor is put back
-   into the middle of the window each reading, so it cannot leave the window. In menus and the pause
-   menu (simulation paused) the mouse is free and the wheel goes back to the middle. */
+   left it (no spring back; optional: back to straight after MouseCenter seconds of rest).
+   The movement comes from Raw Input (the mouse's own counts, like games read it), on an own thread
+   with a message-only window - not from the cursor position, which the game holds in place itself.
+   Only while driving with the game window in front; the cursor is parked in the middle of the window
+   then so a click cannot land outside. In menus and the pause menu the wheel goes back to the middle. */
+typedef ATOM(WINAPI *RegisterClassFn)(const WNDCLASSW *);
+typedef HWND(WINAPI *CreateWindowFn)(DWORD, LPCWSTR, LPCWSTR, DWORD, int, int, int, int, HWND, HMENU, HINSTANCE, LPVOID);
+typedef LRESULT(WINAPI *DefWindowProcFn)(HWND, UINT, WPARAM, LPARAM);
+typedef BOOL(WINAPI *GetMessageFn)(MSG *, HWND, UINT, UINT);
+typedef LRESULT(WINAPI *DispatchMessageFn)(const MSG *);
+typedef BOOL(WINAPI *RegisterRawFn)(const RAWINPUTDEVICE *, UINT, UINT);
+typedef UINT(WINAPI *GetRawDataFn)(HRAWINPUT, UINT, LPVOID, PUINT, UINT);
+
+static struct {
+    DefWindowProcFn def_proc;
+    GetRawDataFn get_data;
+    volatile LONG dx;  /* counts since the last reading */
+    volatile LONG state; /* 0 not started, 1 running, -1 failed */
+} raw;
+
+static LRESULT CALLBACK raw_window(HWND window, UINT message, WPARAM w, LPARAM l) {
+    if (message == WM_INPUT) {
+        _Alignas(8) unsigned char buffer[sizeof(RAWINPUT) + 16];
+        UINT size = sizeof(buffer);
+        if (raw.get_data((HRAWINPUT)l, RID_INPUT, buffer, &size, sizeof(RAWINPUTHEADER)) != (UINT)-1) {
+            const RAWINPUT *input = (const RAWINPUT *)buffer;
+            if (input->header.dwType == RIM_TYPEMOUSE && !(input->data.mouse.usFlags & MOUSE_MOVE_ABSOLUTE))
+                InterlockedExchangeAdd(&raw.dx, input->data.mouse.lLastX);
+        }
+    }
+    return raw.def_proc(window, message, w, l);
+}
+
+static DWORD WINAPI raw_thread(LPVOID unused) {
+    (void)unused;
+    RegisterClassFn register_class = (RegisterClassFn)(uintptr_t)GetProcAddress(user32, "RegisterClassW");
+    CreateWindowFn create_window = (CreateWindowFn)(uintptr_t)GetProcAddress(user32, "CreateWindowExW");
+    GetMessageFn get_message = (GetMessageFn)(uintptr_t)GetProcAddress(user32, "GetMessageW");
+    DispatchMessageFn dispatch = (DispatchMessageFn)(uintptr_t)GetProcAddress(user32, "DispatchMessageW");
+    RegisterRawFn register_raw = (RegisterRawFn)(uintptr_t)GetProcAddress(user32, "RegisterRawInputDevices");
+    raw.def_proc = (DefWindowProcFn)(uintptr_t)GetProcAddress(user32, "DefWindowProcW");
+    raw.get_data = (GetRawDataFn)(uintptr_t)GetProcAddress(user32, "GetRawInputData");
+    if (!register_class || !create_window || !get_message || !dispatch || !register_raw || !raw.def_proc || !raw.get_data) {
+        InterlockedExchange(&raw.state, -1);
+        log_append("KEYBOARD: mouse steering - Raw Input not available.\r\n");
+        return 0;
+    }
+    WNDCLASSW cls;
+    memory_copy(&cls, &(WNDCLASSW){0}, sizeof(cls));
+    cls.lpfnWndProc = raw_window;
+    cls.hInstance = GetModuleHandleW(NULL);
+    cls.lpszClassName = L"GriplineMouseSteering";
+    register_class(&cls);
+    HWND window = create_window(0, cls.lpszClassName, L"", 0, 0, 0, 0, 0, HWND_MESSAGE, NULL, cls.hInstance, NULL);
+    RAWINPUTDEVICE device = {0x01, 0x02, RIDEV_INPUTSINK, window}; /* generic desktop, mouse; also in the background */
+    if (!window || !register_raw(&device, 1, sizeof(device))) {
+        InterlockedExchange(&raw.state, -1);
+        log_append("KEYBOARD: mouse steering - Raw Input could not be registered.\r\n");
+        return 0;
+    }
+    log_append("KEYBOARD: mouse steering - Raw Input ready.\r\n");
+    MSG message;
+    while (get_message(&message, NULL, 0, 0) > 0) dispatch(&message);
+    return 0;
+}
+
 typedef struct { LONG x, y; } MousePoint;
 typedef BOOL(WINAPI *CursorPosFn)(MousePoint *);
 typedef BOOL(WINAPI *SetCursorPosFn)(int, int);
@@ -613,7 +688,46 @@ static struct {
     ClientToScreenFn to_screen;
     int ready, active;
     double target, out;
+    ULONGLONG moved, card_next; /* last mouse movement, next live card */
 } mouse;
+
+#define MOUSE_CARD_TAG 0x3a05e000u
+#define MOUSE_WHEEL_DEGREES 900.0 /* the card shows degrees of a 900 degree wheel (like the G920) */
+
+static void mouse_put(char *out, size_t *n, size_t cap, const char *text) {
+    while (*text && *n + 1 < cap) out[(*n)++] = *text++;
+    out[*n] = 0;
+}
+
+/* "Maus-Lenkung" / "135° links  □□□■■│□□□□□" while the mouse steers or the wheel turns back */
+static void mouse_card(double value, int returning) {
+    int de = game_language_is_german(game_base);
+    int degrees = (int)(value * MOUSE_WHEEL_DEGREES / 2.0 + (value < 0 ? -0.5 : 0.5));
+    int a = degrees < 0 ? -degrees : degrees;
+    char text[160], digits[8];
+    size_t n = 0;
+    unsigned d = 0;
+    text[0] = 0;
+    mouse_put(text, &n, sizeof(text), returning ? (de ? "Maus-Lenkung - zur\xc3\xbc" "ck zur Mitte\n" : "Mouse steering - back to centre\n")
+                                                : (de ? "Maus-Lenkung\n" : "Mouse steering\n"));
+    do digits[d++] = (char)('0' + a % 10); while ((a /= 10) && d < sizeof(digits));
+    while (d && n + 1 < sizeof(text)) text[n++] = digits[--d];
+    text[n] = 0;
+    mouse_put(text, &n, sizeof(text), "\xc2\xb0 ");
+    mouse_put(text, &n, sizeof(text), degrees < 0 ? (de ? "links   " : "left   ") : degrees > 0 ? (de ? "rechts   " : "right   ")
+                                                                                          : (de ? "gerade   " : "straight   "));
+    /* 5 cells per side, filled from the middle */
+    int cells = (int)((value < 0 ? -value : value) * 5.0 + 0.5);
+    for (int i = 0; i < 11; ++i) {
+        const char *c;
+        if (i == 5) c = "\xe2\x94\x82"; /* │ */
+        else if (value < 0 && i < 5 && 5 - i <= cells) c = "\xe2\x96\xa0"; /* ■ */
+        else if (value > 0 && i > 5 && i - 5 <= cells) c = "\xe2\x96\xa0";
+        else c = "\xe2\x96\xa1"; /* □ */
+        mouse_put(text, &n, sizeof(text), c);
+    }
+    notify_show_live(text, MOUSE_CARD_TAG, 1500);
+}
 
 static int mouse_ready(void) {
     if (mouse.ready) return mouse.ready > 0;
@@ -624,7 +738,12 @@ static int mouse_ready(void) {
     mouse.client_rect = (ClientRectFn)(uintptr_t)GetProcAddress(user32, "GetClientRect");
     mouse.to_screen = (ClientToScreenFn)(uintptr_t)GetProcAddress(user32, "ClientToScreen");
     if (mouse.get_pos && mouse.set_pos && mouse.client_rect && mouse.to_screen) mouse.ready = 1;
-    return mouse.ready > 0;
+    if (mouse.ready > 0 && InterlockedCompareExchange(&raw.state, 1, 0) == 0) {
+        HANDLE thread = CreateThread(NULL, 0, raw_thread, NULL, 0, NULL);
+        if (thread) CloseHandle(thread);
+        else InterlockedExchange(&raw.state, -1);
+    }
+    return mouse.ready > 0 && raw.state > 0;
 }
 
 static double mouse_steer(int focused, double dt) {
@@ -643,19 +762,39 @@ static double mouse_steer(int focused, double dt) {
     if (!window) {
         mouse.active = 0;
         mouse.target = 0.0;
-    } else if (!mouse.active) { /* first reading: only centre the cursor */
+    } else if (!mouse.active) { /* first reading: only park the cursor, forget older movement */
         mouse.active = 1;
+        InterlockedExchange(&raw.dx, 0);
         mouse.set_pos((int)centre.x, (int)centre.y);
-    } else if (mouse.get_pos(&now)) {
-        /* sensitivity 50: about 600 pixels from lock to lock */
-        mouse.target = clamp1(mouse.target + (double)(now.x - centre.x) * (double)mouse_sensitivity / 15000.0);
-        if (now.x != centre.x || now.y != centre.y) mouse.set_pos((int)centre.x, (int)centre.y);
+    } else {
+        LONG dx = InterlockedExchange(&raw.dx, 0);
+        /* Medium (40): about 3000 mouse counts (10 cm at 800 dpi) from full left to full right */
+        if (dx) {
+            mouse.target = clamp1(mouse.target + (double)dx * (double)mouse_sensitivity / 60000.0);
+            mouse.moved = GetTickCount64();
+        }
+        if (mouse.get_pos(&now) && (now.x != centre.x || now.y != centre.y)) mouse.set_pos((int)centre.x, (int)centre.y);
+    }
+    if (!window) InterlockedExchange(&raw.dx, 0);
+    /* back to the middle after MouseCenter seconds without moving the mouse (about 0.7 s from full lock) */
+    ULONGLONG tick = GetTickCount64();
+    int returning = 0;
+    if (mouse.active && mouse_center && mouse.target != 0.0 && tick - mouse.moved >= (ULONGLONG)mouse_center * 1000u) {
+        double step = dt * 1.4;
+        mouse.target = mouse.target > 0.0 ? (mouse.target > step ? mouse.target - step : 0.0)
+                                           : (mouse.target < -step ? mouse.target + step : 0.0);
+        returning = 1;
     }
     /* gentle: the wheel follows the mouse with a short delay instead of jumping */
     double k = dt * 14.0;
     if (k > 1.0 || dt <= 0.0) k = 1.0;
     mouse.out += (mouse.target - mouse.out) * k;
     if (mouse.out > -0.002 && mouse.out < 0.002 && mouse.target == 0.0) mouse.out = 0.0;
+    /* live card while the mouse steers, while the wheel turns back and a moment after */
+    if (mouse.active && tick >= mouse.card_next && (tick - mouse.moved < 1500 || returning)) {
+        mouse.card_next = tick + 100;
+        mouse_card(mouse.out, returning);
+    }
     return mouse.out;
 }
 

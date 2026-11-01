@@ -81,5 +81,8 @@ int wheel_buttons_install(unsigned char *game_image);
 /* Mouse steering like ETS2 (V7): FH2_Keyboard.ini [Keyboard] MouseSteering, 0 = off, 1..100 sensitivity */
 int keyboard_mouse_steering(void);
 void keyboard_set_mouse_steering(int sensitivity);
+/* [Keyboard] MouseCenter: seconds until the wheel turns back straight when the mouse rests, 0 = never */
+int keyboard_mouse_center(void);
+void keyboard_set_mouse_center(int seconds);
 
 #endif

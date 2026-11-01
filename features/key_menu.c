@@ -27,6 +27,14 @@ enum { TOP_STYLE = 100, TOP_RESET = 101, TOP_MOUSE = 102 };
 static const int mouse_values[MOUSE_CHOICES] = {0, 20, 40, 65, 90};
 static const wchar_t *const mouse_german[MOUSE_CHOICES] = {L"Aus", L"Sanft", L"Mittel", L"Schnell", L"Sehr schnell"};
 static const wchar_t *const mouse_english[MOUSE_CHOICES] = {L"Off", L"Gentle", L"Medium", L"Fast", L"Very fast"};
+/* back to the middle when the mouse rests: FH2_Keyboard.ini MouseCenter seconds (actions CENTER_FIRST + i) */
+#define CENTER_FIRST 10
+#define CENTER_CHOICES 5
+static const int center_values[CENTER_CHOICES] = {0, 1, 2, 3, 5};
+static const wchar_t *const center_german[CENTER_CHOICES] = {L"Nie", L"nach 1 Sekunde", L"nach 2 Sekunden",
+                                                             L"nach 3 Sekunden", L"nach 5 Sekunden"};
+static const wchar_t *const center_english[CENTER_CHOICES] = {L"Never", L"after 1 second", L"after 2 seconds",
+                                                              L"after 3 seconds", L"after 5 seconds"};
 
 static const wchar_t *const style_names[NOTIFY_STYLE_COUNT] = {L"Classic", L"Enhanced", L"Overdrive"};
 
@@ -238,7 +246,7 @@ static int save_style(int style) {
 }
 
 /* FH2_Keyboard.ini [Keyboard] MouseSteering */
-static int save_mouse(int value) {
+static int save_mouse(const char *key, int value) {
     size_t length;
     char text[4];
     unsigned n = 0;
@@ -249,7 +257,7 @@ static int save_mouse(int value) {
     }
     text[n] = 0;
     if (!read_file_at(ini_path, &length)) return 0;
-    size_t written = ini_set_value(file_text, length, "Keyboard", "MouseSteering", text, edit_text[0], FILE_LIMIT + 1);
+    size_t written = ini_set_value(file_text, length, "Keyboard", key, text, edit_text[0], FILE_LIMIT + 1);
     if (!written || written > FILE_LIMIT || !write_file_at(ini_path, edit_text[0], written)) {
         log_append("KEYMENU: FH2_Keyboard.ini could not be written - mouse steering not saved.\r\n");
         return 0;
@@ -264,6 +272,13 @@ static int mouse_choice(void) {
         if ((d < 0 ? -d : d) < (b < 0 ? -b : b)) best = i;
     }
     return value ? (best ? best : 1) : 0;
+}
+
+static int center_choice(void) {
+    int value = keyboard_mouse_center();
+    for (int i = 0; i < CENTER_CHOICES; ++i)
+        if (center_values[i] == value) return i;
+    return value ? CENTER_CHOICES - 1 : 0;
 }
 
 static void log_binding(unsigned index) {
@@ -415,6 +430,11 @@ static void build_page(wchar_t *title) {
             row_add(tr(L"Lenken mit der Maus wie in ETS2", L"Steer with the mouse like ETS2"), L"", NOTIFY_ROW_INFO, -1);
             for (int i = 0; i < MOUSE_CHOICES; ++i)
                 row_add(tr(mouse_german[i], mouse_english[i]), i == mouse_choice() ? tr(L"✓ aktiv", L"✓ active") : L"", 0, i);
+            row_add(tr(L"Lenkrad automatisch gerade", L"Wheel back to straight"), tr(L"wenn die Maus ruht", L"when the mouse rests"),
+                    NOTIFY_ROW_INFO, -1);
+            for (int i = 0; i < CENTER_CHOICES; ++i)
+                row_add(tr(center_german[i], center_english[i]), i == center_choice() ? tr(L"✓ aktiv", L"✓ active") : L"", 0,
+                        CENTER_FIRST + i);
             hint(0);
             break;
         case LEVEL_RESET_ALL:
@@ -522,8 +542,25 @@ static void choose(void) {
             break;
         }
         case LEVEL_MOUSE: {
+            if (action >= CENTER_FIRST) {
+                int i = action - CENTER_FIRST;
+                keyboard_set_mouse_center(center_values[i]);
+                int saved = save_mouse("MouseCenter", center_values[i]);
+                char text[192];
+                unsigned t = 0;
+                wchar_t line[128];
+                unsigned n = wcopy(line, 0, 128, tr(L"Lenkrad automatisch gerade: ", L"Wheel back to straight: "));
+                n = wcopy(line, n, 128, tr(center_german[i], center_english[i]));
+                wcopy(line, n, 128, saved ? tr(L"\nGilt, sobald die Maus ruht", L"\nApplies when the mouse rests")
+                                          : tr(L"\nNur bis zum Spielende (nicht gespeichert)", L"\nUntil the game closes (not saved)"));
+                utf8(line, text, sizeof(text), &t);
+                text[t] = 0;
+                notify_show(text);
+                log_append_value("KEYMENU: mouse back to centre after seconds ", center_values[i]);
+                break;
+            }
             keyboard_set_mouse_steering(mouse_values[action]);
-            int saved = save_mouse(mouse_values[action]);
+            int saved = save_mouse("MouseSteering", mouse_values[action]);
             char text[192];
             unsigned t = 0;
             wchar_t line[128];
