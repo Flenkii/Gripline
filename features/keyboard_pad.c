@@ -60,6 +60,7 @@ static const GUID IID_Gamepad = {0xbc7bb43c, 0x0a69, 0x3903, {0x9e, 0x9d, 0xa5, 
 /* ------------------------------------------------------------------ settings */
 
 static wchar_t ini_path[PATH_CAPACITY];
+static int mouse_sensitivity; /* [Keyboard] MouseSteering, 0 = off */
 static volatile LONG values[KEY_SETTING_COUNT];
 static int loaded;
 static const wchar_t *const setting_keys[KEY_SETTING_COUNT] = {L"Enabled", L"SteerTime", L"ReturnTime",
@@ -438,6 +439,10 @@ static void settings_load(void) {
         if (v < setting_min[id] || v > setting_max[id]) v = setting_defaults[id];
         values[id] = v;
     }
+    /* V7: mouse steering like Euro Truck Simulator 2 (0 = off, 1..100 = sensitivity) */
+    mouse_sensitivity = read_int(L"MouseSteering", 0);
+    if (mouse_sensitivity < 0 || mouse_sensitivity > 100) mouse_sensitivity = 0;
+    if (mouse_sensitivity) log_append_value("KEYBOARD: mouse steering on, sensitivity ", mouse_sensitivity);
     for (unsigned i = 0; i < ARRAY_COUNT(bindings); ++i) {
         wchar_t text[96];
         GetPrivateProfileStringW(L"Keyboard", bindings[i].key, bindings[i].defaults, text, 96, ini_path);
@@ -579,6 +584,72 @@ static void apply_input(PadReading *r, int input, double amount) {
     }
 }
 
+
+/* ------------------------------------------------------------------ mouse steering (V7) */
+
+/* Like Euro Truck Simulator 2: moving the mouse left or right turns the wheel and it stays where you
+   left it (no spring back). Only while driving with the game window in front: the cursor is put back
+   into the middle of the window each reading, so it cannot leave the window. In menus and the pause
+   menu (simulation paused) the mouse is free and the wheel goes back to the middle. */
+typedef struct { LONG x, y; } MousePoint;
+typedef BOOL(WINAPI *CursorPosFn)(MousePoint *);
+typedef BOOL(WINAPI *SetCursorPosFn)(int, int);
+typedef BOOL(WINAPI *ClientRectFn)(HWND, RECT *);
+typedef BOOL(WINAPI *ClientToScreenFn)(HWND, MousePoint *);
+
+static struct {
+    CursorPosFn get_pos;
+    SetCursorPosFn set_pos;
+    ClientRectFn client_rect;
+    ClientToScreenFn to_screen;
+    int ready, active;
+    double target, out;
+} mouse;
+
+static int mouse_ready(void) {
+    if (mouse.ready) return mouse.ready > 0;
+    mouse.ready = -1;
+    if (!user32_ready()) return 0;
+    mouse.get_pos = (CursorPosFn)(uintptr_t)GetProcAddress(user32, "GetCursorPos");
+    mouse.set_pos = (SetCursorPosFn)(uintptr_t)GetProcAddress(user32, "SetCursorPos");
+    mouse.client_rect = (ClientRectFn)(uintptr_t)GetProcAddress(user32, "GetClientRect");
+    mouse.to_screen = (ClientToScreenFn)(uintptr_t)GetProcAddress(user32, "ClientToScreen");
+    if (mouse.get_pos && mouse.set_pos && mouse.client_rect && mouse.to_screen) mouse.ready = 1;
+    return mouse.ready > 0;
+}
+
+static double mouse_steer(int focused, double dt) {
+    if (!mouse_sensitivity || !mouse_ready()) return 0.0;
+    int on = focused && !input_blocked && driving_now() && !noclip_active();
+    HWND window = on ? foreground() : NULL;
+    RECT rect;
+    MousePoint centre = {0, 0}, now;
+    if (window && mouse.client_rect(window, &rect) && rect.right > 0 && rect.bottom > 0) {
+        centre.x = rect.right / 2;
+        centre.y = rect.bottom / 2;
+        if (!mouse.to_screen(window, &centre)) window = NULL;
+    } else {
+        window = NULL;
+    }
+    if (!window) {
+        mouse.active = 0;
+        mouse.target = 0.0;
+    } else if (!mouse.active) { /* first reading: only centre the cursor */
+        mouse.active = 1;
+        mouse.set_pos((int)centre.x, (int)centre.y);
+    } else if (mouse.get_pos(&now)) {
+        /* sensitivity 50: about 600 pixels from lock to lock */
+        mouse.target = clamp1(mouse.target + (double)(now.x - centre.x) * (double)mouse_sensitivity / 15000.0);
+        if (now.x != centre.x || now.y != centre.y) mouse.set_pos((int)centre.x, (int)centre.y);
+    }
+    /* gentle: the wheel follows the mouse with a short delay instead of jumping */
+    double k = dt * 14.0;
+    if (k > 1.0 || dt <= 0.0) k = 1.0;
+    mouse.out += (mouse.target - mouse.out) * k;
+    if (mouse.out > -0.002 && mouse.out < 0.002 && mouse.target == 0.0) mouse.out = 0.0;
+    return mouse.out;
+}
+
 static struct {
     double steer, pedal[ARRAY_COUNT(bindings)];
     LARGE_INTEGER last;
@@ -649,7 +720,7 @@ static void keyboard_reading(PadReading *r) {
         if (nav_y != 0.0 && r->ry == 0.0) r->ry = clamp1(nav_y);
         nav_x = nav_y = 0.0;
     }
-    double lx = clamp1(kb.steer + nav_x);
+    double lx = clamp1(kb.steer + nav_x + mouse_steer(focused, dt));
     if (lx != 0.0) r->lx = lx;
     if (nav_y != 0.0) r->ly = clamp1(nav_y);
 }
