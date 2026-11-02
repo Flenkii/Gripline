@@ -15,6 +15,7 @@
 #include "support.h"
 #include "cockpit.h"
 #include "traffic_files.h"
+#include "ini_edit.h"
 
 #define TRAFFIC_FOLDER L"gripline_traffic"
 
@@ -528,9 +529,28 @@ static int make_files(const wchar_t *mount_dir, const Level *l) {
     return written > 0 && (car_loading_changes > 0 || l->roads == ROADS_EMPTY);
 }
 
+/* TrafficLevel 0 (original): files from an earlier, higher level must go. In the plugin build they lie in
+   mods\Gripline\media, which Extra Options mounts whatever the level is - so "Original" kept the old traffic
+   (V6.4). Only Gripline's own files are removed. */
+static void remove_files(const wchar_t *mount_dir) {
+    static wchar_t root[PATH_CAPACITY], path[PATH_CAPACITY];
+    const wchar_t *plugin_root = gripline_output_root();
+    if (plugin_root) lstrcpynW(root, plugin_root, PATH_CAPACITY);
+    else if (!mount_dir || !path_join(root, mount_dir, TRAFFIC_FOLDER)) return;
+    static const char *const names[] = {"AI/CarLoadingSettings.xml", "AI/Densities.xml", "AI/DensitiesRoadTrip.xml",
+                                        "AI/DensitiesIEDriveToFestival.xml"};
+    int removed = 0;
+    for (unsigned i = 0; i < ARRAY_COUNT(names); ++i) {
+        if (join_ascii(path, root, "EntityModel/", names[i]) && DeleteFileW(path)) ++removed;
+        if (join_ascii(path, root, "", names[i]) && DeleteFileW(path)) ++removed;
+    }
+    if (removed) log_append_value("TRAFFIC: original traffic - old Gripline traffic files removed: ", removed);
+}
+
 void traffic_files_start(const wchar_t *mount_dir, int traffic_level) {
     if (state != 0) return;
     if (!mount_dir || traffic_level <= 0 || traffic_level > 7) {
+        if (traffic_level == 0) remove_files(mount_dir);
         InterlockedExchange(&state, 3);
         return;
     }
@@ -550,6 +570,65 @@ void traffic_files_start(const wchar_t *mount_dir, int traffic_level) {
         log_append("TRAFFIC: could not make the traffic files; only the density caps are raised.\r\n");
     }
     InterlockedExchange(&state, ok ? 2 : 3);
+}
+
+/* ------------------------------------------------------------------ load guard */
+
+/* A raised traffic level can hang the game's first load (seveN, V6.4: 100 cars, frozen loading screen
+   after pressing A, the game had to be killed). Gripline leaves a marker file at each start and removes it
+   once the own car drives. Still there at the next start = that start never reached the road: the traffic
+   goes back to Original in Gripline.ini, with a card. */
+#define GUARD_FILE L"Gripline_loading.txt"
+static wchar_t guard_path[PATH_CAPACITY];
+static volatile LONG guard_armed;
+
+static int raised(int level) {
+    return (level >= 1 && level <= 5) || level == 7;
+}
+
+static int set_original(const wchar_t *directory) {
+    static char text[8193], step[8300], out[8400];
+    static wchar_t ini[PATH_CAPACITY];
+    if (!path_join(ini, directory, MOD_INI_NAME)) return 0;
+    HANDLE f = CreateFileW(ini, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+    DWORD got = 0;
+    if (f != INVALID_HANDLE_VALUE) {
+        if (!ReadFile(f, text, sizeof(text) - 1, &got, NULL)) got = 0;
+        CloseHandle(f);
+    }
+    text[got] = 0;
+    size_t n = ini_set_value(text, got, "Traffic", "TrafficLevel", "0", step, sizeof(step));
+    if (n) n = ini_set_value(step, n, "Traffic", "RushHourAllDay", "0", out, sizeof(out));
+    return n && write_file(ini, out, n);
+}
+
+int traffic_load_guard(const wchar_t *directory, int traffic_level) {
+    if (!directory || !path_join(guard_path, directory, GUARD_FILE)) return 0;
+    int hung = raised(traffic_level) && GetFileAttributesW(guard_path) != INVALID_FILE_ATTRIBUTES;
+    if (hung) {
+        int saved = set_original(directory);
+        log_append_value("TRAFFIC: LOAD GUARD - the last start never reached the road with raised traffic, "
+                         "traffic set back to Original. Old TrafficLevel=", traffic_level);
+        if (!saved) log_append("TRAFFIC: LOAD GUARD - Gripline.ini could not be changed (only for this start).\r\n");
+        traffic_level = 0;
+    }
+    DeleteFileW(guard_path);
+    if (raised(traffic_level)) {
+        static const char note[] = "Gripline: this start has not reached the road yet. If this file is still here "
+                                   "at the next start, Gripline sets the traffic back to Original.\r\n";
+        if (write_file(guard_path, note, sizeof(note) - 1)) InterlockedExchange(&guard_armed, 1);
+    }
+    return hung;
+}
+
+/* 5 s of the own car's updates, so a car that only moves during the load does not count */
+void traffic_load_reached(float dt) {
+    static float driven;
+    if (!guard_armed || !(dt > 0.0f) || dt > 0.25f) return;
+    driven += dt;
+    if (driven < 5.0f || !InterlockedExchange(&guard_armed, 0)) return;
+    DeleteFileW(guard_path);
+    log_append("TRAFFIC: load guard - the game reached the road, marker removed.\r\n");
 }
 
 int traffic_files_wait_ready(void) {
@@ -588,5 +667,15 @@ __declspec(dllexport) int Fh2TestTrafficFilesStart(const wchar_t *mount_dir, int
     InterlockedExchange(&state, 0);
     traffic_files_start(mount_dir, traffic_level);
     return (int)state;
+}
+#endif
+
+#ifdef FH2_TWEAKS_TEST
+/* tests: the load guard (directory = Azimuth folder) and the own car driving for `ms` */
+__declspec(dllexport) int Fh2TestLoadGuard(const wchar_t *directory, int traffic_level) {
+    return traffic_load_guard(directory, traffic_level);
+}
+__declspec(dllexport) void Fh2TestLoadReached(int ms) {
+    for (int i = 0; i < ms / 100; ++i) traffic_load_reached(0.1f);
 }
 #endif

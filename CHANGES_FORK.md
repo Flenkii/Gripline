@@ -28,6 +28,7 @@ Fork of https://github.com/RokkuDayo/ForzaHorizon2_ExtraOptions – modified in 
 - `features/wheel_watch.c/.h` (V6.4) – wheel connected/disconnected card (raw input device list, vendor/product ids of known wheels)
 - `features/game_units.c/.h` (V6.4) – the game's Units option (mph or km/h; Default = the language's units), read from its locale object, so the cards use the same unit as the speedometer
 - `features/version_check.c/.h` (V6.4) – start card when Azimuth, Extra Options and FH2MP do not fit (azimuth.exe version resource, `FH2_ExtraOptions.log`, `fh2-mods\platform.log`)
+- `features/traffic_files.c` (V6.4.1) – TrafficLevel 0 removes Gripline's old traffic files; load guard: marker `Gripline_loading.txt` at each start with raised traffic, removed after 5 s of the own car on the road, still there at the next start = traffic back to Original in `Gripline.ini` with a card. New installs default to Original traffic.
 - `features/report.c/.h` (V6) – problem report: logs and INIs into `Gripline_Report.zip` (stored ZIP)
 - `third_party/fh2mod/` (V5) – the FH2 Mod Platform's API header (MIT, Trinculo54)
 - `assets/` (V5) – Gripline logo

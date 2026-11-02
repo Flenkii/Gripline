@@ -119,7 +119,7 @@ static void move_gripline_sections(void) {
         if (used) {
             write_whole(ini, ours, used, CREATE_NEW);
         } else {
-            static const char defaults[] = "[Traffic]\r\nTrafficLevel=4\r\nRushHourAllDay=1\r\n"
+            static const char defaults[] = "[Traffic]\r\nTrafficLevel=0\r\nRushHourAllDay=0\r\n"
                                            "[Gripline]\r\nNotifications=1\r\nSteeringAnimation=0\r\n"
                                            "CockpitViewForward=35\r\nCockpitViewUp=-5\r\n";
             write_whole(ini, defaults, sizeof(defaults) - 1, CREATE_NEW);
@@ -438,6 +438,17 @@ static void noclip_install(void) {
     log_append("NOCLIP: car update hook ready - key Noclip (F6) offline, trip card in the pause menu.\r\n");
 }
 
+/* the load guard put the traffic back to Original (traffic_files.c) */
+static int load_guard_card(char *out, unsigned size) {
+    (void)out;
+    (void)size;
+    int de = game && game_language_is_german(game);
+    notify_show_tinted(de ? "Verkehr auf Original gesetzt\nLetzter Start hing beim Laden"
+                          : "Traffic set to Original\nLast start hung while loading",
+                       NOTIFY_COLOR_ORANGE, de ? "HINWEIS" : "NOTE", 1);
+    return 0;
+}
+
 static void start_features(void) {
     ModOptions options;
     settings_defaults(&options);
@@ -449,6 +460,11 @@ static void start_features(void) {
     if (!read) {
         log_append("GRIPLINE: Gripline.ini could not be read; defaults are used.\r\n");
         platform_log("Gripline.ini could not be read - defaults used (see Gripline.log)");
+    }
+    if (traffic_load_guard(directory, options.traffic_level)) {
+        options.traffic_level = 0;
+        options.traffic_all_day = 0;
+        notify_show_deferred_call(load_guard_card);
     }
     traffic_tunables_start(game, &options);
     keyboard_pad_game_start(game, directory);
