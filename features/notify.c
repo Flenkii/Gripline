@@ -420,6 +420,7 @@ static void paint_pill(unsigned char *px, int w, int x0, int y0, int pw, int ph,
                        float rim);
 static void paint_band_glow(unsigned char *px, int w, int h, int x0, int y0, int bw, int bh, int spread,
                             const unsigned char col[3], float strength);
+static void paint_disc(unsigned char *px, int w, int h, float cx, float cy, float r, const unsigned char col[3], float alpha);
 
 /* Draws every card into a top-down BGRA bitmap (premultiplied alpha), one row per card. */
 /* ------------------------------------------------------------------ card look (V7)
@@ -775,6 +776,7 @@ static int draw_cards_v7(const Card *list, unsigned count, const Layout *l, unsi
     int tx = g + l->skew * 6 / 10 + l->bar + (int)(9 * s) + l->icon + (int)(12 * s);
     int shade = s >= 1.5f ? 2 : 1;
     int pill_h = (int)(18 * s), pill_pad = (int)(7 * s);
+    ULONGLONG now = GetTickCount64();
     int line_y[MAX_CARDS][3], pill_w[MAX_CARDS];
     /* V7 overhaul: the text block stands in the middle of the card (measured with the real font);
        the badge sits on a pill; a carbon weave and a glowing colour line finish the card */
@@ -801,17 +803,48 @@ static int draw_cards_v7(const Card *list, unsigned count, const Layout *l, unsi
                 if (((x + yy) % step) == 0)
                     for (int k = 0; k < 3; ++k) row[x * 4 + k] = mix8(row[x * 4 + k], 255, 0.03f);
         }
-        /* colour line along the bottom, card colour into the second colour */
-        int ly = top + ch - (int)(5 * s), lh = s >= 1.5f ? 2 : 1;
+        /* light sweep: a bright diagonal band runs over a new card once */
+        ULONGLONG age = list[c].shown ? now - list[c].shown : 0;
+        if (age < 750) {
+            float t = (float)age / 750.0f;
+            float cx = (float)g - 0.25f * (float)cw + 1.5f * (float)cw * t, band = 46.0f * s;
+            for (int yy = top; yy < top + ch; ++yy) {
+                unsigned char *row = px + (size_t)yy * w * 4;
+                float shear = (float)(yy - top) * 0.45f;
+                for (int x = g; x < g + cw; ++x) {
+                    float d = ((float)x + shear - cx) / band;
+                    if (d < -1.0f || d > 1.0f) continue;
+                    float k = (1.0f - d * d) * 0.22f * (1.0f - t * 0.5f);
+                    for (int q = 0; q < 3; ++q) row[x * 4 + q] = mix8(row[x * 4 + q], 255, k);
+                }
+            }
+        }
+        /* time line along the bottom: card colour into the second colour, it runs out with the card */
+        float left = 1.0f;
+        if (list[c].shown && list[c].hold > FADE_IN_MS) {
+            left = 1.0f - (float)age / (float)list[c].hold;
+            left = left < 0.0f ? 0.0f : left > 1.0f ? 1.0f : left;
+        }
+        int ly = top + ch - (int)(5 * s), lh = s >= 1.5f ? 3 : 2;
+        int lit = tx + (int)((float)(right - tx) * left);
         for (int yy = ly; yy < ly + lh; ++yy) {
             unsigned char *row = px + (size_t)yy * w * 4;
             for (int x = tx; x < right; ++x) {
                 float t = (float)(x - tx) / (float)(right - tx);
-                for (int k = 0; k < 3; ++k)
-                    row[x * 4 + k] = mix8(row[x * 4 + k], mix8(mix8(accent[k], accent2[k], t), 255, 0.3f), 0.9f * (1.0f - 0.7f * t));
+                if (x < lit) {
+                    for (int k = 0; k < 3; ++k)
+                        row[x * 4 + k] = mix8(row[x * 4 + k], mix8(mix8(accent[k], accent2[k], t), 255, 0.3f), 0.95f);
+                } else {
+                    for (int k = 0; k < 3; ++k) row[x * 4 + k] = mix8(row[x * 4 + k], 255, 0.08f); /* the empty track */
+                }
             }
         }
-        paint_band_glow(px, w, h, tx, ly, (right - tx) / 2, lh, (int)(4 * s), accent, 0.16f);
+        if (lit - tx > (int)(4 * s)) {
+            paint_band_glow(px, w, h, tx, ly, lit - tx, lh, (int)(5 * s), accent, 0.22f);
+            paint_disc(px, w, h, (float)lit, (float)ly + lh * 0.5f, 2.6f * s, accent2, 0.9f); /* a bright head */
+            const unsigned char white[3] = {255, 255, 255};
+            paint_disc(px, w, h, (float)lit, (float)ly + lh * 0.5f, 1.3f * s, white, 0.9f);
+        }
         pill_w[c] = 0;
         if (badge) {
             gdi.SelectObject(dc, badge_font);
@@ -1188,6 +1221,21 @@ static int draw_panel_v7(const wchar_t *title, const NotifyPanelRow *rows, unsig
         if (style == NOTIFY_ROW_SELECTED) {
             int inset = roomy ? (int)(2 * s) : 0;
             paint_selection(px, w, h, inner_l, y + inset, inner_r - inner_l, rh - 2 * inset, accent, s);
+            if (roomy && menu) { /* V7 overhaul 4: a soft light runs along the chosen row */
+                int bx = inner_l, bw = inner_r - inner_l, by = y + inset, bh = rh - 2 * inset;
+                float phase = (float)(GetTickCount64() % 1800u) / 1800.0f;
+                float cx = (float)bx - 0.3f * (float)bw + 1.6f * (float)bw * phase, band = 60.0f * s;
+                for (int yy = 0; yy < bh; ++yy) {
+                    unsigned char *row = px + (size_t)(by + yy) * w * 4;
+                    for (int x = 0; x < bw; ++x) {
+                        float d = ((float)(bx + x) + (float)yy * 0.6f - cx) / band;
+                        if (d < -1.0f || d > 1.0f) continue;
+                        float c = card_coverage(x, yy, bw, bh, bh / 2);
+                        if (c <= 0.0f) continue;
+                        for (int k = 0; k < 3; ++k) row[(bx + x) * 4 + k] = mix8(row[(bx + x) * 4 + k], 255, 0.20f * (1.0f - d * d) * c);
+                    }
+                }
+            }
         } else if (style == NOTIFY_ROW_SECTION) {
             /* section head: a thin rule from after the text to the right */
             gdi.SelectObject(dc, tiny);
@@ -1777,6 +1825,7 @@ static struct {
     UINT screen_height;
     unsigned drawn_ids[MAX_CARDS], drawn_count, drawn_panel_id;
     int texture_ready;
+    ULONGLONG drawn_at;
 } gpu;
 
 static const char shader_source[] =
@@ -2047,6 +2096,14 @@ static float card_alpha(ULONGLONG age, ULONGLONG hold, float *slide) {
     return 0.0f;
 }
 
+/* V7 overhaul 4: the cards' time line, their light sweep and the menu's shimmer move, so the
+   picture is drawn again about 30 times a second while one of them is up (not for Classic) */
+#define ANIM_MS 33
+static int animating(unsigned count) {
+    if (card_style == NOTIFY_STYLE_CLASSIC) return 0;
+    return count != 0 || (panel_count != 0 && panel_at_top == 1);
+}
+
 static void render(IDXGISwapChain *swapchain) {
     Card list[MAX_CARDS];
     unsigned count;
@@ -2099,6 +2156,8 @@ static void render(IDXGISwapChain *swapchain) {
     }
     int redraw = !gpu.texture_ready || gpu.drawn_count != count || gpu.drawn_panel_id != shown_panel_id;
     for (unsigned i = 0; !redraw && i < count; ++i) redraw = gpu.drawn_ids[i] != list[i].id;
+    if (!redraw && animating(count) && now - gpu.drawn_at >= ANIM_MS) redraw = 1;
+    if (redraw) gpu.drawn_at = now;
     wait_fence(gpu.allocator_fence[index]);
     if (redraw) {
         void *mapped = NULL;
@@ -2405,6 +2464,9 @@ static DWORD WINAPI overlay_thread(void *unused) {
         }
         int redraw = drawn_screen != screen_h || drawn_count != count || drawn_panel != shown_panel;
         for (unsigned i = 0; !redraw && i < count; ++i) redraw = drawn_ids[i] != list[i].id;
+        static ULONGLONG window_drawn_at;
+        if (!redraw && animating(count) && now - window_drawn_at >= ANIM_MS) redraw = 1;
+        if (redraw) window_drawn_at = now;
         if (redraw) {
             if (!draw_cards(list, count, &l, scratch_cards, l.width * 4) ||
                 (panel && !draw_panel(title, rows, panel, &l, scratch_panel, l.width * 4))) {
@@ -2854,6 +2916,12 @@ __declspec(dllexport) int Fh2TestNotifyDraw(unsigned height, unsigned char *pixe
     if (!pixels) return 1;
     if (!gdi_ready()) return 0;
     return draw_cards(cards, card_count, &l, pixels, pitch);
+}
+
+/* preview renders: every card as if it was shown `ms` ago */
+__declspec(dllexport) void Fh2TestNotifyAge(unsigned ms) {
+    ULONGLONG now = GetTickCount64();
+    for (unsigned i = 0; i < card_count; ++i) cards[i].shown = now > ms ? now - ms : 1;
 }
 
 /* preview renders: shows a panel from given rows (at_top 2 = telemetry) */

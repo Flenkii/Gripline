@@ -111,7 +111,7 @@ check(ok == 1 and card_text == 'Press F8 to change your keys\nKey menu: arrows, 
 check(e.call('Fh2TestKeyboardBinding', 42, 0) == F8, 'KeyMenu = F8 (Standard)')
 
 press(F8)
-check(tick() == LEVEL_GROUPS and panel() == 13, f'F8 oeffnet das Menue (4 Seiten + Maus-Lenkung + Telemetrie + Fahrtenbuch + Rekorde + Sprints + Welt + Karten-Design + Alle auf Standard + Hinweis): {panel()}')
+check(tick() == LEVEL_GROUPS and panel() == 14, f'F8 oeffnet das Menue (4 Seiten + Maus-Lenkung + Telemetrie + Fahrtenbuch + Rekorde + Sprints + Welt + Karten-Design + Problem-Bericht + Alle auf Standard + Hinweis): {panel()}')
 check(selected() == 'Driving', f'erste Zeile gewaehlt: {selected()}')
 
 # while open: the game and noclip get no key
@@ -216,7 +216,7 @@ keys.discard(ord('W'))
 # card design page: Overdrive is the default, Classic chosen -> Gripline.ini CardStyle=0
 open(os.path.join(root, 'Gripline.ini'), 'wb').write(b'[Gripline]\r\nCardColor=3\r\n')
 press(0x79)
-press(UP); press(UP)
+press(UP); press(UP); press(UP)
 check(selected() == 'Card design' and panel_rows().get('Card design') == 'Overdrive', f'Karten-Design-Zeile zeigt Overdrive: {panel_rows()}')
 press(ENTER)
 check(selected() == 'Overdrive' and panel_rows().get('Overdrive') == '\u2713 active', f'Design-Seite: Overdrive aktiv gewaehlt {panel_rows()}')
@@ -231,7 +231,7 @@ check(tick() == LEVEL_CLOSED, 'Esc, Esc: zu')
 
 # mouse steering page: Off by default, Medium chosen -> FH2_Keyboard.ini MouseSteering=40
 press(0x79)
-for _ in range(8): press(UP)
+for _ in range(9): press(UP)
 check(selected() == 'Mouse steering (experimental)' and panel_rows().get('Mouse steering (experimental)') == 'Off', f'Maus-Zeile zeigt Aus: {panel_rows()}')
 press(ENTER)
 check(selected() == 'Off' and panel_rows().get('Off') == '\u2713 active', f'Maus-Seite: Aus gewaehlt {panel_rows()}')
@@ -244,7 +244,7 @@ check(tick() == LEVEL_CLOSED, 'Maus: Esc, Esc: zu')
 
 # telemetry page: Turn rate on -> Gripline.ini TelemetryShow, dead zone 40 % -> FH2_Keyboard.ini
 press(0x79)
-for _ in range(7): press(UP)
+for _ in range(8): press(UP)
 check(selected() == 'Live telemetry', selected())
 press(ENTER)
 check(selected() == 'Telemetry panel', selected())
@@ -263,7 +263,7 @@ check(tick() == LEVEL_CLOSED, 'Telemetrie/Totzone: zu')
 
 # world page: three on/off rows, restart note
 press(0x79)
-press(UP); press(UP); press(UP)
+press(UP); press(UP); press(UP); press(UP)
 check(selected() == 'World: cameras, names, icons', selected())
 press(ENTER)
 rows = panel_rows()
@@ -279,7 +279,7 @@ check(tick() == LEVEL_CLOSED, 'Welt: zu')
 
 # logbook page: totals, nothing driven yet
 press(0x79)
-for _ in range(6): press(UP)
+for _ in range(7): press(UP)
 check(selected() == 'Logbook', repr(selected()))
 press(ENTER)
 rows = panel_rows()
@@ -288,7 +288,7 @@ press(ESC); press(ESC)
 check(tick() == LEVEL_CLOSED, 'Fahrtenbuch: zu')
 # records page: empty, clear asks first
 press(0x79)
-for _ in range(5): press(UP)
+for _ in range(6): press(UP)
 check(selected() == 'Records', selected())
 press(ENTER)
 rows = panel_rows()

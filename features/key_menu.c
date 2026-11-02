@@ -11,6 +11,7 @@
 #include "game_units.h"
 #include "rig_settings.h"
 #include "support.h"
+#include "report.h"
 
 #define VK_UP_ 0x26
 #define VK_DOWN_ 0x28
@@ -25,7 +26,7 @@
 enum { LEVEL_CLOSED, LEVEL_GROUPS, LEVEL_LIST, LEVEL_BINDING, LEVEL_CAPTURE, LEVEL_RESET_ALL, LEVEL_STYLE, LEVEL_MOUSE, LEVEL_TELEMETRY, LEVEL_WORLD, LEVEL_LOGBOOK, LEVEL_RECORDS, LEVEL_SPRINT, LEVEL_COUNT };
 
 /* first page: rows after the binding pages */
-enum { TOP_STYLE = 100, TOP_RESET = 101, TOP_MOUSE = 102, TOP_TELEMETRY = 103, TOP_WORLD = 104, TOP_LOGBOOK = 105, TOP_RECORDS = 106, TOP_SPRINT = 107 };
+enum { TOP_STYLE = 100, TOP_RESET = 101, TOP_MOUSE = 102, TOP_TELEMETRY = 103, TOP_WORLD = 104, TOP_LOGBOOK = 105, TOP_RECORDS = 106, TOP_SPRINT = 107, TOP_REPORT = 108 };
 
 /* mouse steering choices: FH2_Keyboard.ini MouseSteering values */
 #define MOUSE_CHOICES 6
@@ -475,6 +476,7 @@ static void build_page(wchar_t *title) {
             }
             row_add(tr(L"Welt: Blitzer, Namen, Symbole", L"World: cameras, names, icons"), L"›", 0, TOP_WORLD);
             row_add(tr(L"Karten-Design", L"Card design"), style_names[notify_style()], 0, TOP_STYLE);
+            row_add(tr(L"Problem-Bericht erstellen", L"Create problem report"), L"ZIP", 0, TOP_REPORT);
             row_add(tr(L"Alle auf Standard", L"Reset all to default"), L"›", 0, TOP_RESET);
             hint(1);
             break;
@@ -718,7 +720,9 @@ static void choose(void) {
     if (action < 0) return;
     switch (m.level) {
         case LEVEL_GROUPS:
-            if (action == TOP_RESET) {
+            if (action == TOP_REPORT) {
+                report_create_lang(m.german);
+            } else if (action == TOP_RESET) {
                 m.level = LEVEL_RESET_ALL;
                 m.sel[LEVEL_RESET_ALL] = 0;
             } else if (action == TOP_RECORDS) {
