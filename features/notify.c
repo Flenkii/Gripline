@@ -72,6 +72,7 @@ static volatile LONG card_style = NOTIFY_STYLE_OVERDRIVE;
 static wchar_t panel_title[TEXT_CAPACITY];
 static NotifyPanelRow panel_rows[NOTIFY_PANEL_ROWS];
 static volatile LONG panel_count; /* 0 = panel off */
+static volatile ULONGLONG panel_opened; /* V7 overhaul: when the menu panel came up (open animation) */
 static volatile LONG panel_at_top; /* 1 key menu: top right instead of centred; 2 telemetry: centred, cards stay */
 static unsigned panel_id; /* changes with every notify_panel_set: the panel is drawn again */
 
@@ -256,6 +257,7 @@ void notify_panel_show(const wchar_t *title, const NotifyPanelRow *rows, unsigne
     panel_title[n] = 0;
     for (unsigned i = 0; i < count; ++i) panel_rows[i] = rows[i];
     ++panel_id;
+    if (at_top != 2 && count && (panel_count == 0 || panel_at_top == 2)) panel_opened = GetTickCount64();
     InterlockedExchange(&panel_at_top, at_top == 2 ? 2 : at_top ? 1 : 0);
     InterlockedExchange(&panel_count, (LONG)count);
     InterlockedExchange(&cards_changed, 1);
@@ -838,9 +840,139 @@ static void paint_pill(unsigned char *px, int w, int x0, int y0, int pw, int ph,
     }
 }
 
+/* V7 overhaul: the Gripline menu (panel at the top) gets a taller header and roomier rows while it is
+   short enough; the key list (F5) and the telemetry keep the compact rows */
+static int panel_roomy(const Layout *l, unsigned count) {
+    return l->style != NOTIFY_STYLE_CLASSIC && panel_at_top == 1 && count <= 24;
+}
+static int panel_header_px(const Layout *l, unsigned count) {
+    return panel_roomy(l, count) ? (int)(76 * l->scale) : l->panel_header;
+}
+static int panel_row_px(const Layout *l, unsigned count) {
+    return panel_roomy(l, count) ? (int)(26 * l->scale) : l->panel_row;
+}
+
 /* height in pixels of the key list panel with `count` rows (with its glow margin) */
 static int panel_pixels(const Layout *l, unsigned count) {
-    return l->panel_header + (int)count * l->panel_row + l->pad + 2 * l->glow;
+    return panel_header_px(l, count) + (int)count * panel_row_px(l, count) + l->pad + 2 * l->glow;
+}
+
+/* anti-aliased filled circle */
+static void paint_disc(unsigned char *px, int w, int h, float cx, float cy, float r, const unsigned char col[3], float alpha) {
+    int x0 = (int)(cx - r - 1), x1 = (int)(cx + r + 2), y0 = (int)(cy - r - 1), y1 = (int)(cy + r + 2);
+    for (int y = y0 < 0 ? 0 : y0; y < y1 && y < h; ++y) {
+        unsigned char *row = px + (size_t)y * w * 4;
+        for (int x = x0 < 0 ? 0 : x0; x < x1 && x < w; ++x) {
+            float dx = (float)x + 0.5f - cx, dy = (float)y + 0.5f - cy;
+            float c = clamp01(r + 0.5f - root(dx * dx + dy * dy));
+            if (c <= 0.0f) continue;
+            for (int k = 0; k < 3; ++k) row[x * 4 + k] = mix8(row[x * 4 + k], col[k], c * alpha);
+        }
+    }
+}
+
+/* soft glow around a rounded band (selection): strength falls off over `spread` pixels */
+static void paint_band_glow(unsigned char *px, int w, int h, int x0, int y0, int bw, int bh, int spread,
+                            const unsigned char col[3], float strength) {
+    float r = (float)bh * 0.5f;
+    for (int y = y0 - spread; y < y0 + bh + spread; ++y) {
+        if (y < 0 || y >= h) continue;
+        unsigned char *row = px + (size_t)y * w * 4;
+        for (int x = x0 - spread; x < x0 + bw + spread; ++x) {
+            if (x < 0 || x >= w) continue;
+            float cx = (float)x + 0.5f, cy = (float)y + 0.5f;
+            float nx = cx < x0 + r ? x0 + r : (cx > x0 + bw - r ? x0 + bw - r : cx);
+            float ny = (float)y0 + r;
+            float d = root((cx - nx) * (cx - nx) + (cy - ny) * (cy - ny)) - r;
+            if (d <= 0.0f) continue; /* inside: the band itself */
+            float t = 1.0f - d / (float)spread;
+            if (t <= 0.0f) continue;
+            for (int k = 0; k < 3; ++k) row[x * 4 + k] = mix8(row[x * 4 + k], col[k], strength * t * t);
+        }
+    }
+}
+
+/* the chosen row: a glowing capsule in the card colour, brighter at the left and at the top */
+static void paint_selection(unsigned char *px, int w, int h, int x0, int y0, int bw, int bh, const unsigned char accent[3], float s) {
+    int r = bh / 2;
+    paint_band_glow(px, w, h, x0, y0, bw, bh, (int)(7 * s), accent, 0.30f);
+    for (int y = 0; y < bh; ++y) {
+        if (y0 + y < 0 || y0 + y >= h) continue;
+        unsigned char *row = px + (size_t)(y0 + y) * w * 4;
+        float top = 1.0f - (float)y / (float)bh;
+        for (int x = 0; x < bw; ++x) {
+            float c = card_coverage(x, y, bw, bh, r);
+            if (c <= 0.0f) continue;
+            float t = (float)x / (float)bw;
+            unsigned char *p = row + (size_t)(x0 + x) * 4;
+            float inner = card_coverage(x - 1, y - 1, bw - 2, bh - 2, r - 1 > 1 ? r - 1 : 1);
+            float edge = (x == 0 || y == 0 || x == bw - 1 || y == bh - 1) ? 1.0f : 1.0f - inner;
+            for (int k = 0; k < 3; ++k) {
+                unsigned char body = mix8(p[k], accent[k], c * (0.92f - 0.62f * t));
+                body = mix8(body, 255, c * 0.16f * top * top); /* glass at the top */
+                p[k] = mix8(body, 255, c * edge * (0.55f - 0.35f * t));
+            }
+        }
+    }
+    /* light beam at the leading edge */
+    const unsigned char white[3] = {255, 255, 255};
+    for (int y = y0 + (int)(4 * s); y < y0 + bh - (int)(4 * s); ++y) {
+        if (y < 0 || y >= h) continue;
+        unsigned char *row = px + (size_t)y * w * 4;
+        for (int x = x0 + (int)(5 * s); x < x0 + (int)(5 * s) + (s >= 1.5f ? 4 : 3); ++x)
+            for (int k = 0; k < 3; ++k) row[x * 4 + k] = white[k];
+    }
+}
+
+/* on/off switch: a track in the card colour (on) or dark (off) with a white knob */
+static void paint_switch(unsigned char *px, int w, int h, int x0, int y0, int sw, int sh, int on, const unsigned char accent[3]) {
+    const unsigned char dark[3] = {40, 44, 58}, white[3] = {255, 255, 255}, knob_off[3] = {150, 156, 172};
+    int r = sh / 2;
+    for (int y = 0; y < sh; ++y) {
+        if (y0 + y < 0 || y0 + y >= h) continue;
+        unsigned char *row = px + (size_t)(y0 + y) * w * 4;
+        for (int x = 0; x < sw; ++x) {
+            float c = card_coverage(x, y, sw, sh, r);
+            if (c <= 0.0f) continue;
+            unsigned char *p = row + (size_t)(x0 + x) * 4;
+            for (int k = 0; k < 3; ++k) p[k] = mix8(p[k], on ? mix8(accent[k], 255, 0.12f) : dark[k], c);
+        }
+    }
+    if (on) paint_band_glow(px, w, h, x0, y0, sw, sh, sh / 2, accent, 0.35f);
+    float kr = (float)sh * 0.5f - 2.5f;
+    float kx = on ? (float)(x0 + sw) - (float)sh * 0.5f : (float)x0 + (float)sh * 0.5f;
+    paint_disc(px, w, h, kx, (float)y0 + (float)sh * 0.5f, kr, on ? white : knob_off, 1.0f);
+}
+
+static int value_is(const wchar_t *v, const wchar_t *const *list) {
+    for (; *list; ++list) {
+        const wchar_t *a = v, *b = *list;
+        while (*a && *a == *b) ++a, ++b;
+        if (!*a && !*b) return 1;
+    }
+    return 0;
+}
+static const wchar_t *const values_on[] = {L"On", L"An", L"\x2713 on", L"\x2713 an", L"\x25cf on", L"\x25cf l\x00e4uft", NULL};
+static const wchar_t *const values_off[] = {L"Off", L"Aus", L"off", L"aus", NULL};
+
+static int text_px(HDC dc, const wchar_t *t, float fallback_per_char) {
+    SIZE size = {0, 0};
+    int n = text_width_chars(t);
+    if (!n) return 0;
+    if (!gdi.GetTextExtentPoint32W || !gdi.GetTextExtentPoint32W(dc, t, n, &size) || size.cx <= 0)
+        size.cx = (LONG)((float)n * fallback_per_char);
+    return (int)size.cx;
+}
+
+/* "Abc äöü" -> "ABC ÄÖÜ" (section heads) */
+static void upper_text(const wchar_t *in, wchar_t *out, int cap) {
+    int n = 0;
+    for (; in[n] && n < cap - 1; ++n) {
+        wchar_t c = in[n];
+        if ((c >= L'a' && c <= L'z') || c == 0xe4 || c == 0xf6 || c == 0xfc) c = (wchar_t)(c - 32);
+        out[n] = c;
+    }
+    out[n] = 0;
 }
 
 /* Draws the key list panel into l->panel_height rows (premultiplied BGRA, unused rows clear). */
@@ -850,6 +982,8 @@ static int draw_panel_v7(const wchar_t *title, const NotifyPanelRow *rows, unsig
     void *bits = NULL;
     int w = l->width, h = panel_pixels(l, count), g = l->glow;
     int cw = w - 2 * g, ch = h - 2 * g;
+    int header = panel_header_px(l, count), rh = panel_row_px(l, count), roomy = panel_roomy(l, count);
+    int menu = panel_at_top == 1;
     info.bmiHeader.biSize = sizeof(info.bmiHeader);
     info.bmiHeader.biWidth = w;
     info.bmiHeader.biHeight = -h;
@@ -867,16 +1001,18 @@ static int draw_panel_v7(const wchar_t *title, const NotifyPanelRow *rows, unsig
     unsigned char *px = (unsigned char *)bits;
     const unsigned char(*tone)[3] = palette[color];
     const unsigned char accent[3] = {tone[0][2], tone[0][1], tone[0][0]};
+    const unsigned char *second = second_colour(tone);
+    const unsigned char accent2[3] = {second[2], second[1], second[0]};
     float s = l->scale;
     clear_bitmap(px, w, h);
     int over = l->style == NOTIFY_STYLE_OVERDRIVE;
-    if (over) paint_overdrive_back(px, w, g, g, cw, ch, l->panel_header, l, tone);
+    if (over) paint_overdrive_back(px, w, g, g, cw, ch, header, l, tone);
     else paint_card_back(px, w, g, g, cw, ch, l, tone);
     int left = g + l->bar + l->skew, right = g + cw - l->skew; /* inside, right of the colour bar */
-    int first_row = g + l->panel_header;
+    int first_row = g + header;
     /* header: the logo on a soft light, the title next to it */
-    int logo_size = l->panel_header - (int)(14 * s);
-    int lx = left + (int)(8 * s), ly = g + (int)(5 * s);
+    int logo_size = (roomy ? l->panel_header : header) - (int)(14 * s);
+    int lx = left + (int)(8 * s), ly = g + (header - logo_size) / 2;
     const unsigned char logo[3] = {mix8(tone[1][2], 255, 0.15f), mix8(tone[1][1], 255, 0.15f), mix8(tone[1][0], 255, 0.15f)};
     if (over) {
         const unsigned char ink[3] = {0, 0, 0}, white[3] = {255, 255, 255}, dark[3] = {40, 26, 18};
@@ -886,103 +1022,274 @@ static int draw_panel_v7(const wchar_t *title, const NotifyPanelRow *rows, unsig
         paint_halo(px, w, g, g + ch, lx + logo_size / 2, ly + logo_size / 2, logo_size * 7 / 10, 0.38f, tone);
         paint_logo(px, w, lx, ly, logo_size, logo, 1.0f);
     }
-    /* every second row a touch lighter: long lists read easier */
-    for (unsigned i = 1; i < count; i += 2) {
-        int y0 = first_row + (int)i * l->panel_row;
-        for (int y = y0; y < y0 + l->panel_row && y < g + ch; ++y) {
+    int inner_l = left + l->pad / 2, inner_r = right - l->pad / 2;
+    /* the body: a faint diagonal carbon weave, then every second row a touch lighter */
+    if (roomy) {
+        int step = (int)(6 * s) > 3 ? (int)(6 * s) : 3;
+        for (int y = first_row; y < g + ch; ++y) {
             unsigned char *row = px + (size_t)y * w * 4;
-            for (int x = left + l->pad / 2; x < right - l->pad / 2; ++x)
-                for (int k = 0; k < 3; ++k) row[x * 4 + k] = mix8(row[x * 4 + k], 255, 0.04f);
+            for (int x = inner_l; x < inner_r; ++x)
+                if (((x + y) % step) == 0)
+                    for (int k = 0; k < 3; ++k) row[x * 4 + k] = mix8(row[x * 4 + k], 255, 0.025f);
         }
     }
-    /* line in the card colour under the header, fading to the right */
+    for (unsigned i = 1; i < count; i += 2) {
+        if (rows[i].style == NOTIFY_ROW_SECTION || rows[i].style == NOTIFY_ROW_HINT) continue;
+        int y0 = first_row + (int)i * rh;
+        for (int y = y0; y < y0 + rh && y < g + ch; ++y) {
+            unsigned char *row = px + (size_t)y * w * 4;
+            for (int x = inner_l; x < inner_r; ++x)
+                for (int k = 0; k < 3; ++k) row[x * 4 + k] = mix8(row[x * 4 + k], 255, roomy ? 0.03f : 0.04f);
+        }
+    }
+    /* line under the header: card colour into the second colour, fading to the right */
     int line_y = first_row - (int)(5 * s);
-    for (int y = line_y; y < line_y + (s >= 1.5f ? 2 : 1); ++y) {
+    for (int y = line_y; y < line_y + (roomy || s >= 1.5f ? 2 : 1); ++y) {
         unsigned char *row = px + (size_t)y * w * 4;
-        for (int x = left + l->pad / 2; x < right - l->pad; ++x) {
-            float fade = 1.0f - (float)(x - left) / (float)(right - left);
-            for (int k = 0; k < 3; ++k) row[x * 4 + k] = mix8(row[x * 4 + k], mix8(accent[k], 255, 0.3f), 0.95f * fade);
+        for (int x = inner_l; x < right - l->pad; ++x) {
+            float t = (float)(x - left) / (float)(right - left);
+            float fade = roomy ? 1.0f - t * 0.6f : 1.0f - t;
+            for (int k = 0; k < 3; ++k)
+                row[x * 4 + k] = mix8(row[x * 4 + k], mix8(mix8(accent[k], accent2[k], t), 255, 0.3f), 0.95f * fade);
         }
     }
-    gdi.GdiFlush();
+    if (roomy) paint_band_glow(px, w, h, inner_l, line_y, right - l->pad - inner_l, 2, (int)(5 * s), accent, 0.18f);
+
     HFONT small_bold = gdi.CreateFontW(-(int)(13 * s), 0, 0, 0, FW_BOLD, 0, 0, 0, DEFAULT_CHARSET, 0, 0,
                                        ANTIALIASED_QUALITY, 0, L"Segoe UI");
     int italic = l->style == NOTIFY_STYLE_OVERDRIVE;
-    HFONT main = gdi.CreateFontW(-(int)(20 * s), 0, 0, 0, italic ? FW_HEAVY : FW_BOLD, (DWORD)italic, 0, 0,
+    HFONT main = gdi.CreateFontW(-(int)((roomy ? 25 : 20) * s), 0, 0, 0, italic ? FW_HEAVY : FW_BOLD, (DWORD)italic, 0, 0,
                                  DEFAULT_CHARSET, 0, 0, ANTIALIASED_QUALITY, 0, L"Segoe UI");
-    HFONT label = gdi.CreateFontW(-(int)(15 * s), 0, 0, 0, FW_NORMAL, 0, 0, 0, DEFAULT_CHARSET, 0, 0,
+    HFONT label = gdi.CreateFontW(-(int)((roomy ? 16 : 15) * s), 0, 0, 0, FW_NORMAL, 0, 0, 0, DEFAULT_CHARSET, 0, 0,
                                   ANTIALIASED_QUALITY, 0, L"Segoe UI");
+    HFONT label_bold = gdi.CreateFontW(-(int)((roomy ? 16 : 15) * s), 0, 0, 0, FW_BOLD, 0, 0, 0, DEFAULT_CHARSET, 0, 0,
+                                       ANTIALIASED_QUALITY, 0, L"Segoe UI");
     HFONT keys = gdi.CreateFontW(-(int)(15 * s), 0, 0, 0, FW_SEMIBOLD, 0, 0, 0, DEFAULT_CHARSET, 0, 0,
+                                 ANTIALIASED_QUALITY, 0, L"Segoe UI");
+    HFONT tiny = gdi.CreateFontW(-(int)(11 * s), 0, 0, 0, FW_BOLD, 0, 0, 0, DEFAULT_CHARSET, 0, 0,
                                  ANTIALIASED_QUALITY, 0, L"Segoe UI");
     gdi.SetBkMode(dc, TRANSPARENT);
     int tx = left + l->pad, kx = g + cw * 58 / 100;
+    int text_dy = (rh - (int)((roomy ? 21 : 20) * s)) / 2; /* text sits in the middle of the taller rows */
+    if (text_dy < 0) text_dy = 0;
+
+    /* ---- pass 1: everything painted into the pixels (before any text is drawn over it) */
+    int value_kind[NOTIFY_PANEL_ROWS]; /* 0 text, 1 pill, 2 switch on, 3 switch off, 4 dot, 5 sub page (chevron) */
+    int value_x[NOTIFY_PANEL_ROWS];
+    int vr = right - l->pad - (int)(18 * s); /* roomy: values end here, the chevron stands right of it */
+    for (unsigned i = 0; i < count; ++i) {
+        int y = first_row + (int)i * rh, style = rows[i].style;
+        value_kind[i] = 0, value_x[i] = kx;
+        if (style == NOTIFY_ROW_SELECTED) {
+            int inset = roomy ? (int)(2 * s) : 0;
+            paint_selection(px, w, h, inner_l, y + inset, inner_r - inner_l, rh - 2 * inset, accent, s);
+        } else if (style == NOTIFY_ROW_SECTION) {
+            /* section head: a thin rule from after the text to the right */
+            gdi.SelectObject(dc, tiny);
+            wchar_t up[32];
+            upper_text(rows[i].label, up, 32);
+            int tw = text_px(dc, up, 7.5f * s);
+            int ry = y + rh / 2 + (int)(2 * s);
+            for (int x = tx + tw + (int)(8 * s); x < inner_r; ++x) {
+                float t = (float)(x - tx - tw) / (float)(inner_r - tx - tw);
+                unsigned char *p = px + (size_t)ry * w * 4 + (size_t)x * 4;
+                for (int k = 0; k < 3; ++k) p[k] = mix8(p[k], mix8(accent[k], 255, 0.25f), 0.55f * (1.0f - t));
+            }
+        } else if (style == NOTIFY_ROW_HINT) {
+            int ry = y - (int)(2 * s);
+            for (int x = inner_l; x < inner_r; ++x) {
+                unsigned char *p = px + (size_t)ry * w * 4 + (size_t)x * 4;
+                for (int k = 0; k < 3; ++k) p[k] = mix8(p[k], 255, 0.10f);
+            }
+        }
+        if (style == NOTIFY_ROW_HINT || style == NOTIFY_ROW_SECTION || !rows[i].keys[0]) continue;
+        if (roomy && rows[i].keys[0] == 0x203a && !rows[i].keys[1]) {
+            value_kind[i] = 5;
+            continue;
+        }
+        if (roomy && value_is(rows[i].keys, values_on)) value_kind[i] = 2;
+        else if (roomy && value_is(rows[i].keys, values_off)) value_kind[i] = 3;
+        else if (roomy && rows[i].keys[0] == 0x2713) value_kind[i] = 4;
+        if (value_kind[i] == 2 || value_kind[i] == 3) {
+            int sh = (int)(16 * s), sw = (int)(30 * s);
+            paint_switch(px, w, h, roomy ? vr - sw : kx, y + (rh - sh) / 2, sw, sh, value_kind[i] == 2, accent);
+        } else if (value_kind[i] == 4) {
+            float r = 7.0f * s;
+            const unsigned char white[3] = {255, 255, 255};
+            paint_band_glow(px, w, h, kx, y + rh / 2 - (int)r, (int)(2 * r), (int)(2 * r), (int)(5 * s), accent, 0.35f);
+            paint_disc(px, w, h, (float)kx + r, (float)y + rh * 0.5f, r, accent, 1.0f);
+            paint_disc(px, w, h, (float)kx + r, (float)y + rh * 0.5f, r * 0.42f, white, 1.0f);
+            value_x[i] = kx + (int)(2 * r + 7 * s);
+        } else if (!is_bar_text(rows[i].keys) && text_width_chars(rows[i].keys) <= 16) {
+            /* short values (keys, choices) sit on a key cap */
+            gdi.SelectObject(dc, keys);
+            int pad = (int)(7 * s), ph = (roomy ? (int)(19 * s) : rh - (int)(3 * s));
+            int pw = text_px(dc, rows[i].keys, 8.5f * s) + 2 * pad, px0 = kx - pad / 2;
+            if (roomy) {
+                px0 = vr - pw;
+                if (px0 < kx - pad / 2) px0 = kx - pad / 2;
+            }
+            if (px0 + pw > right - l->pad) pw = right - l->pad - px0;
+            if (pw > ph) paint_pill(px, w, px0, y + (rh - ph) / 2, pw, ph, accent,
+                                    style == NOTIFY_ROW_SELECTED ? 0.10f : style == NOTIFY_ROW_INFO ? 0.14f : 0.26f,
+                                    style == NOTIFY_ROW_SELECTED ? 0.70f : 0.45f);
+            value_x[i] = px0 + pad;
+            value_kind[i] = 1;
+        }
+    }
+    /* footer of the menu: key caps (and the controller's A / B) instead of a plain line */
+    int footer = menu && count && rows[count - 1].style == NOTIFY_ROW_HINT;
+    int cap_x[6], cap_w[6], cap_n = 0, word_x[6];
+    const wchar_t *cap_text[6], *word_text[6];
+    wchar_t parts[6][32];
+    int pad_button[6]; /* 0 none, 'A', 'B' */
+    if (footer) {
+        /* "↑↓ choose · Enter OK" + "Esc back": cap = the first word of each part */
+        const wchar_t *src[2] = {rows[count - 1].label, rows[count - 1].keys};
+        int y = first_row + (int)(count - 1) * rh;
+        int x = tx;
+        for (int k = 0; k < 2 && cap_n < 6; ++k) {
+            const wchar_t *p = src[k];
+            while (*p && cap_n < 6) {
+                int n = 0;
+                while (p[n] && !(p[n] == L' ' && p[n + 1] == 0x00b7)) ++n;
+                int c = 0;
+                for (; c < n && c < 31; ++c) parts[cap_n][c] = p[c];
+                parts[cap_n][c] = 0;
+                wchar_t *space = parts[cap_n];
+                while (*space && *space != L' ') ++space;
+                const wchar_t *word = L"";
+                if (*space) *space = 0, word = space + 1;
+                cap_text[cap_n] = parts[cap_n];
+                word_text[cap_n] = word;
+                gdi.SelectObject(dc, tiny);
+                int cw_ = text_px(dc, parts[cap_n], 7.0f * s) + (int)(12 * s);
+                int ch_ = (int)(17 * s), cy = y + (rh - ch_) / 2;
+                const unsigned char cap_col[3] = {70, 76, 96};
+                paint_pill(px, w, x, cy, cw_ > ch_ ? cw_ : ch_ + 1, ch_, cap_col, 0.85f, 0.55f);
+                cap_x[cap_n] = x, cap_w[cap_n] = cw_ > ch_ ? cw_ : ch_ + 1;
+                x += cap_w[cap_n] + (int)(4 * s);
+                pad_button[cap_n] = 0;
+                if (parts[cap_n][0] == L'E' && parts[cap_n][1] == L'n') pad_button[cap_n] = 'A';
+                if (parts[cap_n][0] == L'E' && parts[cap_n][1] == L's') pad_button[cap_n] = 'B';
+                if (pad_button[cap_n]) {
+                    const unsigned char a_col[3] = {70, 190, 90}, b_col[3] = {60, 70, 220};
+                    float r = 8.5f * s;
+                    paint_disc(px, w, h, (float)x + r, (float)cy + ch_ * 0.5f, r, pad_button[cap_n] == 'A' ? a_col : b_col, 1.0f);
+                    x += (int)(2 * r + 5 * s);
+                }
+                gdi.SelectObject(dc, small_bold);
+                word_x[cap_n] = x;
+                x += text_px(dc, word, 7.0f * s) + (int)(14 * s);
+                ++cap_n;
+                p += n;
+                while (*p == L' ' || *p == 0x00b7) ++p;
+            }
+        }
+    }
+    gdi.GdiFlush();
+
+    /* ---- pass 2: the text */
     int title_x = lx + logo_size + (int)(12 * s);
     RECT clip = {title_x, g, right - l->pad, g + ch};
     HGDIOBJ old_font = gdi.SelectObject(dc, main);
-    shadow_text(dc, title_x, g + (l->panel_header - (int)(26 * s)) / 2 - (int)(2 * s), &clip, title, over && over_light_card(tone) ? RGB(18, 22, 32) : RGB(252, 253, 255),
-                s >= 1.5f ? 2 : 1);
+    COLORREF title_col = over && over_light_card(tone) ? RGB(18, 22, 32) : RGB(252, 253, 255);
+    if (roomy) {
+        gdi.SelectObject(dc, tiny);
+        RECT kclip = {title_x, g, right - l->pad, g + header};
+        gdi.SetTextColor(dc, over && over_light_card(tone) ? RGB(40, 30, 20) : RGB(mix8(tone[1][0], 255, 0.55f), mix8(tone[1][1], 255, 0.55f), mix8(tone[1][2], 255, 0.55f)));
+        gdi.ExtTextOutW(dc, title_x + (int)(2 * s), g + header / 2 - (int)(25 * s), ETO_CLIPPED, &kclip, L"GRIPLINE  V7", 12, NULL);
+        gdi.SelectObject(dc, main);
+        HFONT fit = NULL; /* long titles step down a size instead of being cut */
+        if (text_px(dc, title, 15.0f * s) > clip.right - clip.left) {
+            fit = gdi.CreateFontW(-(int)(19 * s), 0, 0, 0, italic ? FW_HEAVY : FW_BOLD, (DWORD)italic, 0, 0, DEFAULT_CHARSET, 0, 0,
+                                  ANTIALIASED_QUALITY, 0, L"Segoe UI");
+            if (fit) gdi.SelectObject(dc, fit);
+        }
+        shadow_text(dc, title_x, g + header / 2 - (int)((fit ? 9 : 12) * s), &clip, title, title_col, s >= 1.5f ? 2 : 1);
+        if (fit) {
+            gdi.SelectObject(dc, main);
+            gdi.DeleteObject(fit);
+        }
+    } else {
+        shadow_text(dc, title_x, g + (header - (int)(26 * s)) / 2 - (int)(2 * s), &clip, title, title_col, s >= 1.5f ? 2 : 1);
+    }
     for (unsigned i = 0; i < count; ++i) {
-        int y = first_row + (int)i * l->panel_row;
-        RECT left_clip = {tx, y, rows[i].keys[0] ? kx - l->pad / 2 : right - l->pad, y + l->panel_row}; /* no value: the label may use the whole row */
+        int y = first_row + (int)i * rh, ty = y + text_dy;
         int style = rows[i].style;
-        COLORREF label_color = RGB(205, 212, 224), keys_color = RGB(tone[1][0], tone[1][1], tone[1][2]);
-        if (style == NOTIFY_ROW_SELECTED) {
-            /* key menu: the chosen row glows in the card colour */
-            gdi.GdiFlush(); /* text of the rows above is in the bitmap before it is touched directly */
-            for (int by = y; by < y + l->panel_row && by < g + ch; ++by) {
-                unsigned char *row = px + (size_t)by * w * 4;
-                float vy = (float)(by - y) / (float)l->panel_row;
-                float bright = 0.12f * (1.0f - vy); /* lighter at the top of the band */
-                for (int x = left + l->pad / 2; x < right - l->pad / 2; ++x) {
-                    float t = (float)(x - left) / (float)(right - left);
-                    for (int k = 0; k < 3; ++k)
-                        row[x * 4 + k] = mix8(mix8(row[x * 4 + k], accent[k], 0.90f - 0.55f * t), 255, bright);
+        if (footer && i == count - 1) {
+            for (int c = 0; c < cap_n; ++c) {
+                RECT cc = {cap_x[c], y, cap_x[c] + cap_w[c], y + rh};
+                gdi.SelectObject(dc, tiny);
+                gdi.SetTextColor(dc, RGB(236, 240, 248));
+                int tw = text_px(dc, cap_text[c], 7.0f * s);
+                gdi.ExtTextOutW(dc, cap_x[c] + (cap_w[c] - tw) / 2, y + (rh - (int)(15 * s)) / 2, ETO_CLIPPED, &cc, cap_text[c],
+                                (UINT)text_width_chars(cap_text[c]), NULL);
+                if (pad_button[c]) {
+                    float r = 8.5f * s;
+                    int bx = cap_x[c] + cap_w[c] + (int)(4 * s);
+                    wchar_t letter[2] = {(wchar_t)pad_button[c], 0};
+                    RECT bc = {bx, y, bx + (int)(2 * r), y + rh};
+                    gdi.SetTextColor(dc, RGB(255, 255, 255));
+                    int lw = text_px(dc, letter, 7.0f * s);
+                    gdi.ExtTextOutW(dc, bx + ((int)(2 * r) - lw) / 2, y + (rh - (int)(15 * s)) / 2, ETO_CLIPPED, &bc, letter, 1, NULL);
                 }
-                for (int x = left + l->pad / 2; x < left + l->pad / 2 + (s >= 1.5f ? 4 : 3); ++x)
-                    for (int k = 0; k < 3; ++k) row[x * 4 + k] = 255; /* marker */
+                gdi.SelectObject(dc, small_bold);
+                gdi.SetTextColor(dc, RGB(150, 158, 175));
+                RECT wc = {word_x[c], y, right - l->pad, y + rh};
+                gdi.ExtTextOutW(dc, word_x[c], y + (rh - (int)(17 * s)) / 2, ETO_CLIPPED, &wc, word_text[c],
+                                (UINT)text_width_chars(word_text[c]), NULL);
             }
-            gdi.GdiFlush();
+            continue;
+        }
+        int lab_x = tx + (style == NOTIFY_ROW_SELECTED && roomy ? (int)(8 * s) : 0);
+        RECT left_clip = {lab_x, y, rows[i].keys[0] && value_kind[i] != 5 ? kx - l->pad / 2 : right - l->pad - (int)(14 * s), y + rh};
+        if (roomy && (value_kind[i] == 2 || value_kind[i] == 3)) left_clip.right = vr - (int)(38 * s);
+        COLORREF label_color = RGB(205, 212, 224), keys_color = RGB(tone[1][0], tone[1][1], tone[1][2]);
+        HFONT lf = label;
+        if (style == NOTIFY_ROW_SELECTED) {
             label_color = keys_color = RGB(255, 255, 255);
+            if (roomy) lf = label_bold;
         } else if (style == NOTIFY_ROW_INFO) {
             label_color = RGB(150, 158, 170);
         } else if (style == NOTIFY_ROW_HINT) {
             label_color = keys_color = RGB(135, 143, 156);
+            lf = small_bold;
+        } else if (style == NOTIFY_ROW_SECTION) {
+            wchar_t up[32];
+            upper_text(rows[i].label, up, 32);
+            gdi.SelectObject(dc, tiny);
+            gdi.SetTextColor(dc, RGB(mix8(tone[1][0], 255, 0.35f), mix8(tone[1][1], 255, 0.35f), mix8(tone[1][2], 255, 0.35f)));
+            gdi.ExtTextOutW(dc, tx, y + rh / 2 - (int)(6 * s), ETO_CLIPPED, &left_clip, up, (UINT)text_width_chars(up), NULL);
+            continue;
         }
-        int key_x = kx;
-        if (style == NOTIFY_ROW_HINT) { /* hint line: a thin rule above it */
-            gdi.GdiFlush();
-            unsigned char *row = px + (size_t)(y - (int)(2 * s)) * w * 4;
-            for (int x = left + l->pad / 2; x < right - l->pad / 2; ++x)
-                for (int k = 0; k < 3; ++k) row[x * 4 + k] = mix8(row[x * 4 + k], 255, 0.10f);
-        } else if (rows[i].keys[0] && !is_bar_text(rows[i].keys) && text_width_chars(rows[i].keys) <= 16) {
-            /* short values (keys, choices) sit on a key cap */
-            gdi.SelectObject(dc, keys);
-            SIZE size = {0, 0};
-            int n = text_width_chars(rows[i].keys);
-            if (!gdi.GetTextExtentPoint32W || !gdi.GetTextExtentPoint32W(dc, rows[i].keys, n, &size) || size.cx <= 0)
-                size.cx = (LONG)((float)n * 8.5f * s);
-            int pad = (int)(7 * s), ph = l->panel_row - (int)(3 * s);
-            int pw = (int)size.cx + 2 * pad, px0 = kx - pad / 2;
-            if (px0 + pw > right - l->pad) pw = right - l->pad - px0;
-            gdi.GdiFlush();
-            if (pw > ph) paint_pill(px, w, px0, y + (l->panel_row - ph) / 2, pw, ph, accent,
-                                    style == NOTIFY_ROW_SELECTED ? 0.10f : style == NOTIFY_ROW_INFO ? 0.14f : 0.26f,
-                                    style == NOTIFY_ROW_SELECTED ? 0.70f : 0.45f);
-            key_x = px0 + pad;
-            if (style != NOTIFY_ROW_SELECTED && style != NOTIFY_ROW_INFO) keys_color = RGB(240, 244, 250);
-        }
-        gdi.SelectObject(dc, style == NOTIFY_ROW_HINT ? small_bold : label);
+        if (value_kind[i] == 1 && style != NOTIFY_ROW_SELECTED && style != NOTIFY_ROW_INFO) keys_color = RGB(240, 244, 250);
+        gdi.SelectObject(dc, lf);
         gdi.SetTextColor(dc, label_color);
-        gdi.ExtTextOutW(dc, tx, y, ETO_CLIPPED, &left_clip, rows[i].label, (UINT)text_width_chars(rows[i].label), NULL);
-        gdi.SelectObject(dc, style == NOTIFY_ROW_HINT ? small_bold : keys);
-        gdi.SetTextColor(dc, keys_color);
-        RECT key_clip = {key_x, y, right - l->pad, y + l->panel_row};
-        gdi.ExtTextOutW(dc, key_x, y, ETO_CLIPPED, &key_clip, rows[i].keys, (UINT)text_width_chars(rows[i].keys), NULL);
+        gdi.ExtTextOutW(dc, lab_x, ty, ETO_CLIPPED, &left_clip, rows[i].label, (UINT)text_width_chars(rows[i].label), NULL);
+        if (value_kind[i] == 5 && style != NOTIFY_ROW_SELECTED) { /* sub page: a quiet chevron */
+            RECT end_clip = {right - l->pad - (int)(12 * s), y, right - l->pad / 2, y + rh};
+            gdi.SelectObject(dc, label_bold);
+            gdi.SetTextColor(dc, RGB(mix8(tone[1][0], 255, 0.3f), mix8(tone[1][1], 255, 0.3f), mix8(tone[1][2], 255, 0.3f)));
+            gdi.ExtTextOutW(dc, end_clip.left, ty, ETO_CLIPPED, &end_clip, L"\x203a", 1, NULL);
+        }
+        if (value_kind[i] != 2 && value_kind[i] != 3 && value_kind[i] != 5) {
+            const wchar_t *v = rows[i].keys;
+            if (value_kind[i] == 4) { /* "✓ active": the dot says the tick, the word stays */
+                v += 1;
+                while (*v == L' ') ++v;
+            }
+            gdi.SelectObject(dc, style == NOTIFY_ROW_HINT ? small_bold : keys);
+            gdi.SetTextColor(dc, value_kind[i] == 4 ? RGB(mix8(tone[1][0], 255, 0.5f), mix8(tone[1][1], 255, 0.5f), mix8(tone[1][2], 255, 0.5f)) : keys_color);
+            if (value_kind[i] == 4 && style == NOTIFY_ROW_SELECTED) gdi.SetTextColor(dc, RGB(255, 255, 255));
+            RECT key_clip = {value_x[i], y, right - l->pad, y + rh};
+            gdi.ExtTextOutW(dc, value_x[i], ty, ETO_CLIPPED, &key_clip, v, (UINT)text_width_chars(v), NULL);
+        }
         if (style == NOTIFY_ROW_SELECTED) { /* chevron at the end of the chosen row */
-            RECT end_clip = {right - l->pad - (int)(12 * s), y, right - l->pad / 2, y + l->panel_row};
-            gdi.SelectObject(dc, keys);
+            RECT end_clip = {right - l->pad - (int)(12 * s), y, right - l->pad / 2, y + rh};
+            gdi.SelectObject(dc, roomy ? label_bold : keys);
             gdi.SetTextColor(dc, RGB(255, 255, 255));
-            gdi.ExtTextOutW(dc, end_clip.left, y, ETO_CLIPPED, &end_clip, L"\x203a", 1, NULL);
+            gdi.ExtTextOutW(dc, end_clip.left, ty, ETO_CLIPPED, &end_clip, L"\x203a", 1, NULL);
         }
     }
     gdi.SelectObject(dc, old_font);
@@ -1002,7 +1309,9 @@ static int draw_panel_v7(const wchar_t *title, const NotifyPanelRow *rows, unsig
     gdi.DeleteObject(small_bold);
     gdi.DeleteObject(main);
     gdi.DeleteObject(label);
+    gdi.DeleteObject(label_bold);
     gdi.DeleteObject(keys);
+    gdi.DeleteObject(tiny);
     gdi.DeleteObject(bitmap);
     gdi.DeleteDC(dc);
     return 1;
@@ -1512,6 +1821,19 @@ static void barrier(ID3D12Resource *resource, D3D12_RESOURCE_STATES before, D3D1
 }
 
 /* fade/slide of one card: alpha 0..1 and slide offset 0..1, 0 when gone */
+/* V7 overhaul: the menu panel fades in and glides in from the right over 220 ms */
+static float panel_open_alpha(ULONGLONG now, float *slide) {
+    ULONGLONG age = now - panel_opened;
+    if (panel_at_top == 2 || age >= 220) {
+        *slide = 0.0f;
+        return 1.0f;
+    }
+    float t = (float)age / 220.0f;
+    float e = 1.0f - (1.0f - t) * (1.0f - t) * (1.0f - t); /* ease out */
+    *slide = 1.0f - e;
+    return 0.15f + 0.85f * e;
+}
+
 static float card_alpha(ULONGLONG age, ULONGLONG hold, float *slide) {
     *slide = 0.0f;
     if (age < FADE_IN_MS) {
@@ -1649,7 +1971,8 @@ static void render(IDXGISwapChain *swapchain) {
     float shift = 0.0f; /* cards stand left of the key list panel while it is shown */
     if (panel) {
         float ph = (float)panel_pixels(l, panel);
-        float x0 = (float)width - l->margin - l->width;
+        float open_slide, open_a = panel_open_alpha(now, &open_slide);
+        float x0 = (float)width - l->margin - l->width + open_slide * 36.0f * l->scale;
         float y0 = panel_at_top == 1 ? (float)l->margin : ((float)height - ph) * 0.5f;
         if (y0 < (float)l->margin) y0 = (float)l->margin;
         if (panel_at_top == 2 && y0 < (float)(l->margin + (int)count * (l->height + l->gap)))
@@ -1662,7 +1985,7 @@ static void render(IDXGISwapChain *swapchain) {
                        (float)card_rows / gpu.tex_height,
                        1.0f,
                        ((float)card_rows + ph) / gpu.tex_height,
-                       1.0f, 0.0f, 0.0f, 0.0f};
+                       open_a, 0.0f, 0.0f, 0.0f};
         ID3D12GraphicsCommandList_SetGraphicsRoot32BitConstants(gpu.list, 1, 12, c, 0);
         ID3D12GraphicsCommandList_DrawInstanced(gpu.list, 4, 1, 0, 0);
         if (panel_at_top != 2) shift = (float)(l->width + l->gap);
@@ -1901,8 +2224,9 @@ static DWORD WINAPI overlay_thread(void *unused) {
             if (y0 < l.margin) y0 = l.margin;
             if (panel_at_top == 2 && y0 < l.margin + (int)count * (l.height + l.gap))
                 y0 = l.margin + (int)count * (l.height + l.gap); /* telemetry: below the cards */
-            blend_block(frame, frame_w, frame_h, frame_w - l.margin - l.width, y0, scratch_panel, l.width * 4, l.width,
-                        ph, 1.0f);
+            float open_slide, open_a = panel_open_alpha(now, &open_slide);
+            blend_block(frame, frame_w, frame_h, frame_w - l.margin - l.width + (int)(open_slide * 36.0f * l.scale), y0,
+                        scratch_panel, l.width * 4, l.width, ph, open_a);
             if (panel_at_top != 2) shift = l.width + l.gap;
         }
         int y = l.margin;

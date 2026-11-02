@@ -62,6 +62,7 @@ enum {
     NOTIFY_ROW_SELECTED, /* key menu: the row the arrows stand on (highlighted) */
     NOTIFY_ROW_INFO,     /* key menu: dim label, value in the card colour, not selectable */
     NOTIFY_ROW_HINT,     /* key menu: small grey help line (label left, keys right) */
+    NOTIFY_ROW_SECTION,  /* key menu (V7 overhaul): a section head in small capitals with a rule, not selectable */
 };
 typedef struct {
     wchar_t label[32], keys[32];

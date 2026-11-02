@@ -518,14 +518,14 @@ static void build_page(wchar_t *title) {
             break;
         case LEVEL_MOUSE:
             wcopy(title, 0, 64, tr(L"Maus-Lenkung (experimentell)", L"Mouse steering (experimental)"));
-            row_add(tr(L"Empfindlichkeit", L"Sensitivity"), L"", NOTIFY_ROW_INFO, -1);
+            row_add(tr(L"Empfindlichkeit", L"Sensitivity"), L"", NOTIFY_ROW_SECTION, -1);
             for (int i = 0; i < MOUSE_CHOICES; ++i)
                 row_add(tr(mouse_german[i], mouse_english[i]), i == mouse_choice() ? tr(L"✓ aktiv", L"✓ active") : L"", 0, i);
-            row_add(tr(L"Totzone überspringen", L"Skip dead zone"), L"", NOTIFY_ROW_INFO, -1);
+            row_add(tr(L"Totzone überspringen", L"Skip dead zone"), L"", NOTIFY_ROW_SECTION, -1);
             for (int i = 0; i < DEAD_CHOICES; ++i)
                 row_add(dead_names[i], i == dead_choice() ? tr(L"✓ aktiv", L"✓ active") : (i == 3 ? tr(L"Standard", L"default") : L""), 0,
                         DEAD_FIRST + i);
-            row_add(tr(L"Zur Mitte, wenn Maus ruht", L"Centre when mouse rests"), L"", NOTIFY_ROW_INFO, -1);
+            row_add(tr(L"Zur Mitte, wenn Maus ruht", L"Centre when mouse rests"), L"", NOTIFY_ROW_SECTION, -1);
             for (int i = 0; i < CENTER_CHOICES; ++i)
                 row_add(tr(center_german[i], center_english[i]), i == center_choice() ? tr(L"✓ aktiv", L"✓ active") : L"", 0,
                         CENTER_FIRST + i);
@@ -535,7 +535,7 @@ static void build_page(wchar_t *title) {
             wcopy(title, 0, 64, tr(L"Live-Telemetrie", L"Live telemetry"));
             row_add(tr(L"Telemetrie-Tafel", L"Telemetry panel"), telemetry_enabled() ? tr(L"An", L"On") : tr(L"Aus", L"Off"), 0, 0);
             row_add(tr(L"Als CSV aufzeichnen", L"Record as CSV"), records_csv_on() ? tr(L"● läuft", L"● on") : tr(L"Aus", L"Off"), 0, 50);
-            row_add(tr(L"Anzeigen (Enter = an/aus)", L"Shown (Enter = on/off)"), L"", NOTIFY_ROW_INFO, -1);
+            row_add(tr(L"Anzeigen (Enter = an/aus)", L"Shown (Enter = on/off)"), L"", NOTIFY_ROW_SECTION, -1);
             int mask = telemetry_show();
             for (unsigned i = 0; i < TELEMETRY_SHOW_COUNT; ++i)
                 row_add(telemetry_item_name(i, m.german), (mask & (1 << i)) ? tr(L"✓ an", L"✓ on") : tr(L"aus", L"off"), 0,
@@ -565,11 +565,11 @@ static void build_page(wchar_t *title) {
             double cm;
             logbook_current(name, 32, &cm);
             if (name[0]) {
-                row_add(tr(L"Jetzt im Auto", L"Car now"), L"", NOTIFY_ROW_INFO, -1);
+                row_add(tr(L"Jetzt im Auto", L"Car now"), L"", NOTIFY_ROW_SECTION, -1);
                 distance_text(cm, text);
                 row_add(name, text, 0, -1);
             }
-            row_add(tr(L"Meiste Kilometer", L"Most kilometres"), L"", NOTIFY_ROW_INFO, -1);
+            row_add(tr(L"Meiste Kilometer", L"Most kilometres"), L"", NOTIFY_ROW_SECTION, -1);
             int any = 0;
             for (unsigned r = 0; r < 5; ++r) {
                 double m;
