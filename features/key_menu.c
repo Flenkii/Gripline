@@ -946,6 +946,55 @@ static volatile LONG pad_now, pad_toggle;
 static volatile LONG64 pad_tick;
 static LONG pad_was;
 
+/* Marvin 02.11. (after an FH2MP update): the menu opened from the controller but could neither be
+   moved nor closed. The game's pad buffer may be read more than once per frame and we blank it
+   while the menu is open, so the menu then saw only the blank. Now the menu reads the controller
+   itself through XInput (loaded at run time: no new imports); the hook only keeps the game out. */
+typedef struct {
+    unsigned long packet;
+    unsigned short buttons;
+    unsigned char lt, rt;
+    short lx, ly, rx, ry;
+} XPadState;
+typedef unsigned long(WINAPI *XInputGetStateFn)(unsigned long, XPadState *);
+static XInputGetStateFn xinput_get;
+static volatile LONG xinput_tried, xinput_ok;
+
+static void xinput_load(void) {
+    if (InterlockedExchange(&xinput_tried, 1)) return;
+    static const wchar_t *names[] = {L"xinput1_4.dll", L"xinput1_3.dll", L"xinput9_1_0.dll"};
+    for (unsigned i = 0; i < 3 && !xinput_get; ++i) {
+        HMODULE dll = LoadLibraryExW(names[i], NULL, LOAD_LIBRARY_SEARCH_SYSTEM32);
+        if (dll) xinput_get = (XInputGetStateFn)(uintptr_t)GetProcAddress(dll, "XInputGetState");
+    }
+    if (xinput_get) InterlockedExchange(&xinput_ok, 1);
+    log_append(xinput_get ? "KEYMENU: controller read through XInput.\r\n"
+                          : "KEYMENU: XInput not found - controller read from the game.\r\n");
+}
+
+/* the menu's own controller reading: bits PAD_*, toggle on LS + D-pad right; 0 when none plugged in */
+static LONG xinput_bits(int *toggle) {
+    static unsigned short before;
+    unsigned short buttons = 0;
+    short ly = 0;
+    for (unsigned long u = 0; u < 4; ++u) {
+        XPadState st;
+        memset(&st, 0, sizeof(st));
+        if (xinput_get(u, &st) != 0) continue;
+        buttons |= st.buttons;
+        if ((st.ly < 0 ? -st.ly : st.ly) > (ly < 0 ? -ly : ly)) ly = st.ly;
+    }
+    unsigned short pressed = (unsigned short)(buttons & ~before);
+    before = buttons;
+    *toggle = (buttons & 0x0040u) && (pressed & 0x0008u);
+    LONG bits = 0;
+    if ((buttons & 0x0001u) || ly > 20000) bits |= PAD_UP;
+    if ((buttons & 0x0002u) || ly < -20000) bits |= PAD_DOWN;
+    if (buttons & 0x1000u) bits |= PAD_A;
+    if (buttons & 0x2000u) bits |= PAD_B;
+    return bits;
+}
+
 int key_menu_pad_input(unsigned char *gamepad) {
     if (!gamepad) return 0;
     unsigned short buttons;
@@ -955,7 +1004,7 @@ int key_menu_pad_input(unsigned char *gamepad) {
     static unsigned short before;
     unsigned short pressed = (unsigned short)(buttons & ~before);
     before = buttons;
-    if ((buttons & 0x0040u) && (pressed & 0x0008u)) InterlockedExchange(&pad_toggle, 1); /* LS + D-pad right */
+    if (!xinput_ok && (buttons & 0x0040u) && (pressed & 0x0008u)) InterlockedExchange(&pad_toggle, 1); /* LS + D-pad right */
     LONG bits = 0;
     if ((buttons & 0x0001u) || ly > 20000) bits |= PAD_UP;
     if ((buttons & 0x0002u) || ly < -20000) bits |= PAD_DOWN;
@@ -999,6 +1048,11 @@ static void key_menu_tick(ULONGLONG now) {
 
     /* the controller counts like the arrow keys, Enter and Esc */
     LONG pad = GetTickCount64() - (ULONGLONG)pad_tick < 300 ? pad_now : 0;
+    if (xinput_ok) {
+        int toggle = 0;
+        pad = xinput_bits(&toggle);
+        if (toggle) InterlockedExchange(&pad_toggle, 1);
+    }
     LONG pad_pressed = pad & ~pad_was;
     pad_was = pad;
     if (InterlockedExchange(&pad_toggle, 0)) menu_pressed = 1;
@@ -1096,6 +1150,7 @@ static void set_path(void) {
 #ifndef FH2_TWEAKS_TEST
 static DWORD WINAPI menu_thread(LPVOID unused) {
     (void)unused;
+    xinput_load();
     for (;;) {
         key_menu_tick(GetTickCount64());
         Sleep(30);
@@ -1126,6 +1181,10 @@ __declspec(dllexport) int Fh2TestKeyMenuPad(unsigned buttons, int ly) {
     unsigned short after;
     memory_copy(&after, pad, 2);
     return taken | (after ? 0 : 2); /* 2: nothing left for the game */
+}
+__declspec(dllexport) int Fh2TestKeyMenuXInput(void) {
+    xinput_load();
+    return (int)xinput_ok;
 }
 __declspec(dllexport) int Fh2TestKeyMenuTick(unsigned now_ms) {
     if (!ini_path[0]) set_path();
