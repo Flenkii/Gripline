@@ -303,6 +303,7 @@ typedef int(WINAPI *SetBkModeFn)(HDC, int);
 typedef BOOL(WINAPI *ExtTextOutWFn)(HDC, int, int, UINT, const RECT *, LPCWSTR, UINT, const INT *);
 typedef BOOL(WINAPI *GdiFlushFn)(void);
 typedef BOOL(WINAPI *GetTextExtentPoint32WFn)(HDC, LPCWSTR, int, SIZE *);
+typedef BOOL(WINAPI *GetTextMetricsWFn)(HDC, TEXTMETRICW *);
 
 static struct {
     CreateCompatibleDCFn CreateCompatibleDC;
@@ -316,6 +317,7 @@ static struct {
     ExtTextOutWFn ExtTextOutW;
     GdiFlushFn GdiFlush;
     GetTextExtentPoint32WFn GetTextExtentPoint32W; /* optional: key caps in the panel */
+    GetTextMetricsWFn GetTextMetricsW;             /* optional: text sits in the middle of its row */
 } gdi;
 
 static int gdi_ready(void) {
@@ -334,6 +336,7 @@ static int gdi_ready(void) {
     LOAD(ExtTextOutW);
     LOAD(GdiFlush);
     LOAD(GetTextExtentPoint32W);
+    LOAD(GetTextMetricsW);
 #undef LOAD
     return gdi.CreateCompatibleDC && gdi.CreateDIBSection && gdi.SelectObject && gdi.DeleteObject &&
            gdi.DeleteDC && gdi.CreateFontW && gdi.SetTextColor && gdi.SetBkMode && gdi.ExtTextOutW &&
@@ -404,6 +407,13 @@ static float card_coverage(int x, int y, int w, int h, int r) {
     float inner = (r - 1.0f) * (r - 1.0f), outer = (float)r * r;
     return clamp01((outer - d2) / (outer - inner));
 }
+
+static int text_px(HDC dc, const wchar_t *t, float fallback_per_char);
+static void font_metrics(HDC dc, float em_px, int *ascent, int *cap);
+static void paint_pill(unsigned char *px, int w, int x0, int y0, int pw, int ph, const unsigned char accent[3], float fill,
+                       float rim);
+static void paint_band_glow(unsigned char *px, int w, int h, int x0, int y0, int bw, int bh, int spread,
+                            const unsigned char col[3], float strength);
 
 /* Draws every card into a top-down BGRA bitmap (premultiplied alpha), one row per card. */
 /* ------------------------------------------------------------------ card look (V7)
@@ -741,8 +751,7 @@ static int draw_cards_v7(const Card *list, unsigned count, const Layout *l, unsi
             paint_logo(px, w, ix, iy, l->icon, logo, 1.0f);
         }
     }
-    gdi.GdiFlush();
-    HFONT badge_font = gdi.CreateFontW(-(int)(13 * s), 0, 0, 0, FW_BOLD, 0, 0, 0, DEFAULT_CHARSET, 0, 0,
+    HFONT badge_font = gdi.CreateFontW(-(int)(12 * s), 0, 0, 0, FW_HEAVY, 0, 0, 0, DEFAULT_CHARSET, 0, 0,
                                        ANTIALIASED_QUALITY, 0, L"Segoe UI");
     int italic = l->style == NOTIFY_STYLE_OVERDRIVE;
     HFONT main = gdi.CreateFontW(-(int)(20 * s), 0, 0, 0, italic ? FW_HEAVY : FW_BOLD, (DWORD)italic, 0, 0,
@@ -750,8 +759,67 @@ static int draw_cards_v7(const Card *list, unsigned count, const Layout *l, unsi
     HFONT small = gdi.CreateFontW(-(int)(14 * s), 0, 0, 0, FW_NORMAL, 0, 0, 0, DEFAULT_CHARSET, 0, 0,
                                   ANTIALIASED_QUALITY, 0, L"Segoe UI");
     gdi.SetBkMode(dc, TRANSPARENT);
+    HGDIOBJ old_font = gdi.SelectObject(dc, badge_font);
+    int asc_b, cap_b, asc_1, cap_1, asc_2, cap_2;
+    font_metrics(dc, 12.0f * s, &asc_b, &cap_b);
+    gdi.SelectObject(dc, main);
+    font_metrics(dc, 20.0f * s, &asc_1, &cap_1);
+    gdi.SelectObject(dc, small);
+    font_metrics(dc, 14.0f * s, &asc_2, &cap_2);
     int tx = g + l->skew * 6 / 10 + l->bar + (int)(9 * s) + l->icon + (int)(12 * s);
     int shade = s >= 1.5f ? 2 : 1;
+    int pill_h = (int)(18 * s), pill_pad = (int)(7 * s);
+    int line_y[MAX_CARDS][3], pill_w[MAX_CARDS];
+    /* V7 overhaul: the text block stands in the middle of the card (measured with the real font);
+       the badge sits on a pill; a carbon weave and a glowing colour line finish the card */
+    for (unsigned c = 0; c < count; ++c) {
+        int top = (int)c * l->height + g;
+        int has2 = list[c].line2[0] != 0, badge = list[c].badge[0] != 0;
+        const unsigned char(*tone)[3] = palette[list[c].color >= 0 ? list[c].color : color];
+        const unsigned char accent[3] = {tone[0][2], tone[0][1], tone[0][0]};
+        const unsigned char *second = second_colour(tone);
+        const unsigned char accent2[3] = {second[2], second[1], second[0]};
+        int gap1 = (int)(7 * s), gap2 = (int)(9 * s);
+        int total = (badge ? pill_h + gap1 : 0) + cap_1 + (has2 ? gap2 + cap_2 : 0);
+        int y = top + (ch - total) / 2;
+        line_y[c][0] = y;
+        if (badge) y += pill_h + gap1;
+        line_y[c][1] = y - (asc_1 - cap_1);
+        line_y[c][2] = y + cap_1 + gap2 - (asc_2 - cap_2);
+        int right = g + cw - l->pad - l->skew;
+        /* carbon weave right of the logo */
+        int step = (int)(6 * s) > 3 ? (int)(6 * s) : 3;
+        for (int yy = top; yy < top + ch; ++yy) {
+            unsigned char *row = px + (size_t)yy * w * 4;
+            for (int x = tx - (int)(6 * s); x < g + cw; ++x)
+                if (((x + yy) % step) == 0)
+                    for (int k = 0; k < 3; ++k) row[x * 4 + k] = mix8(row[x * 4 + k], 255, 0.03f);
+        }
+        /* colour line along the bottom, card colour into the second colour */
+        int ly = top + ch - (int)(5 * s), lh = s >= 1.5f ? 2 : 1;
+        for (int yy = ly; yy < ly + lh; ++yy) {
+            unsigned char *row = px + (size_t)yy * w * 4;
+            for (int x = tx; x < right; ++x) {
+                float t = (float)(x - tx) / (float)(right - tx);
+                for (int k = 0; k < 3; ++k)
+                    row[x * 4 + k] = mix8(row[x * 4 + k], mix8(mix8(accent[k], accent2[k], t), 255, 0.3f), 0.9f * (1.0f - 0.7f * t));
+            }
+        }
+        paint_band_glow(px, w, h, tx, ly, (right - tx) / 2, lh, (int)(4 * s), accent, 0.16f);
+        pill_w[c] = 0;
+        if (badge) {
+            gdi.SelectObject(dc, badge_font);
+            int pw = text_px(dc, list[c].badge, 8.0f * s) + 2 * pill_pad;
+            if (tx + pw > right) pw = right - tx;
+            pill_w[c] = pw;
+            int light = italic && over_light_card(tone);
+            const unsigned char ink[3] = {18, 12, 8};
+            const unsigned char *fill = light || italic ? ink : accent;
+            paint_band_glow(px, w, h, tx, line_y[c][0], pw, pill_h, (int)(5 * s), accent, light ? 0.0f : 0.30f);
+            paint_pill(px, w, tx, line_y[c][0], pw, pill_h, fill, light ? 0.80f : italic ? 0.45f : 0.80f, 0.55f);
+        }
+    }
+    gdi.GdiFlush();
     for (unsigned c = 0; c < count; ++c) {
         int top = (int)c * l->height + g;
         RECT clip = {tx, top, g + cw - l->pad - l->skew, top + ch};
@@ -760,34 +828,28 @@ static int draw_cards_v7(const Card *list, unsigned count, const Layout *l, unsi
         int dark_text = italic && over_light_card(tone);
         COLORREF text1 = dark_text ? RGB(18, 22, 32) : RGB(252, 253, 255);
         COLORREF text2 = italic ? (dark_text ? RGB(40, 46, 60) : RGB(236, 240, 248)) : RGB(180, 190, 205);
-        COLORREF badge_col = italic ? text1 : RGB(tone[1][0], tone[1][1], tone[1][2]);
-        int y = top + (int)((badge ? (has2 ? 10 : 20) : (has2 ? 19 : 31)) * s);
-        HGDIOBJ old_font = gdi.SelectObject(dc, badge_font);
-        if (badge) { /* WARNUNG / HINWEIS above the text */
-            if (dark_text) {
-                gdi.SetTextColor(dc, badge_col);
-                gdi.ExtTextOutW(dc, tx, y, ETO_CLIPPED, &clip, list[c].badge, (UINT)text_width_chars(list[c].badge), NULL);
-            } else {
-                shadow_text(dc, tx, y, &clip, list[c].badge, badge_col, shade);
-            }
-            y += (int)(19 * s);
+        if (badge) { /* WARNUNG / HINWEIS / NEW RECORD on its pill */
+            gdi.SelectObject(dc, badge_font);
+            RECT pc = {tx, line_y[c][0], tx + pill_w[c], line_y[c][0] + pill_h};
+            gdi.SetTextColor(dc, RGB(255, 255, 255));
+            int by = line_y[c][0] + pill_h / 2 - (asc_b - cap_b / 2);
+            gdi.ExtTextOutW(dc, tx + pill_pad, by, ETO_CLIPPED, &pc, list[c].badge, (UINT)text_width_chars(list[c].badge), NULL);
         }
         gdi.SelectObject(dc, main);
         if (dark_text) {
             gdi.SetTextColor(dc, text1);
-            gdi.ExtTextOutW(dc, tx, y, ETO_CLIPPED, &clip, list[c].line1, (UINT)text_width_chars(list[c].line1), NULL);
+            gdi.ExtTextOutW(dc, tx, line_y[c][1], ETO_CLIPPED, &clip, list[c].line1, (UINT)text_width_chars(list[c].line1), NULL);
         } else {
-            shadow_text(dc, tx, y, &clip, list[c].line1, text1, shade);
+            shadow_text(dc, tx, line_y[c][1], &clip, list[c].line1, text1, shade);
         }
         if (has2) {
-            y += (int)(27 * s);
             gdi.SelectObject(dc, small);
             gdi.SetTextColor(dc, text2);
-            gdi.ExtTextOutW(dc, tx, y, ETO_CLIPPED, &clip, list[c].line2, (UINT)text_width_chars(list[c].line2),
+            gdi.ExtTextOutW(dc, tx, line_y[c][2], ETO_CLIPPED, &clip, list[c].line2, (UINT)text_width_chars(list[c].line2),
                             NULL);
         }
-        gdi.SelectObject(dc, old_font);
     }
+    gdi.SelectObject(dc, old_font);
     gdi.GdiFlush();
     for (int y = 0; y < h; ++y) {
         unsigned char *src = px + (size_t)y * w * 4;
@@ -964,6 +1026,33 @@ static int text_px(HDC dc, const wchar_t *t, float fallback_per_char) {
     return (int)size.cx;
 }
 
+/* ascent and capital height in pixels of the font selected in dc (estimates when it cannot be measured) */
+static void font_metrics(HDC dc, float em_px, int *ascent, int *cap) {
+    TEXTMETRICW m;
+    memset(&m, 0, sizeof(m));
+    int em = (int)(em_px + 0.5f);
+    *ascent = (int)(em_px * 1.077f + 0.5f);
+    if (gdi.GetTextMetricsW && gdi.GetTextMetricsW(dc, &m) && m.tmHeight > 0 && m.tmAscent > 0 && m.tmAscent <= m.tmHeight) {
+        *ascent = m.tmAscent;
+        if (m.tmHeight - m.tmInternalLeading > 0) em = m.tmHeight - m.tmInternalLeading;
+    }
+    *cap = (em * 70 + 50) / 100;
+}
+
+/* Where to put the top of a line of text (font selected in dc) so its capitals stand in the middle
+   of a row rh high; fallback when the font cannot be measured. (Marvin 02.11.: text sat too high.) */
+static int text_centre_dy(HDC dc, int rh, int fallback) {
+    TEXTMETRICW m;
+    memset(&m, 0, sizeof(m));
+    if (!gdi.GetTextMetricsW || !gdi.GetTextMetricsW(dc, &m) || m.tmHeight <= 0 || m.tmAscent <= 0 ||
+        m.tmAscent > m.tmHeight)
+        return fallback;
+    int em = m.tmHeight - m.tmInternalLeading;
+    if (em <= 0) em = m.tmHeight;
+    /* capital height is about 0.70 em: their middle lies 0.35 em above the baseline */
+    return rh / 2 - (m.tmAscent - (em * 35 + 50) / 100);
+}
+
 /* "Abc äöü" -> "ABC ÄÖÜ" (section heads) */
 static void upper_text(const wchar_t *in, wchar_t *out, int cap) {
     int n = 0;
@@ -1072,6 +1161,12 @@ static int draw_panel_v7(const wchar_t *title, const NotifyPanelRow *rows, unsig
     int tx = left + l->pad, kx = g + cw * 58 / 100;
     int text_dy = (rh - (int)((roomy ? 21 : 20) * s)) / 2; /* text sits in the middle of the taller rows */
     if (text_dy < 0) text_dy = 0;
+    gdi.SelectObject(dc, label);
+    int label_dy = text_centre_dy(dc, rh, text_dy);
+    gdi.SelectObject(dc, label_bold);
+    int bold_dy = text_centre_dy(dc, rh, text_dy);
+    gdi.SelectObject(dc, keys);
+    int keys_dy = text_centre_dy(dc, rh, text_dy);
 
     /* ---- pass 1: everything painted into the pixels (before any text is drawn over it) */
     int value_kind[NOTIFY_PANEL_ROWS]; /* 0 text, 1 pill, 2 switch on, 3 switch off, 4 dot, 5 sub page (chevron) */
@@ -1215,7 +1310,7 @@ static int draw_panel_v7(const wchar_t *title, const NotifyPanelRow *rows, unsig
         shadow_text(dc, title_x, g + (header - (int)(26 * s)) / 2 - (int)(2 * s), &clip, title, title_col, s >= 1.5f ? 2 : 1);
     }
     for (unsigned i = 0; i < count; ++i) {
-        int y = first_row + (int)i * rh, ty = y + text_dy;
+        int y = first_row + (int)i * rh;
         int style = rows[i].style;
         if (footer && i == count - 1) {
             for (int c = 0; c < cap_n; ++c) {
@@ -1266,12 +1361,12 @@ static int draw_panel_v7(const wchar_t *title, const NotifyPanelRow *rows, unsig
         if (value_kind[i] == 1 && style != NOTIFY_ROW_SELECTED && style != NOTIFY_ROW_INFO) keys_color = RGB(240, 244, 250);
         gdi.SelectObject(dc, lf);
         gdi.SetTextColor(dc, label_color);
-        gdi.ExtTextOutW(dc, lab_x, ty, ETO_CLIPPED, &left_clip, rows[i].label, (UINT)text_width_chars(rows[i].label), NULL);
+        gdi.ExtTextOutW(dc, lab_x, y + (lf == label ? label_dy : lf == label_bold ? bold_dy : text_dy), ETO_CLIPPED, &left_clip, rows[i].label, (UINT)text_width_chars(rows[i].label), NULL);
         if (value_kind[i] == 5 && style != NOTIFY_ROW_SELECTED) { /* sub page: a quiet chevron */
             RECT end_clip = {right - l->pad - (int)(12 * s), y, right - l->pad / 2, y + rh};
             gdi.SelectObject(dc, label_bold);
             gdi.SetTextColor(dc, RGB(mix8(tone[1][0], 255, 0.3f), mix8(tone[1][1], 255, 0.3f), mix8(tone[1][2], 255, 0.3f)));
-            gdi.ExtTextOutW(dc, end_clip.left, ty, ETO_CLIPPED, &end_clip, L"\x203a", 1, NULL);
+            gdi.ExtTextOutW(dc, end_clip.left, y + bold_dy, ETO_CLIPPED, &end_clip, L"\x203a", 1, NULL);
         }
         if (value_kind[i] != 2 && value_kind[i] != 3 && value_kind[i] != 5) {
             const wchar_t *v = rows[i].keys;
@@ -1283,13 +1378,13 @@ static int draw_panel_v7(const wchar_t *title, const NotifyPanelRow *rows, unsig
             gdi.SetTextColor(dc, value_kind[i] == 4 ? RGB(mix8(tone[1][0], 255, 0.5f), mix8(tone[1][1], 255, 0.5f), mix8(tone[1][2], 255, 0.5f)) : keys_color);
             if (value_kind[i] == 4 && style == NOTIFY_ROW_SELECTED) gdi.SetTextColor(dc, RGB(255, 255, 255));
             RECT key_clip = {value_x[i], y, right - l->pad, y + rh};
-            gdi.ExtTextOutW(dc, value_x[i], ty, ETO_CLIPPED, &key_clip, v, (UINT)text_width_chars(v), NULL);
+            gdi.ExtTextOutW(dc, value_x[i], y + (style == NOTIFY_ROW_HINT ? text_dy : keys_dy), ETO_CLIPPED, &key_clip, v, (UINT)text_width_chars(v), NULL);
         }
         if (style == NOTIFY_ROW_SELECTED) { /* chevron at the end of the chosen row */
             RECT end_clip = {right - l->pad - (int)(12 * s), y, right - l->pad / 2, y + rh};
             gdi.SelectObject(dc, roomy ? label_bold : keys);
             gdi.SetTextColor(dc, RGB(255, 255, 255));
-            gdi.ExtTextOutW(dc, end_clip.left, ty, ETO_CLIPPED, &end_clip, L"\x203a", 1, NULL);
+            gdi.ExtTextOutW(dc, end_clip.left, y + (roomy ? bold_dy : keys_dy), ETO_CLIPPED, &end_clip, L"\x203a", 1, NULL);
         }
     }
     gdi.SelectObject(dc, old_font);
