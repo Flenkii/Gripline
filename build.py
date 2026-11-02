@@ -88,7 +88,7 @@ def compiler_arguments(compiler, options):
 
 
 def version_resource(filename):
-    version = "6.4.0"
+    version = "6.4.1"
     numbers = [int(part) for part in version.split(".")]
     numbers += [0] * (4 - len(numbers))
 
@@ -105,10 +105,10 @@ def version_resource(filename):
             data = padded(data) + children
         return struct.pack("<H", len(data)) + data[2:]
 
-    strings = {"FileDescription": "Gripline V6.4 - FH2 Mod Platform mod",
+    strings = {"FileDescription": "Gripline V6.4.1 - FH2 Mod Platform mod",
                "FileVersion": version, "InternalName": "Gripline",
                "OriginalFilename": filename, "ProductName": "Gripline",
-               "ProductVersion": "V6.4",
+               "ProductVersion": "V6.4.1",
                "LegalCopyright": "Flenkii, GPL-3.0; based on Extra Options by Arthur (RokkuDayo)"}
     entries = b"".join(padded(block(key, wide(value), text=True)) for key, value in strings.items())
     string_info = block("StringFileInfo", children=block("040904b0", children=entries))

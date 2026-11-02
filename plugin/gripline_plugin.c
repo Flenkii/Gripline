@@ -438,6 +438,17 @@ static void noclip_install(void) {
     log_append("NOCLIP: car update hook ready - key Noclip (F6) offline, trip card in the pause menu.\r\n");
 }
 
+/* the load guard put the traffic back to Original (traffic_files.c) */
+static int load_guard_card(char *out, unsigned size) {
+    (void)out;
+    (void)size;
+    int de = game && game_language_is_german(game);
+    notify_show_tinted(de ? "Verkehr auf Original gesetzt\nLetzter Start hing beim Laden"
+                          : "Traffic set to Original\nLast start hung while loading",
+                       NOTIFY_COLOR_ORANGE, de ? "HINWEIS" : "NOTE", 1);
+    return 0;
+}
+
 static void start_features(void) {
     ModOptions options;
     settings_defaults(&options);
@@ -449,6 +460,11 @@ static void start_features(void) {
     if (!read) {
         log_append("GRIPLINE: Gripline.ini could not be read; defaults are used.\r\n");
         platform_log("Gripline.ini could not be read - defaults used (see Gripline.log)");
+    }
+    if (traffic_load_guard(directory, options.traffic_level)) {
+        options.traffic_level = 0;
+        options.traffic_all_day = 0;
+        notify_show_deferred_call(load_guard_card);
     }
     traffic_tunables_start(game, &options);
     keyboard_pad_game_start(game, directory);
