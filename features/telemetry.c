@@ -261,14 +261,16 @@ void telemetry_step(unsigned long long now) {
         if (slip > max_slip) max_slip = slip;
     }
     int de = game_language_is_german(game), mask = (int)show_mask;
-    static NotifyPanelRow rows[16];
+    static NotifyPanelRow rows[18];
     unsigned n = 0;
+    int dash = notify_style() != NOTIFY_STYLE_CLASSIC; /* V7 overhaul: dashboard look */
     if (mask & (1 << TELEMETRY_SHOW_SPEED)) {
-        row(&rows[n], de ? L"Tempo" : L"Speed", NOTIFY_ROW_INFO);
+        row(&rows[n], de ? L"Tempo" : L"Speed", dash ? NOTIFY_ROW_HERO : NOTIFY_ROW_INFO);
         wspeed(rows[n++].keys, 32, speed);
+        if (dash) row(&rows[n++], L"", NOTIFY_ROW_SPACER);
     }
     if (mask & (1 << TELEMETRY_SHOW_GRIP)) {
-        row(&rows[n], L"Grip", NOTIFY_ROW_NORMAL);
+        row(&rows[n], L"Grip", !dash ? NOTIFY_ROW_NORMAL : slip < 4.0f ? NOTIFY_ROW_GOOD : slip < 12.0f ? NOTIFY_ROW_WARN : NOTIFY_ROW_BAD);
         wput(rows[n].keys, 32, slip < 4.0f ? (de ? L"haftet" : L"gripping") : slip < 12.0f ? (de ? L"rutscht  " : L"sliding  ")
                                                                                          : (de ? L"Drift  " : L"drifting  "));
         if (slip >= 4.0f) {
@@ -357,14 +359,17 @@ void telemetry_step(unsigned long long now) {
         } else wput(rows[n].keys, 32, de ? L"voll bremsen" : L"brake hard");
         ++n;
     }
+    int best_style = dash ? NOTIFY_ROW_INFO : NOTIFY_ROW_HINT;
+    if (dash && (mask & ((1 << TELEMETRY_SHOW_TOP) | (1 << TELEMETRY_SHOW_BEST))))
+        row(&rows[n++], de ? L"Bestwerte" : L"Best values", NOTIFY_ROW_SECTION);
     if (mask & (1 << TELEMETRY_SHOW_TOP)) {
-        row(&rows[n], de ? L"Höchsttempo" : L"Top speed", NOTIFY_ROW_HINT);
+        row(&rows[n], de ? L"Höchsttempo" : L"Top speed", best_style);
         wspeed(rows[n++].keys, 32, top);
     }
     if (mask & (1 << TELEMETRY_SHOW_BEST)) {
-        row(&rows[n], de ? L"Beste Querkraft" : L"Best side force", NOTIFY_ROW_HINT);
+        row(&rows[n], de ? L"Beste Querkraft" : L"Best side force", best_style);
         wg(rows[n++].keys, 32, max_side);
-        row(&rows[n], de ? L"Bester Drift" : L"Best drift", NOTIFY_ROW_HINT);
+        row(&rows[n], de ? L"Bester Drift" : L"Best drift", best_style);
         wint(rows[n].keys, 32, (int)(max_slip + 0.5f));
         wput(rows[n++].keys, 32, L"\x00b0");
     }

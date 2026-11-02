@@ -63,6 +63,11 @@ enum {
     NOTIFY_ROW_INFO,     /* key menu: dim label, value in the card colour, not selectable */
     NOTIFY_ROW_HINT,     /* key menu: small grey help line (label left, keys right) */
     NOTIFY_ROW_SECTION,  /* key menu (V7 overhaul): a section head in small capitals with a rule, not selectable */
+    NOTIFY_ROW_HERO,     /* telemetry (V7 overhaul): big value over two rows; the next row must be a SPACER */
+    NOTIFY_ROW_SPACER,   /* nothing drawn (room for the HERO above) */
+    NOTIFY_ROW_GOOD,     /* telemetry: value on a green status pill */
+    NOTIFY_ROW_WARN,     /* telemetry: value on an orange status pill */
+    NOTIFY_ROW_BAD,      /* telemetry: value on a red status pill */
 };
 typedef struct {
     wchar_t label[32], keys[32];
