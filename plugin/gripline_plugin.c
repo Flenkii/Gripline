@@ -119,7 +119,7 @@ static void move_gripline_sections(void) {
         if (used) {
             write_whole(ini, ours, used, CREATE_NEW);
         } else {
-            static const char defaults[] = "[Traffic]\r\nTrafficLevel=4\r\nRushHourAllDay=1\r\n"
+            static const char defaults[] = "[Traffic]\r\nTrafficLevel=0\r\nRushHourAllDay=0\r\n"
                                            "[Gripline]\r\nNotifications=1\r\nSteeringAnimation=0\r\n"
                                            "CockpitViewForward=35\r\nCockpitViewUp=-5\r\n";
             write_whole(ini, defaults, sizeof(defaults) - 1, CREATE_NEW);
