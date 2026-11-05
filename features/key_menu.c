@@ -12,6 +12,7 @@
 #include "rig_settings.h"
 #include "support.h"
 #include "report.h"
+#include "no_damage.h"
 
 #define VK_UP_ 0x26
 #define VK_DOWN_ 0x28
@@ -23,10 +24,10 @@
 #define FILE_LIMIT 32768u
 #define MAX_ROWS (NOTIFY_PANEL_ROWS - 1)
 
-enum { LEVEL_CLOSED, LEVEL_GROUPS, LEVEL_LIST, LEVEL_BINDING, LEVEL_CAPTURE, LEVEL_RESET_ALL, LEVEL_STYLE, LEVEL_MOUSE, LEVEL_TELEMETRY, LEVEL_WORLD, LEVEL_LOGBOOK, LEVEL_RECORDS, LEVEL_SPRINT, LEVEL_COUNT };
+enum { LEVEL_CLOSED, LEVEL_GROUPS, LEVEL_LIST, LEVEL_BINDING, LEVEL_CAPTURE, LEVEL_RESET_ALL, LEVEL_STYLE, LEVEL_MOUSE, LEVEL_TELEMETRY, LEVEL_WORLD, LEVEL_LOGBOOK, LEVEL_RECORDS, LEVEL_SPRINT, LEVEL_DAMAGE, LEVEL_COUNT };
 
 /* first page: rows after the binding pages */
-enum { TOP_STYLE = 100, TOP_RESET = 101, TOP_MOUSE = 102, TOP_TELEMETRY = 103, TOP_WORLD = 104, TOP_LOGBOOK = 105, TOP_RECORDS = 106, TOP_SPRINT = 107, TOP_REPORT = 108 };
+enum { TOP_STYLE = 100, TOP_RESET = 101, TOP_MOUSE = 102, TOP_TELEMETRY = 103, TOP_WORLD = 104, TOP_LOGBOOK = 105, TOP_RECORDS = 106, TOP_SPRINT = 107, TOP_REPORT = 108, TOP_DAMAGE = 109 };
 
 /* mouse steering choices: FH2_Keyboard.ini MouseSteering values */
 #define MOUSE_CHOICES 6
@@ -236,8 +237,8 @@ static int save_bindings(unsigned first, unsigned end) {
     return 1;
 }
 
-/* Gripline.ini next to FH2_Keyboard.ini: [Gripline] CardStyle */
-static int save_style(int style) {
+/* Gripline.ini next to FH2_Keyboard.ini: [Gripline] <key> = one digit (CardStyle, NoDamage) */
+static int save_gripline_digit(const char *key, int digit) {
     static wchar_t path[PATH_CAPACITY];
     unsigned n = wcopy(path, 0, PATH_CAPACITY, ini_path), cut = 0;
     for (unsigned i = 0; i < n; ++i)
@@ -247,13 +248,17 @@ static int save_style(int style) {
     wcopy(path, cut, PATH_CAPACITY, L"Gripline.ini");
     size_t length;
     if (!read_file_at(path, &length)) return 0;
-    char value[2] = {(char)('0' + style), 0};
-    size_t written = ini_set_value(file_text, length, "Gripline", "CardStyle", value, edit_text[0], FILE_LIMIT + 1);
+    char value[2] = {(char)('0' + digit), 0};
+    size_t written = ini_set_value(file_text, length, "Gripline", key, value, edit_text[0], FILE_LIMIT + 1);
     if (!written || written > FILE_LIMIT || !write_file_at(path, edit_text[0], written)) {
-        log_append("KEYMENU: Gripline.ini could not be written - card design not saved.\r\n");
+        log_append("KEYMENU: Gripline.ini could not be written - change not saved.\r\n");
         return 0;
     }
     return 1;
+}
+
+static int save_style(int style) {
+    return save_gripline_digit("CardStyle", style);
 }
 
 /* FH2_Keyboard.ini [Keyboard] MouseSteering */
@@ -446,6 +451,11 @@ static const unsigned world_ids[3] = {RIG_GRIP_SPEED_CAMERAS, RIG_GRIP_CAR_LABEL
 static const wchar_t *const world_german[3] = {L"Blitzer", L"Namen über Autos", L"Event-Symbole auf der Straße"};
 static const wchar_t *const world_english[3] = {L"Speed cameras", L"Names above cars", L"Event icons on the road"};
 
+static const wchar_t *const damage_german[NO_DAMAGE_COUNT] = {L"Aus (wie im Spiel)", L"Andere Autos", L"Alle Autos"};
+static const wchar_t *const damage_english[NO_DAMAGE_COUNT] = {L"Off (as in the game)", L"Other cars", L"All cars"};
+static const wchar_t *const damage_short_german[NO_DAMAGE_COUNT] = {L"Aus", L"Andere", L"Alle"};
+static const wchar_t *const damage_short_english[NO_DAMAGE_COUNT] = {L"Off", L"Others", L"All"};
+
 static void build_page(wchar_t *title) {
     row_count = 0;
     title[0] = 0;
@@ -475,6 +485,8 @@ static void build_page(wchar_t *title) {
                         0, TOP_SPRINT);
             }
             row_add(tr(L"Welt: Blitzer, Namen, Symbole", L"World: cameras, names, icons"), L"›", 0, TOP_WORLD);
+            row_add(tr(L"Kein Schaden an Autos", L"No damage on cars"),
+                    tr(damage_short_german[no_damage_mode()], damage_short_english[no_damage_mode()]), 0, TOP_DAMAGE);
             row_add(tr(L"Karten-Design", L"Card design"), style_names[notify_style()], 0, TOP_STYLE);
             row_add(tr(L"Problem-Bericht erstellen", L"Create problem report"), L"ZIP", 0, TOP_REPORT);
             row_add(tr(L"Alle auf Standard", L"Reset all to default"), L"›", 0, TOP_RESET);
@@ -648,6 +660,14 @@ static void build_page(wchar_t *title) {
             row_add(tr(L"Wirkt nach Spiel-Neustart", L"Takes effect after a restart"), L"", NOTIFY_ROW_INFO, -1);
             hint(0);
             break;
+        case LEVEL_DAMAGE:
+            wcopy(title, 0, 64, tr(L"Kein Schaden an Autos", L"No damage on cars"));
+            for (int i = 0; i < NO_DAMAGE_COUNT; ++i)
+                row_add(tr(damage_german[i], damage_english[i]), i == no_damage_mode() ? tr(L"✓ aktiv", L"✓ active") : L"", 0, i);
+            row_add(tr(L"Andere = Drivatare und Verkehr", L"Others = Drivatars and traffic"), L"", NOTIFY_ROW_INFO, -1);
+            row_add(tr(L"Nur sichtbarer Schaden, sofort", L"Visible damage only, at once"), L"", NOTIFY_ROW_INFO, -1);
+            hint(0);
+            break;
         case LEVEL_RESET_ALL:
             wcopy(title, 0, 64, tr(L"Alle Tasten auf Standard?", L"All keys to default?"));
             row_add(tr(L"Nein, zurück", L"No, back"), L"", 0, 0);
@@ -699,6 +719,7 @@ static void back(void) {
         case LEVEL_MOUSE: m.level = LEVEL_GROUPS; break;
         case LEVEL_TELEMETRY: m.level = LEVEL_GROUPS; break;
         case LEVEL_WORLD: m.level = LEVEL_GROUPS; break;
+        case LEVEL_DAMAGE: m.level = LEVEL_GROUPS; break;
         case LEVEL_LOGBOOK: m.level = LEVEL_GROUPS; break;
         case LEVEL_RECORDS: confirm_clear = 0; m.level = LEVEL_GROUPS; break;
         case LEVEL_SPRINT: m.level = LEVEL_GROUPS; break;
@@ -735,6 +756,9 @@ static void choose(void) {
             } else if (action == TOP_LOGBOOK) {
                 m.level = LEVEL_LOGBOOK;
                 m.sel[LEVEL_LOGBOOK] = 0;
+            } else if (action == TOP_DAMAGE) {
+                m.level = LEVEL_DAMAGE;
+                m.sel[LEVEL_DAMAGE] = no_damage_mode();
             } else if (action == TOP_WORLD) {
                 m.level = LEVEL_WORLD;
                 m.sel[LEVEL_WORLD] = 0;
@@ -821,6 +845,22 @@ static void choose(void) {
                 m.sel[LEVEL_SPRINT] = 0;
             }
             break;
+        case LEVEL_DAMAGE: {
+            if (action < 0 || action >= NO_DAMAGE_COUNT) break;
+            no_damage_set_mode(action);
+            int saved = save_gripline_digit("NoDamage", action);
+            char text[192];
+            unsigned t = 0;
+            wchar_t line[128];
+            unsigned n = wcopy(line, 0, 128, tr(L"Kein Schaden: ", L"No damage: "));
+            n = wcopy(line, n, 128, tr(damage_german[action], damage_english[action]));
+            if (!saved) wcopy(line, n, 128, tr(L"\nNur bis zum Spielende (nicht gespeichert)", L"\nUntil the game closes (not saved)"));
+            utf8(line, text, sizeof(text), &t);
+            text[t] = 0;
+            notify_show(text);
+            log_append_value("KEYMENU: no damage mode ", action);
+            break;
+        }
         case LEVEL_WORLD: {
             if (action >= 0 && action < 3) {
                 unsigned id = world_ids[action];

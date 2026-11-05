@@ -27,6 +27,7 @@ typedef struct {
     int update_check; /* [Gripline] UpdateCheck: ask GitHub for a newer release at start (V7) */
     int speed_cameras, car_labels, telemetry, event_icons;
     int news_seen; /* [Gripline] NewsSeen: version whose what's-new cards were shown (70 = V7.0), logbook.c */
+    int no_damage; /* [Gripline] NoDamage: 0 off, 1 other cars, 2 all cars (V7, no_damage.h) */
     int telemetry_show; /* [Gripline] TelemetryShow: bits of telemetry.h TELEMETRY_SHOW_*, -1 = default */ /* [Gripline] SpeedCameras / CarLabels: 0 = off (V7, world_files.c) */
 } ModOptions;
 #endif

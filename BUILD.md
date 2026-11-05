@@ -27,6 +27,7 @@ python test_ini_migrate.py ../out-test/fh2-mods/Gripline.dll
 python test_cockpit_view.py ../out-test/fh2-mods/Gripline.dll
 python test_nitro.py ../out-test/fh2-mods/Gripline.dll
 python test_cockpit.py ../out-test/fh2-mods/Gripline.dll
+python test_no_damage.py ../out-test/fh2-mods/Gripline.dll path/to/forza_durango_release_final.exe
 ```
 
 `test_cockpit_range.py` needs locally extracted game files in `tests/game` (not part of the repository);

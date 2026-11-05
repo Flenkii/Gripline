@@ -20,6 +20,7 @@ const SettingDefinition setting_definitions[] = {
     SETTING("Gripline", "TelemetryShow", telemetry_show, SETTING_MASK),
     SETTING("Gripline", "EventIcons", event_icons, SETTING_BOOLEAN),
     SETTING("Gripline", "NewsSeen", news_seen, SETTING_MASK),
+    SETTING("Gripline", "NoDamage", no_damage, SETTING_NO_DAMAGE),
 };
 
 const size_t setting_count = ARRAY_COUNT(setting_definitions);
@@ -116,7 +117,7 @@ static int parse_value(const SettingDefinition *definition, const char *text, in
         *value = number;
         return 1;
     }
-    if (definition->type == SETTING_CARD_STYLE) {
+    if (definition->type == SETTING_CARD_STYLE || definition->type == SETTING_NO_DAMAGE) {
         if (text[0] >= '0' && text[0] <= '2' && !text[1]) {
             *value = text[0] - '0';
             return 1;

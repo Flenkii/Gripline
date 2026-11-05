@@ -36,6 +36,7 @@
 #include "features/records.h"
 #include "features/game_language.h"
 #include "features/noclip.h"
+#include "features/no_damage.h"
 #include "features/version_check.h"
 #include "features/update_check.h"
 
@@ -474,6 +475,8 @@ static void start_features(void) {
     keyboard_pad_game_start(game, directory);
     nitro_link_start(game);
     cockpit_view_start(game);
+    no_damage_bind(game);
+    no_damage_set_mode(options.no_damage);
     noclip_install();
     gripline_set_output_root(media_dir);
     traffic_files_start(mount_dir, options.traffic_level);

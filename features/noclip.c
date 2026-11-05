@@ -25,6 +25,7 @@
 #include "key_menu.h"
 #include "wheel_watch.h"
 #include "cockpit_view.h"
+#include "no_damage.h"
 
 #define RVA_DYNAMICS_VTABLE 0x2eb4bb8u
 #define RVA_DYNAMICS_REF_VTABLE 0x2eb5e18u
@@ -535,6 +536,7 @@ void noclip_car_update(void *car, float dt, float frame_dt, unsigned frame) {
     if (dynamics && on) place(dynamics); /* ... and what the game moved in it is taken back */
     else if (park) put_back(park);
     else if (local && !on) sample_trip(car, dt);
+    no_damage_after_update(car, local, local_car != NULL);
 }
 
 /* ------------------------------------------------------------------ info card */
