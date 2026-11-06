@@ -255,6 +255,7 @@ int settings_read(const wchar_t *directory, ModOptions *options) {
                               FILE_ATTRIBUTE_NORMAL, NULL);
     if (file == INVALID_HANDLE_VALUE) {
         if (GetLastError() == ERROR_FILE_NOT_FOUND) {
+            status_set("Gripline.ini not found - defaults used.");
             return 1;
         }
         status_set("REFUSED: cannot read Gripline.ini.");
@@ -277,7 +278,8 @@ int settings_read(const wchar_t *directory, ModOptions *options) {
             return 0;
         }
     }
-    return parse_ini(ini_buffer, options);
+    status_set("Gripline.ini read.");
+    return parse_ini(ini_buffer, options); /* a skipped line replaces the status (ignore_line) */
 }
 
 #ifdef FH2_TWEAKS_TEST

@@ -27,6 +27,7 @@
 #include "cockpit_view.h"
 #include "no_damage.h"
 #include "traffic_files.h"
+#include "wheel_buttons.h"
 
 #define RVA_DYNAMICS_VTABLE 0x2eb4bb8u
 #define RVA_DYNAMICS_REF_VTABLE 0x2eb5e18u
@@ -105,6 +106,7 @@ int noclip_freecam_active(void) {
 /* XINPUT_GAMEPAD bits */
 #define XI_DPAD_UP 0x0001u
 #define XI_DPAD_DOWN 0x0002u
+#define XI_DPAD_LEFT 0x0004u
 #define XI_LS 0x0040u
 #define XI_A 0x1000u
 #define PAD_FRESH_MS 250u
@@ -146,11 +148,17 @@ void noclip_pad_input(unsigned user, unsigned char *gamepad) {
     unsigned short pressed = (unsigned short)(buttons & ~pad_buttons[user]);
     pad_buttons[user] = buttons;
     if (buttons & XI_LS) {
-        /* LS held + D-pad up = noclip, + D-pad down = freecam; the D-pad press stays away from the game */
+        /* LS held + D-pad up = noclip, + D-pad down = freecam, + D-pad left = cruise control (V7);
+           the D-pad press stays away from the game */
         if (pressed & XI_DPAD_UP) InterlockedExchange(&pad_request, MODE_NOCLIP);
         if (pressed & XI_DPAD_DOWN) InterlockedExchange(&pad_request, MODE_FREECAM);
-        buttons &= (unsigned short)~(XI_DPAD_UP | XI_DPAD_DOWN);
+        if (pressed & XI_DPAD_LEFT) cruise_request_toggle();
+        buttons &= (unsigned short)~(XI_DPAD_UP | XI_DPAD_DOWN | XI_DPAD_LEFT);
         memory_copy(gamepad, &buttons, sizeof(buttons));
+    }
+    { /* cruise control: its throttle on the layout's throttle trigger (LT = byte 2, RT = byte 3) */
+        int gas = controller_action_input(0), brake = controller_action_input(1);
+        cruise_pad(gamepad, gas == 10 ? 2 : gas == 11 ? 3 : -1, brake == 10 ? 2 : brake == 11 ? 3 : -1);
     }
     pads[user].lx = stick(axes[0]), pads[user].ly = stick(axes[1]);
     pads[user].rx = stick(axes[2]), pads[user].ry = stick(axes[3]);
