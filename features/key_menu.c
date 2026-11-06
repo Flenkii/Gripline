@@ -488,6 +488,51 @@ static unsigned wuint(wchar_t *out, unsigned n, unsigned v) {
     return n;
 }
 
+/* V7: telemetry panel look (notify.h); Enter steps to the next value, the card says what it is now */
+enum { TELE_LOOK_POS = 60, TELE_LOOK_OPACITY, TELE_LOOK_SIZE };
+static const wchar_t *const tele_pos_german[NOTIFY_TELE_POS_COUNT] = {L"Rechts Mitte", L"Rechts oben", L"Rechts unten",
+                                                                      L"Links oben", L"Links Mitte", L"Links unten"};
+static const wchar_t *const tele_pos_english[NOTIFY_TELE_POS_COUNT] = {L"Right middle", L"Right top", L"Right bottom",
+                                                                       L"Left top", L"Left middle", L"Left bottom"};
+static const int tele_opacities[] = {100, 90, 80, 70, 60, 50, 40, 30};
+static const int tele_sizes[] = {100, 115, 130, 150, 175, 200, 60, 70, 85};
+
+static void percent_text(int value, wchar_t out[16]) {
+    unsigned n = wuint(out, 0, (unsigned)value);
+    out[n++] = L' ', out[n++] = L'%', out[n] = 0;
+}
+
+static int next_in(const int *list, unsigned count, int now) {
+    for (unsigned i = 0; i < count; ++i)
+        if (list[i] == now) return list[(i + 1) % count];
+    return list[0];
+}
+
+static void tele_look_next(int action) {
+    int pos = notify_telemetry_position(), opacity = notify_telemetry_opacity(), size = notify_telemetry_size();
+    const char *key;
+    int value;
+    if (action == TELE_LOOK_POS) key = "TelemetryPosition", value = pos = (pos + 1) % NOTIFY_TELE_POS_COUNT;
+    else if (action == TELE_LOOK_OPACITY) key = "TelemetryOpacity", value = opacity = next_in(tele_opacities, ARRAY_COUNT(tele_opacities), opacity);
+    else key = "TelemetrySize", value = size = next_in(tele_sizes, ARRAY_COUNT(tele_sizes), size);
+    notify_set_telemetry_look(pos, opacity, size);
+    if (!save_gripline_int(key, value)) log_append("KEYMENU: Gripline.ini could not be written - telemetry look not saved.\r\n");
+    wchar_t line[96], v[16];
+    unsigned n = wcopy(line, 0, 96, tr(L"Telemetrie: ", L"Telemetry: "));
+    if (action == TELE_LOOK_POS) n = wcopy(line, n, 96, tr(tele_pos_german[pos], tele_pos_english[pos]));
+    else {
+        percent_text(value, v);
+        n = wcopy(line, n, 96, action == TELE_LOOK_OPACITY ? tr(L"Deckkraft ", L"opacity ") : tr(L"Größe ", L"size "));
+        n = wcopy(line, n, 96, v);
+    }
+    wcopy(line, n, 96, tr(L"\nZu sehen, wenn das Menü zu ist", L"\nShown once the menu is closed"));
+    char text[192];
+    unsigned t = 0;
+    utf8(line, text, sizeof(text), &t);
+    text[t] = 0;
+    notify_show_step(text, 0x7e1e00u, 2500);
+}
+
 /* "12,3 km" below 100, else "1234 km" (miles when the game shows mph) */
 static void distance_text(double metres, wchar_t out[32]) {
     int imperial = game_units_imperial(keyboard_game_image());
@@ -729,6 +774,13 @@ static void build_page(wchar_t *title) {
             for (unsigned i = 0; i < TELEMETRY_SHOW_COUNT; ++i)
                 row_add(telemetry_item_name(i, m.german), (mask & (1 << i)) ? tr(L"✓ an", L"✓ on") : tr(L"aus", L"off"), 0,
                         1 + (int)i);
+            row_add(tr(L"Aussehen (Enter = weiter)", L"Look (Enter = next)"), L"", NOTIFY_ROW_SECTION, -1);
+            wchar_t v[16];
+            row_add(tr(L"Position", L"Position"), tr(tele_pos_german[notify_telemetry_position()], tele_pos_english[notify_telemetry_position()]), 0, TELE_LOOK_POS);
+            percent_text(notify_telemetry_opacity(), v);
+            row_add(tr(L"Deckkraft", L"Opacity"), v, 0, TELE_LOOK_OPACITY);
+            percent_text(notify_telemetry_size(), v);
+            row_add(tr(L"Größe", L"Size"), v, 0, TELE_LOOK_SIZE);
             hint(0);
             break;
         }
@@ -1004,6 +1056,10 @@ static void choose(void) {
             break;
         }
         case LEVEL_TELEMETRY: {
+            if (action >= TELE_LOOK_POS && action <= TELE_LOOK_SIZE) {
+                tele_look_next(action);
+                break;
+            }
             if (action == 50) {
                 int on = !records_csv_on();
                 if (on && !telemetry_enabled() && !rig_setting_set(RIG_GRIP_TELEMETRY, 1)) telemetry_set_enabled(1); /* the CSV needs the panel's values */

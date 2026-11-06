@@ -107,6 +107,7 @@ static volatile LONG panel_count; /* 0 = panel off */
 static volatile ULONGLONG panel_opened; /* V7 overhaul: when the menu panel came up (open animation) */
 static volatile ULONGLONG panel_paged;  /* V7 overhaul: when the menu went to another page (short glide) */
 static volatile LONG panel_at_top; /* 1 key menu: top right instead of centred; 2 telemetry: centred, cards stay */
+static volatile LONG tele_pos = NOTIFY_TELE_RIGHT_MIDDLE, tele_opacity = 100, tele_size = 100; /* V7: telemetry look */
 static unsigned panel_id; /* changes with every notify_panel_set: the panel is drawn again */
 
 /* ------------------------------------------------------------------ public */
@@ -326,6 +327,22 @@ unsigned notify_panel_show_owned(const wchar_t *title, const NotifyPanelRow *row
     return id;
 }
 
+void notify_set_telemetry_look(int position, int opacity, int size) {
+    if (position < 0 || position >= NOTIFY_TELE_POS_COUNT) position = NOTIFY_TELE_RIGHT_MIDDLE;
+    opacity = opacity < 20 ? 20 : opacity > 100 ? 100 : opacity;
+    size = size < 50 ? 50 : size > 200 ? 200 : size;
+    InterlockedExchange(&tele_pos, position);
+    InterlockedExchange(&tele_opacity, opacity);
+    InterlockedExchange(&tele_size, size);
+    AcquireSRWLockExclusive(&lock);
+    ++panel_id; /* drawn again */
+    InterlockedExchange(&cards_changed, 1);
+    ReleaseSRWLockExclusive(&lock);
+}
+int notify_telemetry_position(void) { return (int)tele_pos; }
+int notify_telemetry_opacity(void) { return (int)tele_opacity; }
+int notify_telemetry_size(void) { return (int)tele_size; }
+
 void notify_panel_clear_owned(unsigned owner) {
     AcquireSRWLockShared(&lock);
     int mine = owner && panel_id == owner && panel_count != 0;
@@ -426,6 +443,19 @@ static Layout layout_for(UINT screen_height) {
     l.panel_row = (int)(20 * s);
     l.panel_height = l.panel_header + NOTIFY_PANEL_ROWS * l.panel_row + l.pad + 2 * l.glow;
     return l;
+}
+
+/* top left corner of the telemetry panel (pw x ph) on a w x h screen; cards (count, layout l) stay top right */
+static void tele_place(int pos, const Layout *l, unsigned count, int w, int h, int pw, int ph, int *x, int *y) {
+    int below_cards = l->margin + (int)count * (l->height + l->gap);
+    int left = pos >= NOTIFY_TELE_LEFT_TOP;
+    int row = pos == NOTIFY_TELE_RIGHT_TOP || pos == NOTIFY_TELE_LEFT_TOP ? 0
+            : pos == NOTIFY_TELE_RIGHT_BOTTOM || pos == NOTIFY_TELE_LEFT_BOTTOM ? 2 : 1;
+    *x = left ? l->margin : w - l->margin - pw;
+    *y = row == 0 ? l->margin : row == 2 ? h - l->margin - ph : (h - ph) / 2;
+    if (!left && *y < below_cards) *y = below_cards; /* right side: below the cards */
+    if (*y + ph > h - l->margin && !left && row != 0) *y = h - l->margin - ph;
+    if (*y < l->margin) *y = l->margin;
 }
 
 static int text_width_chars(const wchar_t *t) {
@@ -2190,7 +2220,19 @@ static void render(IDXGISwapChain *swapchain) {
     }
     const Layout *l = &gpu.layout;
     int card_rows = l->height * MAX_CARDS;
-    if (!create_texture(l->width, card_rows + l->panel_height)) {
+    /* V7: the telemetry panel is drawn at its own size (sharp text, not stretched) */
+    int tele = panel && panel_at_top == 2;
+    static Layout tele_layout;
+    static UINT tele_for_height;
+    static int tele_for_size = -1, tele_for_style = -1;
+    if (tele_for_height != height || tele_for_size != (int)tele_size || tele_for_style != l->style) {
+        tele_for_height = height, tele_for_size = (int)tele_size, tele_for_style = l->style;
+        tele_layout = layout_for((UINT)((unsigned long long)height * (unsigned)tele_size / 100u));
+    }
+    const Layout *pl = tele && tele_size != 100 ? &tele_layout : l;
+    int tex_w = pl->width > l->width ? pl->width : l->width;
+    int tex_h = card_rows + (pl->panel_height > l->panel_height ? pl->panel_height : l->panel_height);
+    if (!create_texture(tex_w, tex_h)) {
         fail("could not create the card texture");
         return;
     }
@@ -2215,7 +2257,7 @@ static void render(IDXGISwapChain *swapchain) {
         }
         if (!gdi_ready() || FAILED(ID3D12Resource_Map(gpu.upload, 0, &none, &mapped)) ||
             !draw_cards(list, count, l, (unsigned char *)mapped, (int)gpu.upload_pitch) ||
-            (panel && !draw_panel(title, rows, panel, l, (unsigned char *)mapped + (size_t)card_rows * gpu.upload_pitch,
+            (panel && !draw_panel(title, rows, panel, pl, (unsigned char *)mapped + (size_t)card_rows * gpu.upload_pitch,
                                   (int)gpu.upload_pitch))) {
             if (mapped) ID3D12Resource_Unmap(gpu.upload, 0, NULL);
             fail("could not draw the cards");
@@ -2269,20 +2311,24 @@ static void render(IDXGISwapChain *swapchain) {
     ID3D12GraphicsCommandList_IASetPrimitiveTopology(gpu.list, D3D_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP);
     float shift = 0.0f; /* cards stand left of the key list panel while it is shown */
     if (panel) {
-        float ph = (float)panel_pixels(l, panel);
+        float ph = (float)panel_pixels(pl, panel);
         float open_slide, open_a = panel_open_alpha(now, &open_slide);
         float x0 = (float)width - l->margin - l->width + open_slide * 36.0f * l->scale;
         float y0 = panel_at_top == 1 ? (float)l->margin : ((float)height - ph) * 0.5f;
         if (y0 < (float)l->margin) y0 = (float)l->margin;
-        if (panel_at_top == 2 && y0 < (float)(l->margin + (int)count * (l->height + l->gap)))
-            y0 = (float)(l->margin + (int)count * (l->height + l->gap)); /* telemetry: below the cards */
+        if (tele) {
+            int tx, ty;
+            tele_place((int)tele_pos, l, count, (int)width, (int)height, pl->width, (int)ph, &tx, &ty);
+            x0 = (float)tx, y0 = (float)ty;
+            open_a *= (float)tele_opacity / 100.0f;
+        }
         float c[12] = {x0 / width * 2.0f - 1.0f,
                        1.0f - y0 / height * 2.0f,
-                       (x0 + l->width) / width * 2.0f - 1.0f,
+                       (x0 + pl->width) / width * 2.0f - 1.0f,
                        1.0f - (y0 + ph) / height * 2.0f,
                        0.0f,
                        (float)card_rows / gpu.tex_height,
-                       1.0f,
+                       (float)pl->width / gpu.tex_width,
                        ((float)card_rows + ph) / gpu.tex_height,
                        open_a, 0.0f, 0.0f, 0.0f};
         ID3D12GraphicsCommandList_SetGraphicsRoot32BitConstants(gpu.list, 1, 12, c, 0);
@@ -2300,7 +2346,7 @@ static void render(IDXGISwapChain *swapchain) {
                        1.0f - (y + l->height) / height * 2.0f,
                        0.0f,
                        (float)(i * l->height) / gpu.tex_height,
-                       1.0f,
+                       (float)l->width / gpu.tex_width,
                        (float)((i + 1) * l->height) / gpu.tex_height,
                        a, 0.0f, 0.0f, 0.0f};
         if (a > 0.0f) {
@@ -2524,9 +2570,14 @@ static DWORD WINAPI overlay_thread(void *unused) {
             int ph = panel_pixels(&l, panel);
             int y0 = panel_at_top == 1 ? l.margin : (screen_h - ph) / 2;
             if (y0 < l.margin) y0 = l.margin;
-            if (panel_at_top == 2 && y0 < l.margin + (int)count * (l.height + l.gap))
-                y0 = l.margin + (int)count * (l.height + l.gap); /* telemetry: below the cards */
             float open_slide, open_a = panel_open_alpha(now, &open_slide);
+            if (panel_at_top == 2) { /* this window only covers the right side: left positions use the right one */
+                static const int to_right[NOTIFY_TELE_POS_COUNT] = {NOTIFY_TELE_RIGHT_MIDDLE, NOTIFY_TELE_RIGHT_TOP, NOTIFY_TELE_RIGHT_BOTTOM,
+                                                                    NOTIFY_TELE_RIGHT_TOP, NOTIFY_TELE_RIGHT_MIDDLE, NOTIFY_TELE_RIGHT_BOTTOM};
+                int tx;
+                tele_place(to_right[tele_pos], &l, count, frame_w, screen_h, l.width, ph, &tx, &y0);
+                open_a *= (float)tele_opacity / 100.0f;
+            }
             blend_block(frame, frame_w, frame_h, frame_w - l.margin - l.width + (int)(open_slide * 36.0f * l.scale), y0,
                         scratch_panel, l.width * 4, l.width, ph, open_a);
             if (panel_at_top != 2) shift = l.width + l.gap;

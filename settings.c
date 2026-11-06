@@ -24,6 +24,9 @@ const SettingDefinition setting_definitions[] = {
     SETTING("Gripline", "CardsHidden", cards_hidden, SETTING_MASK),
     SETTING("Gripline", "CruiseCrashOff", cruise_crash_off, SETTING_BOOLEAN),
     SETTING("Gripline", "CruiseMinSpeed", cruise_min_speed, SETTING_MASK),
+    SETTING("Gripline", "TelemetryPosition", telemetry_pos, SETTING_MASK),
+    SETTING("Gripline", "TelemetryOpacity", telemetry_opacity, SETTING_MASK),
+    SETTING("Gripline", "TelemetrySize", telemetry_size, SETTING_MASK),
 };
 
 const size_t setting_count = ARRAY_COUNT(setting_definitions);
@@ -45,6 +48,8 @@ void settings_defaults(ModOptions *options) {
         .telemetry_show = -1, /* telemetry.c default */
         .cruise_crash_off = 1,
         .cruise_min_speed = 20,
+        .telemetry_opacity = 100,
+        .telemetry_size = 100,
     };
 }
 

@@ -100,5 +100,12 @@ void notify_panel_show(const wchar_t *title, const NotifyPanelRow *rows, unsigne
 /* panel that gives way to the others (telemetry): see notify.c */
 unsigned notify_panel_show_owned(const wchar_t *title, const NotifyPanelRow *rows, unsigned count, unsigned owner);
 void notify_panel_clear_owned(unsigned owner);
+/* V7: where the telemetry panel sits (NOTIFY_TELE_*), how see-through (opacity 20..100 %) and how big (50..200 %) */
+enum { NOTIFY_TELE_RIGHT_MIDDLE, NOTIFY_TELE_RIGHT_TOP, NOTIFY_TELE_RIGHT_BOTTOM,
+       NOTIFY_TELE_LEFT_TOP, NOTIFY_TELE_LEFT_MIDDLE, NOTIFY_TELE_LEFT_BOTTOM, NOTIFY_TELE_POS_COUNT };
+void notify_set_telemetry_look(int position, int opacity, int size);
+int notify_telemetry_position(void);
+int notify_telemetry_opacity(void);
+int notify_telemetry_size(void);
 
 #endif
