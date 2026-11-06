@@ -43,6 +43,7 @@ enum {
     NOTIFY_COLOR_BLUE, /* original */
     NOTIFY_COLOR_RED, NOTIFY_COLOR_GREEN, NOTIFY_COLOR_PURPLE, NOTIFY_COLOR_ORANGE,
     NOTIFY_COLOR_YELLOW, NOTIFY_COLOR_PINK, NOTIFY_COLOR_WHITE,
+    NOTIFY_COLOR_BLACK, /* V7: a very dark grey, white text */
     NOTIFY_COLOR_RAINBOW, /* V7: a smooth fade through all colours; only as the setting, warnings keep theirs */
     NOTIFY_COLOR_COUNT
 };

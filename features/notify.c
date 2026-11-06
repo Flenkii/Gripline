@@ -54,6 +54,7 @@ static unsigned char palette[NOTIFY_COLOR_COUNT][2][3] = { /* [RAINBOW] is fille
     {{225, 185, 20}, {255, 230, 110}},  /* yellow */
     {{225, 60, 150}, {255, 150, 205}},  /* pink */
     {{215, 220, 228}, {255, 255, 255}}, /* white */
+    {{44, 47, 54}, {185, 192, 204}},    /* black (very dark grey, the light tone keeps titles readable) */
     {{38, 120, 225}, {110, 185, 255}},  /* rainbow (changes every frame) */
 };
 static volatile LONG color;
@@ -67,6 +68,7 @@ static unsigned char palette_second[NOTIFY_COLOR_COUNT][3] = {
     {255, 135, 20},  /* yellow -> orange */
     {140, 70, 230},  /* pink -> purple */
     {140, 165, 205}, /* white -> steel blue */
+    {88, 94, 108},   /* black -> graphite */
     {150, 60, 235},  /* rainbow: the next hue (rainbow_tick) */
 };
 

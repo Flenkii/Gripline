@@ -40,9 +40,9 @@ check(ok == 1 and n == 0 and v['CardStyle'] == 2 and v['Notifications'] == 1, 'k
 ok, v, n, s = read('[Traffic]\r\nTrafficLevel=0\r\n[Gripline]\r\nCardColor=3\r\nNoDamage=2\r\nCardStyle=1\r\n')
 check(ok == 1 and n == 0 and (v['CardColor'], v['NoDamage'], v['CardStyle']) == (3, 2, 1), f'gute Datei: alles gelesen {v}')
 
-ok, v, n, s = read('[Gripline]\r\nCardColor=8\r\n')
-check(ok == 1 and v['CardColor'] == 8, f'Kartenfarbe 8 = Regenbogen: {v["CardColor"]}')
-ok, v, n, s = read('[Gripline]\r\nCardColor=9\r\nNoDamage=2\r\nCardStyle=1\r\n')
+ok, v, n, s = read('[Gripline]\r\nCardColor=9\r\n')
+check(ok == 1 and v['CardColor'] == 9, f'Kartenfarbe 9 = Regenbogen: {v["CardColor"]}')
+ok, v, n, s = read('[Gripline]\r\nCardColor=10\r\nNoDamage=2\r\nCardStyle=1\r\n')
 check(ok == 0 and n == 1, f'falscher Wert: eine Zeile uebersprungen ({ok}, {n})')
 check(v['CardColor'] == 0 and v['NoDamage'] == 2 and v['CardStyle'] == 1,
       f'Zeilen danach werden trotzdem gelesen (frueher verloren): {v}')
