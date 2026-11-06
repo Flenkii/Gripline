@@ -501,6 +501,22 @@ static void *camera_view(void *camera, void *out) {
     return ((CameraViewFn)previous_view[i])(camera, out);
 }
 
+/* The game's multi camera (game+0xfe61c0) moves a follow camera towards its car when something is
+   between them (vtable slot 0x230 game+0x103ef50, only when slot 0x238 says 1 - the follow cameras do,
+   the cockpit cameras not). The walker is far from the car, behind trees and houses: the eye jumped
+   towards the car (Marvin 06.11.2026, gone in the cockpit view). While walking slot 0x238 says 0. */
+#define SLOT_AVOID 0x238u
+static const unsigned follow_vtables[3] = {0x2e783a0u, 0x2e78610u, 0x2e78880u};
+static void *previous_avoid[3];
+typedef unsigned char (*AvoidFn)(void *);
+static unsigned char avoid(unsigned i, void *camera) {
+    if (active && entered) return 0;
+    return ((AvoidFn)previous_avoid[i])(camera);
+}
+static unsigned char avoid0(void *c) { return avoid(0, c); }
+static unsigned char avoid1(void *c) { return avoid(1, c); }
+static unsigned char avoid2(void *c) { return avoid(2, c); }
+
 /* ------------------------------------------------------------------ HUD */
 
 typedef void (*Draw3Fn)(void *, void *, void *);
@@ -595,6 +611,16 @@ int walking_start(unsigned char *game_image) {
         log_append_value("WALKING: cameras hooked (of 7): ", (int)cameras_hooked);
         if (!cameras_hooked) return 0;
     }
+    static void *const avoid_hooks[3] = {(void *)(uintptr_t)avoid0, (void *)(uintptr_t)avoid1,
+                                         (void *)(uintptr_t)avoid2};
+    unsigned avoid_hooked = 0;
+    for (unsigned i = 0; i < 3; ++i) {
+        void *current = NULL;
+        if (!memory_read_pointer(game + follow_vtables[i] + SLOT_AVOID, &current) || !current) continue;
+        if (current != game + 0xc47af0u) log_append_module("WALKING: follow camera avoid already hooked by ", current);
+        if (chain(follow_vtables[i] + SLOT_AVOID, avoid_hooks[i], &previous_avoid[i])) ++avoid_hooked;
+    }
+    if (avoid_hooked != 3) log_append_value("WALKING: follow camera avoid hooked (of 3): ", (int)avoid_hooked);
     static void *const ui_hooks[6] = {(void *)(uintptr_t)ui0, (void *)(uintptr_t)ui1, (void *)(uintptr_t)ui2,
                                       (void *)(uintptr_t)ui3, (void *)(uintptr_t)ui4, (void *)(uintptr_t)ui5};
     unsigned ui_hooked = 0;
