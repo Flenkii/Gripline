@@ -489,7 +489,8 @@ static void start_features(void) {
     InterlockedExchange(&started, 1);
     if (row_count) sync_rows();
     /* Extra Options mounts mods\Gripline\media; the game's steering angle follows once the files are there */
-    if (cockpit_wait_ready()) cockpit_patch_game();
+    cockpit_wait_ready(); /* up to 60 s; files that take longer are patched in when they are ready */
+    cockpit_patch_when_ready();
     platform_log("Gripline features started");
 }
 
