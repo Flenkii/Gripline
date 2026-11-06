@@ -477,14 +477,16 @@ static void set_on(LONG value) {
     walking_set_active(value == MODE_WALK);
 }
 
-/* V7 walking, getting out and in (Marvin 06.11.2026): fade to black, door opens, 1 s dark (the
-   switch happens at its start, so the camera is settled), door shuts, fade back to the picture. */
+/* V7 walking, getting out and in (Marvin 06.11.2026): fade to black, door opens (the switch happens
+   now, so the camera is settled), right after it the door shuts, 2 s dark, fade back to the picture. */
 #define FADE_DOWN_MS 300
-#define FADE_HOLD_MS 1000
+#define FADE_SHUT_MS 800  /* after the door opened: the opening sound is over */
+#define FADE_HOLD_MS 2000 /* dark in all */
 #define FADE_UP_MS 450
 static int fade_stage; /* 0 none, 1 getting dark, 2 dark, 3 getting light (watch thread only) */
 static LONG fade_to;   /* MODE_WALK = get out, 0 = get in */
 static ULONGLONG fade_at;
+static int fade_shut; /* the door has shut (sound played) */
 
 static void walk_out_card(void) {
     card("Ausgestiegen - Walking an\nWASD/linker Stick laufen, Pfeile/rechter Stick schauen, Shift/RT rennen, "
@@ -522,8 +524,11 @@ static void fade_tick(ULONGLONG now) {
         }
         fade_stage = 2;
         fade_at = now;
-    } else if (fade_stage == 2 && now >= fade_at + FADE_HOLD_MS) {
+        fade_shut = 0;
+    } else if (fade_stage == 2 && !fade_shut && now >= fade_at + FADE_SHUT_MS) {
+        fade_shut = 1;
         walking_door_sound(1);
+    } else if (fade_stage == 2 && now >= fade_at + FADE_HOLD_MS) {
         notify_fade_black(0, FADE_UP_MS);
         if (fade_to == MODE_WALK) walk_out_card();
         else card("Eingestiegen", "Back in the car");
