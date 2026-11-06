@@ -8,7 +8,7 @@
 #include "cockpit.h"
 #include "cockpit_view.h"
 
-#define COCKPIT_VERSION 6
+#define COCKPIT_VERSION 7 /* 7: manifest also holds a fingerprint of the game zips (Source=) */
 #define COCKPIT_FOLDER L"gripline_cockpit"
 #define HALF_SAMPLES 121
 #define SAMPLES (HALF_SAMPLES + 2) /* + held ends at 0 and the end */
@@ -1639,10 +1639,41 @@ static int read_small(const wchar_t *path, char *out, size_t cap) {
     return ok;
 }
 
-static void format_manifest(char *out, size_t cap, int rotation, int curve) {
-    char n1[12], n2[12], n3[12];
+/* FNV-1a over name, size and time of every zip the files are made from: a game update, a car mod
+   that replaces a car zip or new DLC cars change it, and the files are made again (an animation made
+   from an older car zip may not fit the car any more). */
+static uint32_t fnv_add(uint32_t h, const void *data, size_t n) {
+    const unsigned char *p = data;
+    for (size_t i = 0; i < n; ++i) h = (h ^ p[i]) * 16777619u;
+    return h;
+}
+
+static uint32_t fingerprint_folder(uint32_t h, const wchar_t *pattern) {
+    WIN32_FIND_DATAW found;
+    HANDLE find = FindFirstFileW(pattern, &found);
+    if (find == INVALID_HANDLE_VALUE) return fnv_add(h, "-", 1);
+    do {
+        if (found.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) continue;
+        uint32_t one = 2166136261u; /* per file, then summed: the order FindNextFile gives does not matter */
+        for (const wchar_t *c = found.cFileName; *c; ++c) {
+            wchar_t l = *c >= L'A' && *c <= L'Z' ? (wchar_t)(*c + 32) : *c;
+            one = fnv_add(one, &l, sizeof(l));
+        }
+        one = fnv_add(one, &found.nFileSizeLow, 4);
+        one = fnv_add(one, &found.nFileSizeHigh, 4);
+        one = fnv_add(one, &found.ftLastWriteTime, sizeof(found.ftLastWriteTime));
+        h += one;
+    } while (FindNextFileW(find, &found));
+    FindClose(find);
+    return h;
+}
+
+static void format_manifest(char *out, size_t cap, int rotation, int curve, uint32_t source) {
+    char n1[12], n2[12], n3[12], n4[12];
+    for (int i = 0; i < 8; ++i) n4[i] = "0123456789abcdef"[(source >> (28 - 4 * i)) & 15];
+    n4[8] = 0;
     const char *parts[] = {"Gripline cockpit files - made by Gripline, safe to delete\r\nVersion=",
-                           n1, "\r\nRotation=", n2, "\r\nCurve=", n3, "\r\n"};
+                           n1, "\r\nRotation=", n2, "\r\nCurve=", n3, "\r\nSource=", n4, "\r\n"};
     int values[3] = {COCKPIT_VERSION, rotation, curve};
     char *numbers[3] = {n1, n2, n3};
     for (int k = 0; k < 3; ++k) {
@@ -1672,7 +1703,10 @@ static int make_files(void) {
     if (output_root[0]) lstrcpynW(root, output_root, PATH_CAPACITY);
     else if (!wjoin(root, mount_path, COCKPIT_FOLDER)) return 0;
     if (!wjoin(media, mount_path, L"media")) return 0;
-    format_manifest(manifest, sizeof(manifest), want_rotation, want_rotation ? want_curve : 0);
+    uint32_t source = 2166136261u;
+    if (wjoin(pattern, media, L"cars\\*.zip")) source = fingerprint_folder(source, pattern);
+    if (wjoin(pattern, media, L"drivers\\*.zip")) source = fingerprint_folder(source, pattern);
+    format_manifest(manifest, sizeof(manifest), want_rotation, want_rotation ? want_curve : 0, source);
     if (!wjoin(path, root, L"gripline_cockpit.txt")) return 0;
     if (read_small(path, existing, sizeof(existing)) && same_text(existing, manifest)) {
         log_append("COCKPIT: steering animation files are up to date.\r\n");
@@ -1794,6 +1828,74 @@ static int make_files(void) {
     return cars > 0 || hands > 0;
 }
 
+/* deletes <folder>\...\leftrightturn.gr2 (only that name: the files Gripline made). The empty folders
+   stay: they change nothing (no new import for removing them: imports kept as they are, Defender) */
+static int remove_turn_files(wchar_t *folder, int depth) {
+    static WIN32_FIND_DATAW found; /* one thread at a time; the name is used before the next call */
+    size_t n = wlen(folder);
+    if (depth > 12 || n + 4 >= PATH_CAPACITY) return 0;
+    memory_copy(folder + n, L"\\*", 3 * 2);
+    HANDLE find = FindFirstFileW(folder, &found);
+    folder[n] = 0;
+    if (find == INVALID_HANDLE_VALUE) return 0;
+    int removed = 0;
+    do {
+        const wchar_t *name = found.cFileName;
+        if (name[0] == L'.' && (!name[1] || (name[1] == L'.' && !name[2]))) continue;
+        size_t nl = wlen(name);
+        if (n + 1 + nl + 1 >= PATH_CAPACITY) continue;
+        folder[n] = L'\\';
+        memory_copy(folder + n + 1, name, (nl + 1) * 2);
+        if (found.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) {
+            if (!(found.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT)) {
+                removed += remove_turn_files(folder, depth + 1);
+            }
+        } else {
+            static const wchar_t want[] = L"leftrightturn.gr2";
+            int match = nl == ARRAY_COUNT(want) - 1;
+            for (size_t c = 0; match && c < nl; ++c) {
+                wchar_t l = name[c] >= L'A' && name[c] <= L'Z' ? (wchar_t)(name[c] + 32) : name[c];
+                match = l == want[c];
+            }
+            if (match && DeleteFileW(folder)) ++removed;
+        }
+        folder[n] = 0;
+    } while (FindNextFileW(find, &found));
+    FindClose(find);
+    return removed;
+}
+
+/* The files only work together with the Turn hook (the time below TURN_FIRST hides the wheel and the
+   driver, the outer turn is pressed together, the hands are hidden). Extra Options mounts the folder
+   whenever it is there, so when the hook cannot go in, Gripline's own cockpit files go and the game
+   shows its original cockpit. Only Gripline's files are removed, never a game file. */
+static void remove_files(void) {
+    static wchar_t root[PATH_CAPACITY], path[PATH_CAPACITY];
+    if (output_root[0]) lstrcpynW(root, output_root, PATH_CAPACITY);
+    else if (!mount_path[0] || !wjoin(root, mount_path, COCKPIT_FOLDER)) return;
+    __try {
+        if (wjoin(path, root, L"gripline_cockpit.txt")) DeleteFileW(path); /* first: never "ready" again */
+        int removed = 0;
+        static const char *const drivers[] = {"default", "defaultRace", "suited", "unsuited", "stig"};
+        for (unsigned i = 0; i < ARRAY_COUNT(drivers); ++i) {
+            static char rel[96];
+            size_t n = 0;
+            for (const char *s = "drivers\\"; *s; ++s) rel[n++] = *s;
+            for (const char *s = drivers[i]; *s; ++s) rel[n++] = *s;
+            rel[n] = 0;
+            static wchar_t folder[PATH_CAPACITY];
+            if (!wjoin_ascii(folder, root, rel) || !wjoin(path, folder, L"driver.modelbin")) continue;
+            if (DeleteFileW(path)) ++removed;
+        }
+        if (wjoin(path, root, L"cars")) removed += remove_turn_files(path, 0);
+        log_append_value("COCKPIT: original cockpit - Gripline's cockpit files removed: ", removed);
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        log_append("COCKPIT: could not remove all cockpit files.\r\n");
+    }
+}
+
+static volatile LONG patch_wanted;
+
 static DWORD WINAPI maker_thread(LPVOID unused) {
     (void)unused;
     int ok = 0;
@@ -1802,8 +1904,13 @@ static DWORD WINAPI maker_thread(LPVOID unused) {
     } __except (EXCEPTION_EXECUTE_HANDLER) {
         ok = 0;
     }
-    if (!ok) log_append("COCKPIT: could not make the steering animation files; original cockpit.\r\n");
+    if (!ok) {
+        log_append("COCKPIT: could not make the steering animation files; original cockpit.\r\n");
+        remove_files(); /* half-made files without the manifest would still be mounted */
+    }
     InterlockedExchange(&state, ok ? 2 : 3);
+    /* the start gave up waiting (slow disk, many cars): the game is patched now that the files are there */
+    if (ok && patch_wanted) cockpit_patch_game();
     return 0;
 }
 
@@ -1814,13 +1921,19 @@ void cockpit_start(unsigned char *game_image, const wchar_t *mount_dir, int full
                    int curve_x10) {
     if (!mount_dir || state != 0) return;
     game = game_image;
-    /* the files only work together with the Turn hook: without it the original files stay */
-    if (wlen(mount_dir) + 32 >= PATH_CAPACITY || !turn_site_ok() || !prepare_page()) {
-        log_append("COCKPIT: game code differs - original cockpit animation.\r\n");
+    if (wlen(mount_dir) + 32 >= PATH_CAPACITY) {
         InterlockedExchange(&state, 3);
         return;
     }
     memory_copy(mount_path, mount_dir, (wlen(mount_dir) + 1) * 2);
+    /* the files only work together with the Turn hook: without it the original files stay, and files of
+       an earlier start (other game version, another mod on the same place) are removed */
+    if (!turn_site_ok() || !prepare_page()) {
+        log_append("COCKPIT: game code differs - original cockpit animation.\r\n");
+        remove_files();
+        InterlockedExchange(&state, 3);
+        return;
+    }
     want_rotation = !full ? 0 : rotation_degrees < 180 ? 180 : (rotation_degrees > 2520 ? 2520 : rotation_degrees);
     want_curve = curve_x10 < 10 ? 10 : (curve_x10 > 60 ? 60 : curve_x10);
     InterlockedExchange(&state, 1);
@@ -1841,6 +1954,11 @@ int cockpit_wait_ready(void) {
         Sleep(50);
     }
     return 0;
+}
+
+void cockpit_patch_when_ready(void) {
+    InterlockedExchange(&patch_wanted, 1);
+    if (state == 2) cockpit_patch_game(); /* otherwise the maker thread does it when it is done */
 }
 
 /* ------------------------------------------------------------------ game: steering range */
@@ -1936,7 +2054,14 @@ int cockpit_patch_game(void) {
     if (!game || !patch_page || InterlockedCompareExchange(&patched, 1, 0) != 0) return 0;
     int turn_hooked = hook_turn(patch_page + 0x40);
     log_append(turn_hooked ? "COCKPIT: second cockpit view hides the steering wheel.\r\n"
-                           : "COCKPIT: game code differs - the second cockpit view keeps the steering wheel.\r\n");
+                           : "COCKPIT: game code differs - original cockpit animation.\r\n");
+    if (!turn_hooked) {
+        /* the files need the hook (see remove_files): without it the game's own cockpit */
+        remove_files();
+        DWORD old;
+        VirtualProtect(patch_page, 0x1000, PAGE_EXECUTE_READ, &old);
+        return 0;
+    }
     int range = want_rotation > 0 && patch_range();
     DWORD old;
     VirtualProtect(patch_page, 0x1000, PAGE_EXECUTE_READ, &old);
@@ -1982,6 +2107,11 @@ __declspec(dllexport) int Fh2TestCockpitMake(const wchar_t *mount, int rotation,
     want_rotation = rotation;
     want_curve = curve_x10;
     return make_files();
+}
+
+__declspec(dllexport) void Fh2TestCockpitRemove(const wchar_t *mount) {
+    memory_copy(mount_path, mount, (wlen(mount) + 1) * 2);
+    remove_files();
 }
 
 __declspec(dllexport) double Fh2TestMath(int which, double x) {

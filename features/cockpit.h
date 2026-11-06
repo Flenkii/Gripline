@@ -23,6 +23,11 @@ void cockpit_start(unsigned char *game_image, const wchar_t *mount_dir, int full
 /* For the mount: 1 = mount the folder, 0 = not. Waits (up to 60 s) until the files are made. */
 int cockpit_wait_ready(void);
 
+/* Like cockpit_wait_ready() + cockpit_patch_game(), but without a time limit: if the files are still
+   being made (first start, slow disk), the game is patched by the maker thread once they are ready.
+   If the Turn hook cannot go in, Gripline's cockpit files are removed (original cockpit). */
+void cockpit_patch_when_ready(void);
+
 /* After the folder is mounted: the game's cockpit steering angle goes up to rotation / 2 instead of
    90 degrees, so the animation turns 1:1 with the real wheel. 1 = patched. */
 int cockpit_patch_game(void);
