@@ -207,7 +207,7 @@ static void ascii_key(const wchar_t *key, char *out, unsigned capacity) {
 }
 
 /* writes the current keys of bindings [first, end) into FH2_Keyboard.ini; the rest of the file stays */
-static int save_bindings(unsigned first, unsigned end) {
+static int save_bindings_now(unsigned first, unsigned end) {
     size_t length;
     if (!ini_path[0] || !read_file_at(ini_path, &length)) {
         log_append("KEYMENU: FH2_Keyboard.ini could not be read - change not saved.\r\n");
@@ -237,8 +237,15 @@ static int save_bindings(unsigned first, unsigned end) {
     return 1;
 }
 
+static int save_bindings(unsigned first, unsigned end) { /* one writer at a time (support.h) */
+    settings_file_lock();
+    int ok = save_bindings_now(first, end);
+    settings_file_unlock();
+    return ok;
+}
+
 /* Gripline.ini next to FH2_Keyboard.ini: [Gripline] <key> = one digit (CardStyle, NoDamage) */
-static int save_gripline_digit(const char *key, int digit) {
+static int save_gripline_digit_now(const char *key, int digit) {
     static wchar_t path[PATH_CAPACITY];
     unsigned n = wcopy(path, 0, PATH_CAPACITY, ini_path), cut = 0;
     for (unsigned i = 0; i < n; ++i)
@@ -257,12 +264,19 @@ static int save_gripline_digit(const char *key, int digit) {
     return 1;
 }
 
+static int save_gripline_digit(const char *key, int digit) { /* one writer at a time (support.h) */
+    settings_file_lock();
+    int ok = save_gripline_digit_now(key, digit);
+    settings_file_unlock();
+    return ok;
+}
+
 static int save_style(int style) {
     return save_gripline_digit("CardStyle", style);
 }
 
 /* FH2_Keyboard.ini [Keyboard] MouseSteering */
-static int save_mouse(const char *key, int value) {
+static int save_mouse_now(const char *key, int value) {
     size_t length;
     char text[4];
     unsigned n = 0;
@@ -279,6 +293,13 @@ static int save_mouse(const char *key, int value) {
         return 0;
     }
     return 1;
+}
+
+static int save_mouse(const char *key, int value) { /* one writer at a time (support.h) */
+    settings_file_lock();
+    int ok = save_mouse_now(key, value);
+    settings_file_unlock();
+    return ok;
 }
 
 static int mouse_choice(void) {
@@ -300,7 +321,7 @@ static int dead_choice(void) {
 }
 
 /* Gripline.ini [Gripline] key = number */
-static int save_gripline_int(const char *key, int value) {
+static int save_gripline_int_now(const char *key, int value) {
     static wchar_t path[PATH_CAPACITY];
     unsigned n = wcopy(path, 0, PATH_CAPACITY, ini_path), cut = 0;
     for (unsigned i = 0; i < n; ++i)
@@ -319,6 +340,13 @@ static int save_gripline_int(const char *key, int value) {
     text[t] = 0;
     size_t written = ini_set_value(file_text, length, "Gripline", key, text, edit_text[0], FILE_LIMIT + 1);
     return written && written <= FILE_LIMIT && write_file_at(path, edit_text[0], written);
+}
+
+static int save_gripline_int(const char *key, int value) { /* one writer at a time (support.h) */
+    settings_file_lock();
+    int ok = save_gripline_int_now(key, value);
+    settings_file_unlock();
+    return ok;
 }
 
 static int center_choice(void) {
@@ -1180,10 +1208,6 @@ int key_menu_start_card(char *out, unsigned size) {
     utf8(line, out, size, &t);
     out[t] = 0;
     return 1;
-}
-
-int key_menu_open(void) {
-    return m.level != LEVEL_CLOSED;
 }
 
 static void set_path(void) {

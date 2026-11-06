@@ -73,25 +73,6 @@ static const signed char function_actions[WHEEL_FUNCTION_COUNT] = {
     [WHEEL_FUNCTION_COCKPIT_VIEW] = -1,
 };
 
-static const wchar_t *const names_german[WHEEL_FUNCTION_COUNT] = {
-    L"Aus",          L"Kamera wechseln", L"Blick zurück", L"Blick links",     L"Blick rechts",
-    L"Zurückspulen", L"Telemetrie",      L"Fotomodus",    L"Radio: zurück",   L"Radio: weiter",
-    L"Handbremse",   L"Kupplung",        L"Hochschalten", L"Runterschalten", L"Nitro (NitroSystem)",
-    L"Cockpit-Ansicht 2"};
-static const wchar_t *const names_english[WHEEL_FUNCTION_COUNT] = {
-    L"Off",    L"Change Camera", L"Look Back",     L"Look Left",      L"Look Right",
-    L"Rewind", L"Telemetry",     L"Photo Mode",    L"Radio: Previous", L"Radio: Next",
-    L"Handbrake", L"Clutch",     L"Shift Up",      L"Shift Down",    L"Nitro (NitroSystem)",
-    L"Cockpit View 2"};
-
-const wchar_t *wheel_function_name(unsigned char *game_image, unsigned function) {
-    if (function >= WHEEL_FUNCTION_COUNT) {
-        return L"";
-    }
-    return game_language_is_german(game_image) ? names_german[function]
-                                                     : names_english[function];
-}
-
 /* ------------------------------------------------------------------ input of the wheel layout */
 
 typedef struct {

@@ -18,7 +18,6 @@ PLUGIN_SOURCES = [
     "support.c",
     "logging.c",
     "settings.c",
-    "sha256.c",
     "plugin/gripline_plugin.c",
     "features/game_language.c",
     "features/traffic_tunables.c",

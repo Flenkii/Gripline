@@ -65,15 +65,6 @@ int rig_kind_is_choice(unsigned kind) {
     return kind == RIG_KIND_TOGGLE || kind == RIG_KIND_TRAFFIC || kind == RIG_KIND_DENSITY || kind == RIG_KIND_COLOR;
 }
 
-const char *rig_kind_collection(unsigned kind) {
-    switch (kind) {
-        case RIG_KIND_TRAFFIC: return "TrafficChoices";
-        case RIG_KIND_DENSITY: return "DensityChoices";
-        case RIG_KIND_COLOR: return "ColorChoices";
-    }
-    return "ToggleChoices";
-}
-
 unsigned rig_setting_menu_count(void) {
     return (unsigned)sizeof(order);
 }
@@ -570,7 +561,7 @@ static void log_line(const char *first, const char *second) {
 }
 
 /* Writes the current values of the dirty settings into the file. */
-static int save_file(RigFile *f, LONG64 dirty) {
+static int save_file_now(RigFile *f, LONG64 dirty) {
     if (!f->path || !f->path[0] || !dirty) {
         return 1;
     }
@@ -614,6 +605,13 @@ static int save_file(RigFile *f, LONG64 dirty) {
         log_line("MENU: saved again: ", f->name);
     }
     return 1;
+}
+
+static int save_file(RigFile *f, LONG64 dirty) { /* one writer at a time (support.h) */
+    settings_file_lock();
+    int ok = save_file_now(f, dirty);
+    settings_file_unlock();
+    return ok;
 }
 
 /* The launcher (or an editor) changed the file: take over its values, except for settings
@@ -687,9 +685,10 @@ void rig_settings_flush(void) {
     if (!started) {
         return;
     }
-    save_file(&files[0], InterlockedExchange64(&dirty_traffic, 0));
-    save_file(&files[1], InterlockedExchange64(&dirty_keyboard, 0));
-    save_file(&files[2], InterlockedExchange64(&dirty_gripline, 0));
+    /* without the shared lock: at process exit a thread that held it is gone, the lock would never come */
+    save_file_now(&files[0], InterlockedExchange64(&dirty_traffic, 0));
+    save_file_now(&files[1], InterlockedExchange64(&dirty_keyboard, 0));
+    save_file_now(&files[2], InterlockedExchange64(&dirty_gripline, 0));
 }
 
 void rig_settings_start(const wchar_t *settings_directory) {

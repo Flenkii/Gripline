@@ -408,7 +408,7 @@ static void milestone(const char *stem, double before, double after) {
     }
 }
 
-static int save_news_seen(void) {
+static int save_news_seen_now(void) {
     size_t length;
     if (!read_text(ini_path, &length)) return 0;
     static char out[FILE_LIMIT + 64];
@@ -417,6 +417,13 @@ static int save_news_seen(void) {
     put_uint(value, &n, sizeof(value), NEWS_VERSION);
     size_t written = ini_set_value(file_text, length, "Gripline", "NewsSeen", value, out, sizeof(out));
     return written && write_text(ini_path, out, written);
+}
+
+static int save_news_seen(void) { /* one writer at a time (support.h) */
+    settings_file_lock();
+    int ok = save_news_seen_now();
+    settings_file_unlock();
+    return ok;
 }
 
 static void show_news(void) {

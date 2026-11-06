@@ -229,10 +229,6 @@ int notify_style(void) {
     return (int)card_style;
 }
 
-int notify_color(void) {
-    return (int)color;
-}
-
 void notify_set_enabled(int on) {
     InterlockedExchange(&enabled, on ? 1 : 0);
 }
@@ -289,10 +285,6 @@ void notify_panel_clear_owned(unsigned owner) {
     int mine = owner && panel_id == owner && panel_count != 0;
     ReleaseSRWLockShared(&lock);
     if (mine) notify_panel_show(NULL, NULL, 0, 0);
-}
-
-int notify_panel_visible(void) {
-    return panel_count != 0;
 }
 
 /* ------------------------------------------------------------------ GDI card bitmap */

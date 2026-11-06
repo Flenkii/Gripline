@@ -51,7 +51,6 @@ void notify_set_color(int index);
 enum { NOTIFY_STYLE_CLASSIC, NOTIFY_STYLE_ENHANCED, NOTIFY_STYLE_OVERDRIVE, NOTIFY_STYLE_COUNT };
 void notify_set_style(int style);
 int notify_style(void);
-int notify_color(void);
 
 /* Key list panel (keyboard_pad.c, key Keybinds): a tall card at the right edge of the picture,
    one row per key, shown until it is switched off; cards move to its left meanwhile. It is only
@@ -79,6 +78,5 @@ void notify_panel_show(const wchar_t *title, const NotifyPanelRow *rows, unsigne
 /* panel that gives way to the others (telemetry): see notify.c */
 unsigned notify_panel_show_owned(const wchar_t *title, const NotifyPanelRow *rows, unsigned count, unsigned owner);
 void notify_panel_clear_owned(unsigned owner);
-int notify_panel_visible(void);
 
 #endif

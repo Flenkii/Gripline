@@ -28,6 +28,16 @@ size_t text_length(const char *text) {
     return length;
 }
 
+static SRWLOCK settings_files = SRWLOCK_INIT;
+
+void settings_file_lock(void) {
+    AcquireSRWLockExclusive(&settings_files);
+}
+
+void settings_file_unlock(void) {
+    ReleaseSRWLockExclusive(&settings_files);
+}
+
 void status_set(const char *message) {
     size_t length = text_length(message);
     if (length >= sizeof(status_text)) {
@@ -76,17 +86,6 @@ const char *text_find(const char *text, size_t length, const char *needle) {
         }
     }
     return NULL;
-}
-
-const char *text_find_unique(const char *text, size_t length, const char *needle) {
-    if (!*needle) {
-        return NULL;
-    }
-    const char *found = text_find(text, length, needle);
-    if (!found || text_find(found + 1, length - (size_t)(found + 1 - text), needle)) {
-        return NULL;
-    }
-    return found;
 }
 
 static int memory_read_fault(EXCEPTION_POINTERS *exception) {

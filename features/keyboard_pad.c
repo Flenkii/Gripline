@@ -1493,10 +1493,6 @@ int keyboard_key_down(unsigned char vk) {
     return vk && user32_ready() && game_has_focus() && (async_key(vk) & 0x8000) != 0;
 }
 
-int keyboard_game_focused(void) {
-    return user32_ready() && game_has_focus();
-}
-
 void keyboard_block_input(int blocked) {
     if (!blocked && input_blocked && user32_ready()) {
         /* keys still held when the menu closes (Esc, Enter, the menu key) do nothing in the game */
@@ -1504,10 +1500,6 @@ void keyboard_block_input(int blocked) {
             if (async_key((int)vk) & 0x8000) swallowed[vk] = 1;
     }
     InterlockedExchange(&input_blocked, blocked ? 1 : 0);
-}
-
-int keyboard_input_blocked(void) {
-    return (int)input_blocked;
 }
 
 /* the key list (F5) was on: shown again with the current keys; off: the panel is cleared */

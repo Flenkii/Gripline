@@ -68,10 +68,8 @@ void keyboard_binding_set(unsigned index, const unsigned char vk[4]); /* at once
 void keyboard_keys_text(const unsigned char vk[4], int german, wchar_t *out, unsigned capacity);
 const char *keyboard_key_ini_name(unsigned char vk, char buffer[8]);
 int keyboard_key_down(unsigned char vk); /* held and the game window has the focus */
-int keyboard_game_focused(void);
 /* 1 = the game, noclip and freecam get no key (menu open); 0 = keys held now stay ignored until released */
 void keyboard_block_input(int blocked);
-int keyboard_input_blocked(void);
 void keyboard_key_list_restore(void); /* after the menu: key list (F5) again if it was on, else nothing */
 unsigned char *keyboard_game_image(void);
 size_t keyboard_start_keys(char *out, size_t capacity); /* start card line */
