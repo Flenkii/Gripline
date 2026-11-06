@@ -57,7 +57,8 @@ static float dir[2] = {0, 1}; /* heading (x, z) */
 static float mirror = 1.0f;  /* the game's right row = mirror * (z, 0, -x) of the heading */
 static float pitch, pitch_sin, pitch_cos = 1.0f;
 static float fall;           /* vertical speed, m/s (+ = up) */
-static int grounded, bob_on;
+static int grounded, bob_on, no_floor, recovered_logged;
+static float last_ground;
 static float bob_phase;
 static float car_place[3], car_right[3], car_forward[3];
 static LARGE_INTEGER last_step;
@@ -82,6 +83,11 @@ static int world_tried; /* tests: no lookup */
 #define WALK_PITCH_MAX 1.4f
 #define WALK_MAX_DISTANCE 300.0f /* from the car: the game streams collision around the car (guess) */
 #define WALK_FALL_LIMIT 150.0f   /* below the car: fell through the world, back to the car */
+#define WALK_STEP 0.4f     /* steps and curbs up to 40 cm */
+#define WALK_SNAP 0.3f     /* stays on the ground going down up to this per step */
+#define WALK_HOVER 0.01f   /* the sphere rests this far above the floor */
+#define WALK_RECOVER 1.5f  /* sunk into the floor: looked for again from this far above */
+#define WALK_NO_FLOOR 4.0f /* metres of falling without any floor: no collision loaded there */
 
 int walking_ready(void) {
     return ready;
@@ -102,6 +108,10 @@ int walking_speed_kmh(void) {
 
 int walking_has_collision(void) {
     return collision_ok != 0;
+}
+
+int walking_no_floor(void) {
+    return no_floor;
 }
 
 void walking_set_active(int on) {
@@ -166,6 +176,23 @@ static void *find_world(void) {
     return NULL;
 }
 
+/* the RTTI class name of a game object (diagnostics in Gripline.log) */
+static void log_class(const char *label, void *object) {
+    void *vtable, *locator;
+    unsigned type = 0;
+    char line[160];
+    size_t n = 0;
+    if (!object || !memory_read_pointer(object, &vtable) || !in_game(vtable) ||
+        !memory_read_pointer((unsigned char *)vtable - 8, &locator) || !in_game(locator) ||
+        !memory_read((unsigned char *)locator + 0xc, &type, 4) || type >= GAME_IMAGE_SIZE)
+        return;
+    while (label[n] && n < 60) line[n] = label[n], ++n;
+    const char *name = (const char *)game + type + 0x10;
+    for (unsigned i = 0; i < 90 && name[i] >= 0x20 && name[i] < 0x7f; ++i) line[n++] = name[i];
+    line[n++] = '\r', line[n++] = '\n', line[n] = 0;
+    log_append(line);
+}
+
 static void make_params(void) {
     memory_copy(params_free, game + RVA_SLIDE_PARAMS, 0x20); /* iterations, radius, skin ... as the game has them */
     params_free[0x1c] = params_free[0x1d] = params_free[0x1e] = 0; /* no photo mode distance / height limits */
@@ -222,7 +249,7 @@ static void spawn(void) {
     if (length > 0.1f) dir[0] = car_forward[0] / length, dir[1] = car_forward[2] / length;
     mirror = car_right[0] * dir[1] - car_right[2] * dir[0] >= 0.0f ? 1.0f : -1.0f;
     pitch = 0.0f, pitch_sin = 0.0f, pitch_cos = 1.0f;
-    fall = 0.0f, grounded = 0;
+    fall = 0.0f, grounded = 0, no_floor = 0;
     if (!world && !world_tried) { /* again at every getting out until found */
         make_params();
         __try {
@@ -232,6 +259,7 @@ static void spawn(void) {
         }
         log_append_module(world ? "WALKING: collision world found " : "WALKING: no collision world - walking without collision ",
                           world);
+        log_class("WALKING: collision world class ", world);
     }
     InterlockedExchange(&collision_ok, world != NULL);
     /* out at the left of the car (the driver's door of most cars), from inside the car outwards */
@@ -240,6 +268,7 @@ static void spawn(void) {
     float from[3] = {car_place[0], car_place[1] + 1.0f, car_place[2]};
     float to[3] = {car_place[0] + lx * 2.0f, car_place[1] + 1.0f, car_place[2] + lz * 2.0f};
     slide(from, to, 0, centre);
+    last_ground = centre[1];
     stepped = 0;
 }
 
@@ -258,29 +287,66 @@ static void step(float dt) {
     float mx = (dir[0] * in.ahead + rx * in.side) * speed * dt, mz = (dir[1] * in.ahead + rz * in.side) * speed * dt;
     float before[3] = {centre[0], centre[1], centre[2]};
 
-    /* along the ground: slides along walls */
+    /* along the ground: first up by a step (curbs, stairs), then forward sliding along walls; the
+       sphere never grazes the floor it stands on */
+    float lifted = 0.0f;
     if (mx != 0.0f || mz != 0.0f) {
-        float to[3] = {centre[0] + mx, centre[1], centre[2] + mz};
-        float dx = to[0] - car_place[0], dz = to[2] - car_place[2];
-        if (dx * dx + dz * dz <= WALK_MAX_DISTANCE * WALK_MAX_DISTANCE) slide(centre, to, 0, centre);
+        float dx = centre[0] + mx - car_place[0], dz = centre[2] + mz - car_place[2];
+        if (dx * dx + dz * dz <= WALK_MAX_DISTANCE * WALK_MAX_DISTANCE) {
+            float raised[3] = {centre[0], centre[1], centre[2]};
+            if (world && grounded) {
+                float up[3] = {centre[0], centre[1] + WALK_STEP, centre[2]};
+                slide(centre, up, 0, raised);
+                lifted = raised[1] - centre[1];
+            }
+            float to[3] = {raised[0] + mx, raised[1], raised[2] + mz};
+            slide(raised, to, 0, centre);
+        }
     }
     /* gravity and jumping: stops on a floor */
-    if (in.jump && grounded) fall = WALK_JUMP, grounded = 0;
+    if (in.jump && grounded) fall = WALK_JUMP, grounded = 0, lifted = 0.0f;
     fall -= WALK_GRAVITY * dt;
     if (fall < -50.0f) fall = -50.0f;
     if (world) {
-        float dy = fall * dt;
-        if (grounded && dy > -0.25f) dy = -0.25f; /* stay on the ground walking down a slope or a step */
+        float dy = fall * dt - lifted;
+        if (grounded && dy > -(lifted + WALK_SNAP)) dy = -(lifted + WALK_SNAP); /* down a slope or a step */
         float to[3] = {centre[0], centre[1] + dy, centre[2]}, end[3];
         int hit = slide(centre, to, 1, end);
+        if (!hit && dy < 0.0f) {
+            /* nothing below: maybe the sphere sank into the floor - look again from above the head */
+            float top[3] = {centre[0], centre[1] + WALK_RECOVER, centre[2]}, again[3];
+            if (slide(top, to, 1, again) && again[1] > to[1]) {
+                hit = 1;
+                end[0] = again[0], end[1] = again[1], end[2] = again[2];
+                if (!recovered_logged) {
+                    recovered_logged = 1;
+                    log_append("WALKING: the floor was found again from above (sphere had sunk in).\r\n");
+                }
+            }
+        }
         if (hit && dy < 0.0f) {
             grounded = 1;
             fall = 0.0f;
+            end[1] += WALK_HOVER;
+            last_ground = end[1];
+            no_floor = 0;
+        } else if (no_floor && end[1] < last_ground) {
+            end[1] = last_ground, fall = 0.0f, grounded = 1; /* still no floor here: stay level */
         } else {
             grounded = 0;
             if (hit) fall = 0.0f; /* the head hit a ceiling */
         }
         centre[0] = end[0], centre[1] = end[1], centre[2] = end[2];
+        if (!grounded && fall < 0.0f && centre[1] < last_ground - WALK_NO_FLOOR) {
+            /* fell several metres without any floor: the game has no collision loaded here. Walk on at
+               the last floor height instead of falling through the world. */
+            centre[1] = last_ground, fall = 0.0f, grounded = 1;
+            if (!no_floor) {
+                float cx = centre[0] - car_place[0], cz = centre[2] - car_place[2];
+                log_append_value("WALKING: no floor collision here, metres from the car: ", (int)root(cx * cx + cz * cz));
+            }
+            no_floor = 1;
+        }
     } else {
         /* no collision world: walk at the height of the car, no gravity */
         centre[1] = car_place[1] + WALK_RADIUS, fall = 0.0f, grounded = 1;

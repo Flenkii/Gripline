@@ -42,6 +42,8 @@ float walking_car_distance(void);
 /* Walking speed in km/h (smoothed) and 1 if the walker has collision (0 = no collision world). */
 int walking_speed_kmh(void);
 int walking_has_collision(void);
+/* 1 while the walker is where the game has no floor collision loaded (walks on flat, no falling) */
+int walking_no_floor(void);
 
 /* Input of one step (noclip.c fills it from the keyboard and the controllers). */
 typedef struct {

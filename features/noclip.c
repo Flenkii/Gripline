@@ -700,6 +700,7 @@ static void walk_info(ULONGLONG now) {
         put_text(text, &n, imperial ? " ft" : " m");
     }
     if (!walking_has_collision()) put_text(text, &n, de ? " (ohne Kollision)" : " (no collision)");
+    else if (walking_no_floor()) put_text(text, &n, de ? " (hier kein Boden geladen)" : " (no floor loaded here)");
     if (notify_kind_on(NOTIFY_KIND_LIVE)) notify_show_live(text, INFO_TAG, 1000);
 }
 
