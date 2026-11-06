@@ -427,7 +427,7 @@ static void show_news(void) {
                        NOTIFY_COLOR_GREEN, badge, 1);
     notify_show_tinted(de ? "Live-Telemetrie\nViertelmeile, Bremsweg & mehr (F8)" : "Live telemetry\nQuarter mile, braking & more (F8)",
                        NOTIFY_COLOR_GREEN, badge, 1);
-    notify_show_tinted(de ? "Das Gripline-Menü\nF8: Tasten, Welt, Karten-Design" : "The Gripline menu\nF8: keys, world, card design",
+    notify_show_tinted(de ? "Das Gripline-Menü\nF8: Tasten, Kein Schaden, Welt" : "The Gripline menu\nF8: keys, no damage, world",
                        NOTIFY_COLOR_GREEN, badge, 1);
     if (save_news_seen()) log_append("LOGBOOK: what's-new cards shown, NewsSeen saved.\r\n");
     else log_append("LOGBOOK: what's-new cards shown, but Gripline.ini could not be written.\r\n");

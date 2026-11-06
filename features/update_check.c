@@ -42,13 +42,17 @@ static void put_number(char *out, size_t *n, size_t cap, unsigned v) {
     out[*n] = 0;
 }
 
-/* "V7" or "V7.1" */
-static void put_version(char *out, size_t *n, size_t cap, unsigned major, unsigned minor) {
+/* "V7", "V7.1" or "V7.0.1" */
+static void put_version(char *out, size_t *n, size_t cap, unsigned major, unsigned minor, unsigned patch) {
     put(out, n, cap, "V");
     put_number(out, n, cap, major);
-    if (minor) {
+    if (minor || patch) {
         put(out, n, cap, ".");
         put_number(out, n, cap, minor);
+    }
+    if (patch) {
+        put(out, n, cap, ".");
+        put_number(out, n, cap, patch);
     }
 }
 
@@ -73,44 +77,47 @@ static size_t json_string(const char *json, size_t length, const char *key, char
     return p < end && *p == '"' ? n : 0;
 }
 
-/* the number after marker, e.g. "fork6.4" -> 6, 4 (minor 0 when missing) */
-static int version_after(const char *text, const char *marker, unsigned *major, unsigned *minor) {
+/* the numbers after marker, e.g. "fork6.4.1" -> 6, 4, 1 (minor/patch 0 when missing) */
+static int version_after(const char *text, const char *marker, unsigned *major, unsigned *minor, unsigned *patch) {
     const char *p = find(text, text_length(text), marker);
     if (!p) return 0;
     p += text_length(marker);
     if (*p < '0' || *p > '9') return 0;
-    unsigned a = 0, b = 0;
-    while (*p >= '0' && *p <= '9' && a < 100000) a = a * 10 + (unsigned)(*p++ - '0');
-    if (*p == '.' && p[1] >= '0' && p[1] <= '9') {
+    unsigned part[3] = {0, 0, 0};
+    for (unsigned i = 0; i < 3; ++i) {
+        while (*p >= '0' && *p <= '9' && part[i] < 100000) part[i] = part[i] * 10 + (unsigned)(*p++ - '0');
+        if (i == 2 || *p != '.' || p[1] < '0' || p[1] > '9') break;
         ++p;
-        while (*p >= '0' && *p <= '9' && b < 100000) b = b * 10 + (unsigned)(*p++ - '0');
     }
-    *major = a, *minor = b;
+    *major = part[0], *minor = part[1], *patch = part[2];
     return 1;
 }
 
 /* the card for GitHub's answer: 1 = newer release (card in out), 0 = up to date or not understood */
 static int make_card(const char *json, size_t length, int de, char *out, size_t cap) {
     char tag[128], name[256];
-    unsigned major = 0, minor = 0;
+    unsigned major = 0, minor = 0, patch = 0;
     out[0] = 0;
     int have_tag = json_string(json, length, "\"tag_name\"", tag, sizeof(tag)) != 0;
     int have_name = json_string(json, length, "\"name\"", name, sizeof(name)) != 0;
     /* tags are v0.2.98-fork6, v0.2.98-fork6.4, ...; the release title "Gripline V6.4 - ..." as fallback */
-    if (!(have_tag && version_after(tag, "fork", &major, &minor)) &&
-        !(have_name && version_after(name, "Gripline V", &major, &minor))) {
+    if (!(have_tag && version_after(tag, "fork", &major, &minor, &patch)) &&
+        !(have_name && version_after(name, "Gripline V", &major, &minor, &patch))) {
         log_append("UPDATE: newest release not understood - no card.\r\n");
         return 0;
     }
-    if (major < GRIPLINE_RELEASE_MAJOR || (major == GRIPLINE_RELEASE_MAJOR && minor <= GRIPLINE_RELEASE_MINOR)) {
+    /* V6.4.1 was a real release: the third number counts too (V7.0.1 is newer than V7) */
+    if (major != GRIPLINE_RELEASE_MAJOR ? major < GRIPLINE_RELEASE_MAJOR
+        : minor != GRIPLINE_RELEASE_MINOR ? minor < GRIPLINE_RELEASE_MINOR
+                                          : patch <= GRIPLINE_RELEASE_PATCH) {
         log_append("UPDATE: this Gripline is the newest version.\r\n");
         return 0;
     }
     size_t n = 0;
     put(out, &n, cap, "Gripline ");
-    put_version(out, &n, cap, major, minor);
+    put_version(out, &n, cap, major, minor, patch);
     put(out, &n, cap, de ? " ist draußen\nBitte nutzen, " : " is out\nPlease use it, ");
-    put_version(out, &n, cap, GRIPLINE_RELEASE_MAJOR, GRIPLINE_RELEASE_MINOR);
+    put_version(out, &n, cap, GRIPLINE_RELEASE_MAJOR, GRIPLINE_RELEASE_MINOR, GRIPLINE_RELEASE_PATCH);
     put(out, &n, cap, de ? " ist veraltet" : " is outdated");
     log_append("UPDATE: ");
     log_append(out);

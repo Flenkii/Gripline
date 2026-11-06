@@ -19,5 +19,7 @@ extern const size_t setting_count;
 void settings_defaults(ModOptions *options);
 int settings_read(const wchar_t *directory, ModOptions *options);
 int settings_value(const ModOptions *options, const SettingDefinition *definition);
+/* lines of Gripline.ini the last settings_read skipped (bad key or value); the rest still loaded */
+unsigned settings_ignored_lines(void);
 
 #endif

@@ -10,6 +10,7 @@
 /* this build as a release number: the update notice compares it with the newest GitHub release */
 #define GRIPLINE_RELEASE_MAJOR 7
 #define GRIPLINE_RELEASE_MINOR 0
+#define GRIPLINE_RELEASE_PATCH 0 /* third number of the release tag (fork6.4.1), update_check.c */
 #define MOD_INI_NAME L"Gripline.ini"
 #define MOD_LOG_NAME L"Gripline.log"
 #define GAME_EXE_NAME L"forza_durango_release_final.exe"

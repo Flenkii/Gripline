@@ -131,8 +131,36 @@ static int parse_value(const SettingDefinition *definition, const char *text, in
     return 0;
 }
 
+static unsigned ignored_lines;
+
+unsigned settings_ignored_lines(void) {
+    return ignored_lines;
+}
+
+/* One bad line no longer drops the whole file (V7): it is skipped and named in Gripline.log,
+   the other settings still load. "IGNORED: Gripline.ini line 4 (CardColor)" */
+static void ignore_line(unsigned number, const char *what) {
+    char note[128];
+    size_t n = 0;
+    const char *head = ignored_lines ? ", line " : "IGNORED in Gripline.ini (other settings loaded): line ";
+    for (const char *p = head; *p; ++p) note[n++] = *p;
+    char digits[12];
+    unsigned d = 0;
+    do digits[d++] = (char)('0' + number % 10); while ((number /= 10) && d < sizeof(digits));
+    while (d) note[n++] = digits[--d];
+    note[n++] = ' ', note[n++] = '(';
+    for (const char *p = what; *p && n + 3 < sizeof(note); ++p) note[n++] = *p;
+    note[n++] = ')';
+    note[n] = 0;
+    ++ignored_lines;
+    if (ignored_lines <= 8) status_append(note);
+}
+
 static int parse_ini(char *text, ModOptions *options) {
     char section[32] = {0};
+    unsigned line_number = 0;
+    int section_known = 1;
+    ignored_lines = 0;
     if ((unsigned char)text[0] == 0xef && (unsigned char)text[1] == 0xbb &&
         (unsigned char)text[2] == 0xbf) {
         text += 3;
@@ -140,6 +168,7 @@ static int parse_ini(char *text, ModOptions *options) {
 
     while (*text) {
         char *line = text;
+        ++line_number;
         while (*text && *text != '\n') {
             ++text;
         }
@@ -163,15 +192,20 @@ static int parse_ini(char *text, ModOptions *options) {
                 ++closing;
             }
             if (*closing != ']' || *trim_whitespace(closing + 1)) {
-                goto invalid;
+                ignore_line(line_number, "section");
+                section_known = 0;
+                continue;
             }
             *closing = 0;
             char *name = trim_whitespace(line + 1);
             size_t length = text_length(name);
             if (length >= sizeof(section) || !known_section(name)) {
-                goto invalid;
+                ignore_line(line_number, "unknown section");
+                section_known = 0; /* its keys are skipped silently */
+                continue;
             }
             memory_copy(section, name, length + 1);
+            section_known = 1;
             continue;
         }
 
@@ -179,8 +213,12 @@ static int parse_ini(char *text, ModOptions *options) {
         while (*separator && *separator != '=') {
             ++separator;
         }
+        if (!section_known) {
+            continue;
+        }
         if (!*separator) {
-            goto invalid;
+            ignore_line(line_number, "no =");
+            continue;
         }
         *separator = 0;
         char *key = trim_whitespace(line);
@@ -196,17 +234,13 @@ static int parse_ini(char *text, ModOptions *options) {
         const SettingDefinition *definition = find_setting(section, key);
         int parsed;
         if (!definition || !parse_value(definition, value, &parsed)) {
-            goto invalid;
+            ignore_line(line_number, *key ? key : "?");
+            continue;
         }
         int *field = (int *)((unsigned char *)options + definition->field_offset);
         *field = parsed;
     }
-    return 1;
-
-invalid:
-    status_set("REFUSED: invalid INI section, option, or value. See the supplied "
-               "Gripline.ini.");
-    return 0;
+    return ignored_lines == 0;
 }
 
 int settings_read(const wchar_t *directory, ModOptions *options) {

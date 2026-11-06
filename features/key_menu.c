@@ -489,7 +489,7 @@ static void build_page(wchar_t *title) {
                     tr(damage_short_german[no_damage_mode()], damage_short_english[no_damage_mode()]), 0, TOP_DAMAGE);
             row_add(tr(L"Karten-Design", L"Card design"), style_names[notify_style()], 0, TOP_STYLE);
             row_add(tr(L"Problem-Bericht erstellen", L"Create problem report"), L"ZIP", 0, TOP_REPORT);
-            row_add(tr(L"Alle auf Standard", L"Reset all to default"), L"›", 0, TOP_RESET);
+            row_add(tr(L"Alle Tasten auf Standard", L"Reset all keys to default"), L"›", 0, TOP_RESET); /* keys only, not the other settings */
             hint(1);
             break;
         case LEVEL_LIST:

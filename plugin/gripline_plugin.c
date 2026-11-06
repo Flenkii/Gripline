@@ -39,6 +39,7 @@
 #include "features/no_damage.h"
 #include "features/version_check.h"
 #include "features/update_check.h"
+#include "features/ini_migrate.h"
 
 void keyboard_pad_game_start(unsigned char *game_image, const wchar_t *settings_directory);
 void report_init(const wchar_t *settings_directory);
@@ -470,6 +471,17 @@ static int load_guard_card(char *out, unsigned size) {
     return 0;
 }
 
+/* Gripline.ini had lines that were skipped (settings.c) */
+static int ini_lines_card(char *out, unsigned size) {
+    (void)out;
+    (void)size;
+    int de = game && game_language_is_german(game);
+    notify_show_tinted(de ? "Gripline.ini: Zeile übersprungen\nRest geladen, Details in Gripline.log"
+                          : "Gripline.ini: line skipped\nRest loaded, details in Gripline.log",
+                       NOTIFY_COLOR_ORANGE, de ? "HINWEIS" : "NOTE", 1);
+    return 0;
+}
+
 static void start_features(void) {
     ModOptions options;
     settings_defaults(&options);
@@ -478,7 +490,12 @@ static void start_features(void) {
     log_start(directory, &options);
     log_set_directory(directory);
     log_append("GRIPLINE: plugin build - FH2 Mod Platform mod next to the official Extra Options.\r\n");
-    if (!read) {
+    if (!read && settings_ignored_lines()) {
+        log_append("GRIPLINE: Gripline.ini has lines that were not understood; they were skipped, all other "
+                   "settings are used (see the IGNORED line at the top).\r\n");
+        platform_log("Gripline.ini: some lines skipped, the rest loaded (see Gripline.log)");
+        notify_show_deferred_call(ini_lines_card);
+    } else if (!read) {
         log_append("GRIPLINE: Gripline.ini could not be read; defaults are used.\r\n");
         platform_log("Gripline.ini could not be read - defaults used (see Gripline.log)");
     }
@@ -489,6 +506,7 @@ static void start_features(void) {
     }
     traffic_tunables_start(game, &options);
     keyboard_pad_game_start(game, directory);
+    ini_migrate_log(); /* notes of the fork1-fork3 file migration (were never written to the log) */
     nitro_link_start(game);
     cockpit_view_start(game);
     no_damage_bind(game);
@@ -547,8 +565,9 @@ FH2MOD_EXPORT int fh2mod_init(const FH2ModApi *platform) {
     info.github_repo = "Flenkii/Gripline";
     info.platform_version = "2.7.4";
     info.check_updates = 0;
-    info.description = "Keyboard driving, 1:1 cockpit wheel, cockpit view 2, more traffic, nitro keys and noclip for "
-                       "Forza Horizon 2. Runs next to Extra Options and Azimuth's wheel. Settings: Pause > Settings > MODS.";
+    info.description = "Keyboard driving, 1:1 cockpit wheel, cockpit view 2, noclip, freecam, live telemetry and no damage "
+                       "for Forza Horizon 2. Gripline menu: F8. Runs next to Extra Options and Azimuth's wheel. "
+                       "Settings: Pause > Settings > MODS.";
     mod = api->register_mod(&info);
     if (!mod) return 1;
     if (!find_folders()) {
