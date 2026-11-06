@@ -37,6 +37,9 @@ int notify_install_late(void); /* after the game made its swap chain (plugin bui
 /* On/off (menu, INI). Off hides cards at once; messages are still logged. */
 void notify_set_enabled(int enabled);
 int notify_enabled(void);
+/* V7 walking: darkens the whole game picture, 0 = off .. 1000 = black, reached smoothly in ms
+   (the fade when getting out and in). Shown even with cards switched off. Safe from any thread. */
+void notify_fade_black(int permille, unsigned ms);
 
 /* Card colour (menu, INI [Gripline] CardColor): bar, logo and title. Safe from any thread. */
 enum {

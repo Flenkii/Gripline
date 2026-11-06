@@ -43,6 +43,10 @@ static Card cards[MAX_CARDS]; /* [0] = newest */
 static unsigned card_count, next_id = 1;
 static volatile LONG cards_changed;
 static volatile LONG enabled = 1, broken;
+/* V7 walking: the whole picture darkened, 0..1000, fading from black_from to black_to (under lock) */
+static int black_from, black_to;
+static ULONGLONG black_start;
+static unsigned black_ms;
 
 /* card colours (NOTIFY_COLOR_*): bar, and the light tone of the logo and the GRIPLINE title; R, G, B */
 static unsigned char palette[NOTIFY_COLOR_COUNT][2][3] = { /* [RAINBOW] is filled by rainbow_tick */
@@ -293,6 +297,23 @@ void notify_set_enabled(int on) {
 
 int notify_enabled(void) {
     return (int)enabled;
+}
+
+static int black_at(ULONGLONG now) { /* under lock */
+    if (!black_ms || now >= black_start + black_ms) return black_to;
+    return black_from + (int)((long long)(black_to - black_from) * (long long)(now - black_start) / (long long)black_ms);
+}
+
+void notify_fade_black(int permille, unsigned ms) {
+    if (permille < 0) permille = 0;
+    if (permille > 1000) permille = 1000;
+    ULONGLONG now = GetTickCount64();
+    AcquireSRWLockExclusive(&lock);
+    black_from = black_at(now);
+    black_to = permille;
+    black_start = now;
+    black_ms = ms;
+    ReleaseSRWLockExclusive(&lock);
 }
 
 void notify_panel_set(const wchar_t *title, const NotifyPanelRow *rows, unsigned count) {
@@ -2587,10 +2608,12 @@ static DWORD WINAPI overlay_thread(void *unused) {
             memory_copy(ttitle, tele_title, sizeof(ttitle));
             memory_copy(trows, tele_rows, sizeof(trows[0]) * tele_n);
         }
+        int dark = black_at(now);
         ReleaseSRWLockExclusive(&lock);
         HWND top = win.GetForegroundWindow();
         int focused = top && (top == game_window || win.GetAncestor(game_window, GA_ROOT) == top);
-        if ((!count && !panel && !tele_n) || !enabled || !focused || win.IsIconic(game_window)) {
+        if (!enabled) count = 0, panel = 0, tele_n = 0;
+        if ((!count && !panel && !tele_n && !dark) || !focused /* black shows even with cards off */ || win.IsIconic(game_window)) {
             if (visible) win.ShowWindow(window, SW_HIDE);
             visible = 0;
             continue;
@@ -2613,7 +2636,7 @@ static DWORD WINAPI overlay_thread(void *unused) {
         }
         int want_w = l.margin + 2 * l.width + l.gap + (int)(40.0f * l.scale) + 4;
         if (tele && (tele_pos >= NOTIFY_TELE_LEFT_TOP || pl.width + l.margin + 4 > want_w)) want_w = screen_w;
-        if (want_w > screen_w) want_w = screen_w;
+        if (dark || want_w > screen_w) want_w = screen_w;
         if (want_w != frame_w || screen_h != frame_h) {
             if (bitmap) gdi.DeleteObject(bitmap);
             BITMAPINFO info;
@@ -2659,6 +2682,12 @@ static DWORD WINAPI overlay_thread(void *unused) {
             for (unsigned i = 0; i < count; ++i) drawn_ids[i] = list[i].id;
         }
         memset(frame, 0, frame_bytes);
+        if (dark) { /* premultiplied black over the whole picture */
+            unsigned a = (unsigned)dark * 255u / 1000u;
+            if (a > 255u) a = 255u;
+            unsigned pixel = a << 24, *p = (unsigned *)frame;
+            for (size_t i = 0, n = (size_t)frame_w * frame_h; i < n; ++i) p[i] = pixel;
+        }
         int shift = 0;
         if (tele) {
             int ph = panel_pixels(&pl, tele_n), tx, ty;

@@ -477,13 +477,68 @@ static void set_on(LONG value) {
     walking_set_active(value == MODE_WALK);
 }
 
+/* V7 walking, getting out and in (Marvin 06.11.2026): fade to black, door opens, 1 s dark (the
+   switch happens at its start, so the camera is settled), door shuts, fade back to the picture. */
+#define FADE_DOWN_MS 300
+#define FADE_HOLD_MS 1000
+#define FADE_UP_MS 450
+static int fade_stage; /* 0 none, 1 getting dark, 2 dark, 3 getting light (watch thread only) */
+static LONG fade_to;   /* MODE_WALK = get out, 0 = get in */
+static ULONGLONG fade_at;
+
+static void walk_out_card(void) {
+    card("Ausgestiegen - Walking an\nWASD/linker Stick laufen, Pfeile/rechter Stick schauen, Shift/RT rennen, "
+         "Leertaste/A springen, F/Y einsteigen",
+         "Out of the car - walking on\nWASD/left stick walk, arrows/right stick look, Shift/RT run, Space/A jump, "
+         "F/Y get in");
+}
+
+static void fade_begin(LONG to) {
+    fade_to = to;
+    fade_stage = 1;
+    fade_at = GetTickCount64();
+    notify_fade_black(1000, FADE_DOWN_MS);
+}
+
+static void fade_stop(void) { /* online or a failed switch: the picture back at once */
+    if (!fade_stage) return;
+    fade_stage = 0;
+    notify_fade_black(0, 200);
+}
+
+static void fade_tick(ULONGLONG now) {
+    if (fade_stage == 1 && now >= fade_at + FADE_DOWN_MS) {
+        walking_door_sound(0);
+        set_on(fade_to);
+        if (on != fade_to) { /* not switched (see the log) */
+            fade_stop();
+            return;
+        }
+        if (fade_to == MODE_WALK) {
+            info_from = now + FADE_HOLD_MS + INFO_DELAY_MS;
+            log_append("NOCLIP: walking on (out of the car)\r\n");
+        } else {
+            log_append("NOCLIP: walking off - back in the car.\r\n");
+        }
+        fade_stage = 2;
+        fade_at = now;
+    } else if (fade_stage == 2 && now >= fade_at + FADE_HOLD_MS) {
+        walking_door_sound(1);
+        notify_fade_black(0, FADE_UP_MS);
+        if (fade_to == MODE_WALK) walk_out_card();
+        else card("Eingestiegen", "Back in the car");
+        fade_stage = 3;
+        fade_at = now;
+    } else if (fade_stage == 3 && now >= fade_at + FADE_UP_MS) {
+        fade_stage = 0;
+    }
+}
+
 /* walking: the walk key / controller Y near the car gets back in */
 static void walk_key(void) {
     float distance = walking_car_distance();
     if (distance >= 0.0f && distance <= WALK_ENTER_DISTANCE) {
-        set_on(0);
-        log_append("NOCLIP: walking off - back in the car.\r\n");
-        card("Eingestiegen", "Back in the car");
+        fade_begin(0); /* in the car while the picture is black */
         return;
     }
     char de[96], en[96];
@@ -520,6 +575,7 @@ static void handle_toggle(void) {
         }
         online_known = 1;
     }
+    if (online) fade_stop();
     if (on && online) { /* the first check already online */
         set_on(0);
         log_append("NOCLIP: online session - noclip / freecam off.\r\n");
@@ -542,6 +598,10 @@ static void handle_toggle(void) {
     if (request == MODE_NOCLIP) pressed = 1;
     if (request == MODE_FREECAM) free_pressed = 1;
     if (request == MODE_WALK) walk_pressed = 1;
+    if (fade_stage) { /* getting out / in: keys wait until the picture is back */
+        fade_tick(now);
+        return;
+    }
     if (!pressed && !free_pressed && !walk_pressed) return;
     LONG mode = pressed ? MODE_NOCLIP : free_pressed ? MODE_FREECAM : MODE_WALK;
     if (on == MODE_WALK && mode == MODE_WALK) {
@@ -584,16 +644,14 @@ static void handle_toggle(void) {
                    NOTIFY_COLOR_RED);
         return;
     }
+    if (mode == MODE_WALK) { /* out of the car while the picture is black */
+        fade_begin(MODE_WALK);
+        return;
+    }
     set_on(mode);
     if (!on) return;
     info_from = GetTickCount64() + INFO_DELAY_MS;
-    if (mode == MODE_WALK) {
-        log_append("NOCLIP: walking on (out of the car)\r\n");
-        card("Ausgestiegen - Walking an\nWASD/linker Stick laufen, Pfeile/rechter Stick schauen, Shift/RT rennen, "
-             "Leertaste/A springen, F/Y einsteigen",
-             "Out of the car - walking on\nWASD/left stick walk, arrows/right stick look, Shift/RT run, Space/A jump, "
-             "F/Y get in");
-    } else if (mode == MODE_FREECAM) {
+    if (mode == MODE_FREECAM) {
         log_append("NOCLIP: freecam on\r\n");
         card("Freecam an\nPfeile/rechter Stick schauen, WASD/linker Stick fliegen, Leertaste/Strg/RT/LT hoch/runter",
              "Freecam on\nArrows/right stick look, WASD/left stick fly, Space/Ctrl/RT/LT up/down");

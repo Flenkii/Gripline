@@ -57,4 +57,9 @@ typedef struct {
 } WalkInput;
 void noclip_walk_input(WalkInput *input);
 
+/* Door sounds of the fade when getting out / in (Marvin 06.11.2026, his own sound file, cut in two,
+   built into the DLL): 0 = door opens, 1 = door shuts. Played through Windows (winmm PlaySoundW,
+   loaded only when needed), so at the Windows volume, not the game's. Silent when winmm is missing. */
+void walking_door_sound(int shut);
+
 #endif

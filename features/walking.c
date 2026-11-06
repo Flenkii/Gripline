@@ -102,6 +102,37 @@ int walking_ready(void) {
     return ready;
 }
 
+/* ------------------------------------------------------------------ door sounds */
+
+#include "door_sounds.h"
+#define SND_ASYNC_ 0x0001u
+#define SND_NODEFAULT_ 0x0002u
+#define SND_MEMORY_ 0x0004u
+typedef int(WINAPI *PlaySoundWFn)(const void *, void *, unsigned long);
+typedef unsigned(WINAPI *GetSystemDirectoryWFn)(wchar_t *, unsigned);
+
+void walking_door_sound(int shut) {
+    static PlaySoundWFn play;
+    static int tried;
+    if (!tried) {
+        tried = 1;
+        /* the full path: Extra Options is itself a winmm.dll in the game folder */
+        HMODULE kernel = GetModuleHandleW(L"kernel32.dll");
+        GetSystemDirectoryWFn system_dir =
+            kernel ? (GetSystemDirectoryWFn)(uintptr_t)GetProcAddress(kernel, "GetSystemDirectoryW") : NULL;
+        wchar_t path[300];
+        unsigned n = system_dir ? system_dir(path, 280) : 0;
+        if (n && n < 280) {
+            static const wchar_t name[] = L"\\winmm.dll";
+            for (unsigned i = 0; i < sizeof(name) / sizeof(name[0]); ++i) path[n + i] = name[i];
+            HMODULE winmm = LoadLibraryExW(path, NULL, 0);
+            if (winmm) play = (PlaySoundWFn)(uintptr_t)GetProcAddress(winmm, "PlaySoundW");
+        }
+        log_append(play ? "WALKING: door sounds ready.\r\n" : "WALKING: winmm PlaySoundW not found - no door sounds.\r\n");
+    }
+    if (play) play(shut ? door_close_wav : door_open_wav, NULL, SND_ASYNC_ | SND_NODEFAULT_ | SND_MEMORY_);
+}
+
 int walking_active(void) {
     return active != 0;
 }
