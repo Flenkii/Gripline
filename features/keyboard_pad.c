@@ -255,7 +255,7 @@ static const char default_ini[] =
     ";   NoclipUp/NoclipDown up/down, NoclipFast held = faster.\r\n"
     "; KeyMenu: Gripline menu to change these keys in the game (arrows, Enter, Esc/Backspace = back).\r\n"
     ";   It saves its changes into this file.\r\n"
-    "; CruiseControl: keeps the speed of the moment, again/brake = off (20 km/h or faster).\r\n";
+    "; CruiseControl: keeps the speed of the moment, again/brake = off (controller: LS + D-pad left; settings: F8).\r\n";
 
 /* Default file text including the key bindings (also used by ini_migrate.c). Returns the
    length, 0 if it does not fit. */

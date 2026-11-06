@@ -14,6 +14,7 @@
 #include "report.h"
 #include "no_damage.h"
 #include "update_check.h"
+#include "cruise.h"
 
 #define VK_UP_ 0x26
 #define VK_DOWN_ 0x28
@@ -26,11 +27,11 @@
 #define MAX_ROWS (NOTIFY_PANEL_ROWS - 1)
 
 enum { LEVEL_CLOSED, LEVEL_GROUPS, LEVEL_LIST, LEVEL_BINDING, LEVEL_CAPTURE, LEVEL_RESET_ALL, LEVEL_STYLE, LEVEL_MOUSE, LEVEL_TELEMETRY, LEVEL_WORLD, LEVEL_LOGBOOK, LEVEL_RECORDS, LEVEL_DAMAGE,
-       LEVEL_SETTINGS, LEVEL_COLOR, LEVEL_VIEW_FORWARD, LEVEL_VIEW_UP, LEVEL_TRAFFIC, LEVEL_CARDS, LEVEL_COUNT };
+       LEVEL_SETTINGS, LEVEL_COLOR, LEVEL_VIEW_FORWARD, LEVEL_VIEW_UP, LEVEL_TRAFFIC, LEVEL_CARDS, LEVEL_CRUISE, LEVEL_COUNT };
 
 /* first page: rows after the binding pages */
 enum { TOP_STYLE = 100, TOP_RESET = 101, TOP_MOUSE = 102, TOP_TELEMETRY = 103, TOP_WORLD = 104, TOP_LOGBOOK = 105, TOP_RECORDS = 106, TOP_REPORT = 108, TOP_DAMAGE = 109,
-       TOP_SETTINGS = 110, TOP_CARDS = 111, TOP_TRAFFIC = 112 };
+       TOP_SETTINGS = 110, TOP_CARDS = 111, TOP_TRAFFIC = 112, TOP_CRUISE = 113 };
 
 /* settings page (V7): rows */
 enum { SET_COLOR, SET_STEERING, SET_VIEW_FORWARD, SET_VIEW_UP, SET_UPDATE };
@@ -52,6 +53,10 @@ static const wchar_t *const kind_german[NOTIFY_KIND_COUNT] = {L"Startkarten", L"
 static const wchar_t *const kind_english[NOTIFY_KIND_COUNT] = {L"Start cards", L"New record", L"Milestones",
                                                                L"Trip summary (pause)", L"Live info (noclip, mouse)",
                                                                L"Wheel & nitro", L"Confirmations (Mods page)"};
+/* cruise control page: on from (km/h), actions CRUISE_FIRST + i; action 0 = crash on/off */
+#define CRUISE_FIRST 10
+#define CRUISE_CHOICES 8
+static const int cruise_speeds[CRUISE_CHOICES] = {10, 20, 30, 50, 80, 100, 150, 200};
 #define PREVIEW_TAG 0x9e7000u /* design / colour preview card: one card, new text in place */
 
 /* mouse steering choices: FH2_Keyboard.ini MouseSteering values */
@@ -532,6 +537,13 @@ static const wchar_t *cards_preset_name(void) {
     return tr(L"eigene Auswahl", L"own choice");
 }
 
+/* km/h value in the game's unit: "20 km/h" / "12 mph" */
+static void speed_text(int kmh, wchar_t out[32]) {
+    int imperial = game_units_imperial(keyboard_game_image());
+    unsigned n = wuint(out, 0, (unsigned)(imperial ? (kmh / 1.609344 + 0.5) : kmh));
+    wcopy(out, n, 32, imperial ? L" mph" : L" km/h");
+}
+
 static void build_page(wchar_t *title) {
     row_count = 0;
     title[0] = 0;
@@ -555,6 +567,12 @@ static void build_page(wchar_t *title) {
                 wchar_t dist[32];
                 distance_text(lm, dist);
                 row_add(tr(L"Fahrtenbuch", L"Logbook"), dist, 0, TOP_LOGBOOK);
+            }
+            {
+                wchar_t v[32];
+                unsigned n = wcopy(v, 0, 32, tr(L"ab ", L"from "));
+                speed_text(cruise_min_speed(), v + n);
+                row_add(tr(L"Tempomat (Cruise Control)", L"Cruise control"), v, 0, TOP_CRUISE);
             }
             row_add(tr(L"Rekorde", L"Records"), L"›", 0, TOP_RECORDS);
             row_add(tr(L"Welt & Autos", L"World & cars"), L"", NOTIFY_ROW_SECTION, -1);
@@ -617,6 +635,22 @@ static void build_page(wchar_t *title) {
                 row_add(traffic_name(p), p == now ? tr(L"✓ aktiv", L"✓ active") : L"", 0, p);
             if (!now) row_add(tr(L"Jetzt: eigene Werte", L"Now: own values (Mods page)"), L"", NOTIFY_ROW_INFO, -1);
             row_add(tr(L"Wirkt nach Spiel-Neustart", L"Takes effect after a restart"), L"", NOTIFY_ROW_INFO, -1);
+            hint(0);
+            break;
+        }
+        case LEVEL_CRUISE: {
+            wcopy(title, 0, 64, tr(L"Tempomat", L"Cruise control"));
+            row_add(tr(L"Bei Aufprall ausschalten", L"Switch off on a crash"), cruise_crash_off() ? tr(L"An", L"On") : tr(L"Aus", L"Off"), 0, 0);
+            row_add(tr(L"Einschalten ab", L"Switch on from"), L"", NOTIFY_ROW_SECTION, -1);
+            int now = cruise_min_speed();
+            for (int i = 0; i < CRUISE_CHOICES; ++i) {
+                wchar_t v[32];
+                speed_text(cruise_speeds[i], v);
+                row_add(v, cruise_speeds[i] == now ? tr(L"✓ aktiv", L"✓ active") : cruise_speeds[i] == CRUISE_MIN_DEFAULT ? tr(L"Standard", L"default") : L"",
+                        0, CRUISE_FIRST + i);
+            }
+            row_add(tr(L"Nach oben offen, Bremsen = aus", L"No top limit, braking = off"), L"", NOTIFY_ROW_INFO, -1);
+            row_add(tr(L"Controller: LS + Steuerkreuz ◄", L"Controller: LS + D-pad ◄"), L"", NOTIFY_ROW_INFO, -1);
             hint(0);
             break;
         }
@@ -844,6 +878,7 @@ static void back(void) {
         case LEVEL_STYLE: notify_set_style(style_saved); m.level = LEVEL_GROUPS; break; /* end of the preview */
         case LEVEL_SETTINGS: m.level = LEVEL_GROUPS; break;
         case LEVEL_CARDS: m.level = LEVEL_GROUPS; break;
+        case LEVEL_CRUISE: m.level = LEVEL_GROUPS; break;
         case LEVEL_TRAFFIC: m.level = LEVEL_GROUPS; break;
         case LEVEL_COLOR: notify_set_color(rig_setting_get(RIG_GRIP_CARD_COLOR)); m.level = LEVEL_SETTINGS; break;
         case LEVEL_VIEW_FORWARD: m.level = LEVEL_SETTINGS; break;
@@ -924,6 +959,9 @@ static void choose(void) {
             } else if (action == TOP_STYLE) {
                 m.level = LEVEL_STYLE;
                 m.sel[LEVEL_STYLE] = style_saved;
+            } else if (action == TOP_CRUISE) {
+                m.level = LEVEL_CRUISE;
+                m.sel[LEVEL_CRUISE] = 0;
             } else if (action == TOP_SETTINGS) {
                 m.level = LEVEL_SETTINGS;
                 m.sel[LEVEL_SETTINGS] = 0;
@@ -1131,6 +1169,33 @@ static void choose(void) {
                 log_append_value("KEYMENU: traffic preset ", action);
             }
             break;
+        case LEVEL_CRUISE: {
+            int crash = cruise_crash_off(), speed = cruise_min_speed();
+            if (action == 0) crash = !crash;
+            else if (action >= CRUISE_FIRST && action < CRUISE_FIRST + CRUISE_CHOICES) speed = cruise_speeds[action - CRUISE_FIRST];
+            else break;
+            cruise_set_options(crash, speed);
+            int saved = save_gripline_digit("CruiseCrashOff", crash) && save_gripline_int("CruiseMinSpeed", speed);
+            wchar_t line[128], v[32];
+            unsigned n;
+            if (action == 0) {
+                n = wcopy(line, 0, 128, crash ? tr(L"Tempomat: aus bei Aufprall", L"Cruise control: off on a crash")
+                                              : tr(L"Tempomat: bleibt bei Aufprall an", L"Cruise control: stays on in a crash"));
+            } else {
+                n = wcopy(line, 0, 128, tr(L"Tempomat: an ab ", L"Cruise control: on from "));
+                speed_text(speed, v);
+                n = wcopy(line, n, 128, v);
+            }
+            wcopy(line, n, 128, saved ? tr(L"\nGespeichert", L"\nSaved") : tr(L"\nNur bis zum Spielende (nicht gespeichert)", L"\nUntil the game closes (not saved)"));
+            char text[192];
+            unsigned t = 0;
+            utf8(line, text, sizeof(text), &t);
+            text[t] = 0;
+            notify_show(text);
+            log_append_value("KEYMENU: cruise control from km/h ", speed);
+            log_append_value("KEYMENU: cruise control off on a crash ", crash);
+            break;
+        }
         case LEVEL_CARDS: {
             int hidden = notify_hidden_kinds();
             if (action >= 0 && action < CARDS_PRESET_COUNT) hidden = cards_presets[action];

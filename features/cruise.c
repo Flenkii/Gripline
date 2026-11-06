@@ -9,7 +9,7 @@
 #include "game_language.h"
 #include "game_units.h"
 
-#define MIN_SPEED 5.5556f   /* 20 km/h */
+#define STOP_SPEED 2.2222f  /* 8 km/h: slower (or backwards) switches it off */
 #define KP 0.25f            /* throttle per m/s too slow */
 #define KI 0.08f            /* throttle per m/s*s */
 #define BASE 0.35f          /* throttle that roughly holds a speed; the integral does the rest */
@@ -22,6 +22,27 @@
 
 static volatile LONG active, want_card; /* want_card: 1 on, 2 off, 3 off by brake, 4 too slow, 5 crash, 6 slow */
 static float target, integral, last_speed, speed_now, smooth_accel, since_on;
+/* settings (F8 > Tempomat, Gripline.ini CruiseCrashOff / CruiseMinSpeed) */
+static volatile LONG crash_off = 1, min_kmh = CRUISE_MIN_DEFAULT;
+
+void cruise_set_options(int switch_off_on_crash, int min_speed_kmh) {
+    InterlockedExchange(&crash_off, switch_off_on_crash ? 1 : 0);
+    if (min_speed_kmh < CRUISE_MIN_LOWEST) min_speed_kmh = CRUISE_MIN_LOWEST;
+    if (min_speed_kmh > CRUISE_MIN_HIGHEST) min_speed_kmh = CRUISE_MIN_HIGHEST;
+    InterlockedExchange(&min_kmh, min_speed_kmh);
+}
+
+int cruise_crash_off(void) {
+    return (int)crash_off;
+}
+
+int cruise_min_speed(void) {
+    return (int)min_kmh;
+}
+
+static float min_speed(void) {
+    return (float)min_kmh / 3.6f;
+}
 static volatile LONG throttle_bits; /* float */
 static volatile LONG player_gas; /* player's throttle > 0.5 (float compare done in reading) */
 
@@ -77,11 +98,11 @@ void cruise_sample(float dt, const float v[3], const float f[3]) {
         return;
     }
     since_on += dt;
-    if (along < MIN_SPEED * 0.6f) {
+    if (along < STOP_SPEED) {
         stop(6);
         return;
     }
-    if (since_on > SETTLE_S && smooth_accel < CRASH_DECEL) {
+    if (crash_off && since_on > SETTLE_S && smooth_accel < CRASH_DECEL) {
         stop(5);
         return;
     }
@@ -122,39 +143,73 @@ void cruise_pad(unsigned char *gamepad, int gas_trigger, int brake_trigger) {
     if (c > gas) gamepad[gas_trigger] = (unsigned char)(c * 255.0 + 0.5);
 }
 
+static void put(char *text, unsigned *n, unsigned cap, const char *t) {
+    while (*t && *n + 1 < cap) text[(*n)++] = *t++;
+    text[*n] = 0;
+}
+
+static void put_uint(char *text, unsigned *n, unsigned cap, unsigned value) {
+    char d[12];
+    unsigned k = 0;
+    do d[k++] = (char)('0' + value % 10); while ((value /= 10) && k < sizeof(d));
+    while (k && *n + 1 < cap) text[(*n)++] = d[--k];
+    text[*n] = 0;
+}
+
+/* "120 km/h" / "75 mph" */
+static void put_speed(char *text, unsigned *n, unsigned cap, float metres_per_second, int imperial) {
+    put_uint(text, n, cap, (unsigned)(metres_per_second * (imperial ? 2.236936f : 3.6f) + 0.5f));
+    put(text, n, cap, imperial ? " mph" : " km/h");
+}
+
+/* the key as bound now: "K" (the controller combination is the same for everyone) */
+static void put_key(char *text, unsigned *n, unsigned cap, int de) {
+    int index = keyboard_binding_find(L"CruiseControl");
+    unsigned char vk[4] = {0};
+    if (index >= 0) keyboard_binding_vks((unsigned)index, vk);
+    if (vk[0]) {
+        wchar_t keys[32];
+        vk[1] = vk[2] = vk[3] = 0;
+        keyboard_keys_text(vk, de, keys, 32);
+        int got = WideCharToMultiByte(CP_UTF8, 0, keys, -1, text + *n, (int)(cap - *n), NULL, NULL);
+        if (got > 0) *n += (unsigned)got - 1;
+        put(text, n, cap, " / ");
+    }
+    put(text, n, cap, de ? "LS + Steuerkreuz links" : "LS + D-pad left");
+}
+
+/* V7 (Marvin 06.11.): the off cards say why and how it comes back, not only "Crash" */
 static void card(unsigned char *game, LONG what) {
     int de = game_language_is_german(game), imperial = game_units_imperial(game);
-    char text[96];
+    char text[160];
     unsigned n = 0;
-    const char *head;
+    text[0] = 0;
     if (what == 1) {
-        head = de ? "Tempomat an: " : "Cruise control on: ";
-        while (*head) text[n++] = *head++;
-        unsigned value = (unsigned)(target * (imperial ? 2.236936f : 3.6f) + 0.5f);
-        char d[8];
-        unsigned k = 0;
-        do d[k++] = (char)('0' + value % 10); while ((value /= 10) && k < 8);
-        while (k) text[n++] = d[--k];
-        const char *tail = imperial ? " mph\n" : " km/h\n";
-        while (*tail) text[n++] = *tail++;
-        tail = de ? "Bremsen oder Taste = aus" : "Brake or key again = off";
-        while (*tail) text[n++] = *tail++;
-        text[n] = 0;
+        put(text, &n, sizeof(text), de ? "Tempomat an: " : "Cruise control on: ");
+        put_speed(text, &n, sizeof(text), target, imperial);
+        put(text, &n, sizeof(text), de ? "\nAus: Bremsen oder " : "\nOff: brake or ");
+        put_key(text, &n, sizeof(text), de);
         notify_show(text);
         return;
     }
-    if (what == 4)
-        head = imperial ? (de ? "Tempomat\nErst schneller als 12 mph fahren" : "Cruise control\nDrive faster than 12 mph first")
-                        : (de ? "Tempomat\nErst schneller als 20 km/h fahren" : "Cruise control\nDrive faster than 20 km/h first");
-    else if (what == 3)
-        head = de ? "Tempomat aus\nGebremst" : "Cruise control off\nBraked";
-    else if (what == 5)
-        head = de ? "Tempomat aus\nAufprall" : "Cruise control off\nCrash";
-    else if (what == 6)
-        head = de ? "Tempomat aus\nZu langsam" : "Cruise control off\nToo slow";
+    if (what == 4) {
+        put(text, &n, sizeof(text), de ? "Tempomat noch nicht möglich\nErst schneller als " : "Cruise control not yet\nDrive faster than ");
+        put_speed(text, &n, sizeof(text), min_speed(), imperial);
+        put(text, &n, sizeof(text), de ? " fahren" : " first");
+        notify_show_tinted(text, NOTIFY_COLOR_ORANGE, de ? "TEMPOMAT" : "CRUISE", 0);
+        return;
+    }
+    const char *why = what == 3 ? (de ? "Tempomat aus: gebremst" : "Cruise control off: braked")
+                    : what == 5 ? (de ? "Tempomat aus: Aufprall erkannt" : "Cruise control off: crash detected")
+                    : what == 6 ? (de ? "Tempomat aus: fast stehen geblieben" : "Cruise control off: almost stopped")
+                                : (de ? "Tempomat aus" : "Cruise control off");
+    put(text, &n, sizeof(text), why);
+    put(text, &n, sizeof(text), de ? "\nWieder an: " : "\nOn again: ");
+    put_key(text, &n, sizeof(text), de);
+    if (what == 3 || what == 5 || what == 6)
+        notify_show_tinted(text, NOTIFY_COLOR_ORANGE, de ? "TEMPOMAT" : "CRUISE", 0);
     else
-        head = de ? "Tempomat aus" : "Cruise control off";
-    notify_show(head);
+        notify_show(text);
 }
 
 void cruise_step(unsigned long long now, unsigned char *game) {
@@ -168,7 +223,7 @@ void cruise_step(unsigned long long now, unsigned char *game) {
             log_append("CRUISE: off (key)\r\n");
         } else if (!DRIVING()) {
             log_append("CRUISE: not now (noclip or menu)\r\n");
-        } else if (speed_now < MIN_SPEED) {
+        } else if (speed_now < min_speed()) {
             log_append_value("CRUISE: too slow to switch on, km/h ", (int)(speed_now * 3.6f));
             InterlockedExchange(&want_card, 4);
         } else {
@@ -187,7 +242,7 @@ void cruise_step(unsigned long long now, unsigned char *game) {
     if (what) {
         if (what == 3) log_append("CRUISE: off (brake)\r\n");
         if (what == 5) log_append("CRUISE: off (crash)\r\n");
-        if (what == 6) log_append("CRUISE: off (slower than 12 km/h or backwards)\r\n");
+        if (what == 6) log_append("CRUISE: off (slower than 8 km/h or backwards)\r\n");
         card(game, what);
     }
 }
@@ -208,6 +263,9 @@ __declspec(dllexport) int Fh2TestCruiseStep(void) {
     return cruise_active();
 }
 /* the controller state: RT (gas) and LT (brake) in, RT out */
+__declspec(dllexport) void Fh2TestCruiseOptions(int crash, int min_speed_kmh) {
+    cruise_set_options(crash, min_speed_kmh);
+}
 __declspec(dllexport) int Fh2TestCruisePad(int rt, int lt) {
     unsigned char pad[12] = {0};
     pad[3] = (unsigned char)rt, pad[2] = (unsigned char)lt;

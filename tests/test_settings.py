@@ -17,7 +17,7 @@ root = tempfile.mkdtemp(prefix='gl-settings-')
 e = Emu(DLL, root)
 KEYS = ['TrafficLevel', 'RushHourAllDay', 'Notifications', 'SteeringAnimation', 'CockpitViewForward',
         'CockpitViewUp', 'CardColor', 'CardStyle', 'UpdateCheck', 'SpeedCameras', 'CarLabels', 'Telemetry',
-        'TelemetryShow', 'EventIcons', 'NewsSeen', 'NoDamage', 'CardsHidden']
+        'TelemetryShow', 'EventIcons', 'NewsSeen', 'NoDamage', 'CardsHidden', 'CruiseCrashOff', 'CruiseMinSpeed']
 
 
 def read(text):

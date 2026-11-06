@@ -40,6 +40,7 @@
 #include "features/version_check.h"
 #include "features/update_check.h"
 #include "features/ini_migrate.h"
+#include "features/cruise.h"
 
 void keyboard_pad_game_start(unsigned char *game_image, const wchar_t *settings_directory);
 void report_init(const wchar_t *settings_directory);
@@ -519,6 +520,7 @@ static void start_features(void) {
     notify_set_enabled(options.notifications);
     notify_set_style(options.card_style);
     notify_set_hidden_kinds(options.cards_hidden);
+    cruise_set_options(options.cruise_crash_off, options.cruise_min_speed);
     mod_scan_start(directory);
     version_check_start(game, directory);
     update_check_start(game, options.update_check);

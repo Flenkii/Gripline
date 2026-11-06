@@ -31,6 +31,7 @@ typedef struct {
     int speed_cameras, car_labels, telemetry, event_icons;
     int news_seen; /* [Gripline] NewsSeen: version whose what's-new cards were shown (70 = V7.0), logbook.c */
     int no_damage; /* [Gripline] NoDamage: 0 off, 1 other cars, 2 all cars (V7, no_damage.h) */
+    int cruise_crash_off, cruise_min_speed; /* [Gripline] CruiseCrashOff 0/1, CruiseMinSpeed km/h (V7, cruise.h) */
     int cards_hidden; /* [Gripline] CardsHidden: bits of notify.h NOTIFY_KIND_* that are not shown (V7) */
     int telemetry_show; /* [Gripline] TelemetryShow: bits of telemetry.h TELEMETRY_SHOW_*, -1 = default */ /* [Gripline] SpeedCameras / CarLabels: 0 = off (V7, world_files.c) */
 } ModOptions;

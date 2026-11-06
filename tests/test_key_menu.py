@@ -118,7 +118,7 @@ check(ok == 1 and card_text == 'Press F8 to change your keys\nKey menu: arrows, 
 check(e.call('Fh2TestKeyboardBinding', 42, 0) == F8, 'KeyMenu = F8 (Standard)')
 
 press(F8)
-check(tick() == LEVEL_GROUPS and panel() == 21, f'F8 oeffnet das Menue (4 Abschnitte + 4 Seiten + Maus + Telemetrie + Fahrtenbuch + Rekorde + Welt + Verkehr + Kein Schaden + Einstellungen + Karten & Hinweise + Karten-Design + Problem-Bericht + Alle Tasten + Hinweis): {panel()}')
+check(tick() == LEVEL_GROUPS and panel() == 22, f'F8 oeffnet das Menue (4 Abschnitte + 4 Seiten + Maus + Telemetrie + Tempomat + Fahrtenbuch + Rekorde + Welt + Verkehr + Kein Schaden + Einstellungen + Karten & Hinweise + Karten-Design + Problem-Bericht + Alle Tasten + Hinweis): {panel()}')
 top = panel_rows()
 check(top.get('Keys & controls') == '' and top.get('Driving & data') == '' and top.get('World & cars') == '' and top.get('Gripline') == '',
       f'vier Abschnitte: {list(top)}')
@@ -389,6 +389,21 @@ check(panel_rows().get('Cards & notices') == 'own choice', 'Hauptseite: eigene A
 press(ENTER)
 press(ENTER)  # "Show everything"
 check(b'CardsHidden=0' in open(gpath, 'rb').read(), 'alles wieder an')
+press(ESC)
+
+# cruise control page: crash switch + minimum speed -> Gripline.ini
+check(goto('Cruise control'), selected())
+press(ENTER)
+rows = panel_rows()
+check(rows.get('Switch off on a crash') == 'On' and rows.get('20 km/h') == '\u2713 active' and '10 km/h' in rows, f'Tempomat-Seite: {rows}')
+press(ENTER)
+check(b'CruiseCrashOff=0' in open(gpath, 'rb').read() and panel_rows().get('Switch off on a crash') == 'Off', 'Aufprall-Schalter aus, gespeichert')
+check(goto('10 km/h'), selected())
+press(ENTER)
+check(b'CruiseMinSpeed=10' in open(gpath, 'rb').read() and panel_rows().get('10 km/h') == '\u2713 active', 'ab 10 km/h gespeichert')
+check(goto('Switch off on a crash'), selected())
+press(ENTER)
+check(b'CruiseCrashOff=1' in open(gpath, 'rb').read(), 'Aufprall-Schalter wieder an')
 press(ESC)
 
 # traffic page: presets, restart note
