@@ -126,6 +126,7 @@ Wheel problems belong to Azimuth (report them there without mods).
 - **Claude (Anthropic)** – wrote most of the code together with Flenkii
 - **Lancaster** (Discord) – testing and ideas
 - A YouTube viewer – idea for cockpit view 2
+- **[Sounds From The Lab](https://soundsfromthelab.com)** – car door sounds for walking (royalty-free, "Car Door Opening And Closing Slamming Shut")
 - Works well with: **[NitroSystem](https://github.com/qiangqiang101/NitroSystem)** by qiangqiang101, **Azimuth Mapper** by bigdamnhero6
 
 ## Building
