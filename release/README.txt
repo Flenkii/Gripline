@@ -2,6 +2,11 @@ GRIPLINE V7 "THE BIG UPDATE" – keyboard, cockpit, walking & more for Forza Hor
 =========================================================================================
 An add-on next to Azimuth, the official Extra Options and FH2MP.
 
+*** NEW IN V7: WALKING MODE ***
+Press F (controller: hold LS + Y) to get out of your car and walk around on foot -
+with collision (trees, walls, buildings), run, jump, fade to black and door sounds.
+Your car stays parked; F / Y near it gets you back in. Offline only.
+
 Source code: https://github.com/Flenkii/Gripline
 
 No game files, no Azimuth, no Extra Options and no FH2MP included. Never paste commands

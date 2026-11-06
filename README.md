@@ -3,6 +3,10 @@
 **Keyboard driving, cockpit and traffic for Forza Horizon 2 on PC** (Xbox One version on the **Azimuth** wrapper).
 Works offline and online with [FH2MP](https://github.com/Charelene/FH2MP).
 
+> ## 🚶 NEW IN V7: WALKING MODE – get out of your car!
+> Press **F** (controller: hold **LS + Y**) and walk around Forza Horizon 2 on foot – **with real collision** (trees, walls, buildings, ground).
+> Walk, run and jump, fade to black with **car door sounds**, your car stays parked until you get back in. Offline only.
+
 **[⬇ Download the latest version](../../releases/latest)** · current version: **V7 – The Big Update**
 
 **[Join the Gripline Discord](https://discord.gg/g83eBcrq)** · problems, questions, ideas for V8 and showcase. Join to always stay up to date with every new version.
