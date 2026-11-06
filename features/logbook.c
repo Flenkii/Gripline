@@ -18,7 +18,7 @@
 #define SAVE_EVERY_MS 60000u
 #define SCAN_BYTES 0x6000u  /* the car object is searched this far for the name */
 #define SCAN_INNER 0x200u   /* and each object it points to this far */
-#define NEWS_VERSION (GRIPLINE_RELEASE_MAJOR * 10 + GRIPLINE_RELEASE_MINOR)
+#define NEWS_VERSION GRIPLINE_NEWS_VERSION
 #define NEWS_DELAY_MS 20000u /* after the start cards */
 #define FILE_LIMIT 65536u
 
@@ -402,7 +402,7 @@ static void milestone(const char *stem, double before, double after) {
             put(text, &n, sizeof(text), imperial ? " mi" : " km");
             put(text, &n, sizeof(text), de ? " gefahren!\nim " : " driven!\nin the ");
             utf8_name(stem, text, sizeof(text), &n);
-            notify_show_tinted(text, NOTIFY_COLOR_YELLOW, de ? "MEILENSTEIN" : "MILESTONE", 1);
+            if (notify_kind_on(NOTIFY_KIND_MILESTONES)) notify_show_tinted(text, NOTIFY_COLOR_YELLOW, de ? "MEILENSTEIN" : "MILESTONE", 1);
             log_append("LOGBOOK: milestone card\r\n");
         }
     }
@@ -428,6 +428,10 @@ static int save_news_seen(void) { /* one writer at a time (support.h) */
 
 static void show_news(void) {
     int de = game_language_is_german(game);
+    if (!notify_kind_on(NOTIFY_KIND_START)) { /* start cards hidden: no what's-new either, counts as seen */
+        if (save_news_seen()) log_append("LOGBOOK: what's-new cards hidden (CardsHidden), NewsSeen saved.\r\n");
+        return;
+    }
     const char *badge = de ? "NEU IN V7" : "NEW IN V7";
     /* the last one shown ends up on top */
     notify_show_tinted(de ? "Freecam & Fahrtenbuch\nF7 Freecam, km pro Auto in F8" : "Freecam & logbook\nF7 freecam, km per car in F8",

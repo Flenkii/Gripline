@@ -13,4 +13,8 @@
 /* game_image for the language; enabled = Gripline.ini UpdateCheck. */
 void update_check_start(unsigned char *game_image, int enabled);
 
+/* UpdateCheck as set now (F8 > Einstellungen changes it for the next start) */
+int update_check_enabled(void);
+void update_check_remember(int on);
+
 #endif

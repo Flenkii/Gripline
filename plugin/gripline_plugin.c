@@ -518,6 +518,7 @@ static void start_features(void) {
     cockpit_start(game, mount_dir, options.steering_animation, azimuth_rotation(), 10 /* linear */);
     notify_set_enabled(options.notifications);
     notify_set_style(options.card_style);
+    notify_set_hidden_kinds(options.cards_hidden);
     mod_scan_start(directory);
     version_check_start(game, directory);
     update_check_start(game, options.update_check);
@@ -533,8 +534,12 @@ static void start_features(void) {
     /* the platform may have loaded Gripline after Azimuth set up gamepads and swap chain */
     if (!keyboard_pad_late()) platform_log("keyboard: not active (off in FH2_Keyboard.ini, Mapper running, or no hook)");
     if (!notify_install_late()) platform_log("cards: could not hook the game picture");
-    notify_show_deferred_call(start_card); /* the keys as bound now (the key menu can change them) */
-    notify_show_deferred_call(key_menu_start_card); /* own card: "Press F8 to change your keys" */
+    if (notify_kind_on(NOTIFY_KIND_START)) {
+        notify_show_deferred_call(start_card); /* the keys as bound now (the key menu can change them) */
+        /* own card "Press F8 to change your keys": only until this version's what's-new cards were seen,
+           later starts show just one card (the start card names F8 too) */
+        if (options.news_seen < GRIPLINE_NEWS_VERSION) notify_show_deferred_call(key_menu_start_card);
+    }
     InterlockedExchange(&started, 1);
     if (row_count) sync_rows();
     /* Extra Options mounts mods\Gripline\media; the game's steering angle follows once the files are there */

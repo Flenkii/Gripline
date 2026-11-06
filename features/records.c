@@ -1,5 +1,4 @@
-/* Records, own sprints, telemetry CSV - see records.h. Own code. */
-#include <xmmintrin.h>
+/* Records and telemetry CSV - see records.h. Own code. */
 #include "gripline.h"
 #include "support.h"
 #include "logging.h"
@@ -10,35 +9,26 @@
 #include "game_units.h"
 
 #define FILE_LIMIT 8192u
-#define GATE 15.0f          /* m: start and finish circles */
 #define TOP_SETTLE_MS 3000u /* top speed card once the speed stopped rising */
 #define CSV_EVERY_MS 100u
-#define SPRINT_MAX 900.0f   /* s */
 
 static unsigned char *game;
 static wchar_t book_path[PATH_CAPACITY], csv_dir[PATH_CAPACITY];
 static SRWLOCK lock = SRWLOCK_INIT;
 static float best[RECORD_COUNT];
 static float pending[RECORD_COUNT], before[RECORD_COUNT]; /* new records waiting for their card */
+static volatile LONG64 fresh_at[RECORD_COUNT]; /* tick of the last new record (records_fresh) */
 static ULONGLONG top_at;
 static int dirty, started;
 
-/* own sprint */
+/* own car position for the CSV */
 static float pos_now[3];
-static int have_pos;
-static float gate_start[3], gate_finish[3];
-static int sprint_state;   /* 0 none, 1 start, 2 start + finish */
-static int run_phase;      /* 0 away, 1 in the start circle, 2 running */
-static float run_time;
-static volatile LONG run_card; /* 1 started, 2 finished */
-static float run_result;
 
 /* csv */
 static volatile LONG csv_on;
 static HANDLE csv_file = INVALID_HANDLE_VALUE;
 static ULONGLONG csv_next, csv_t0;
 
-static float root(float x) { return _mm_cvtss_f32(_mm_sqrt_ss(_mm_set_ss(x))); }
 static int lower_better(unsigned kind) { return kind != RECORD_TOP; }
 
 /* ------------------------------------------------------------------ text helpers */
@@ -130,7 +120,7 @@ static long parse_int(const char **p, const char *end) {
     return neg ? -v : v;
 }
 
-/* "best <kind> <value * 1000>", "sprint <x y z of start, x y z of finish in cm>" (finish 0 0 0 0 = none) */
+/* "best <kind> <value * 1000>" */
 static void load(void) {
     HANDLE file = CreateFileW(book_path, GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE, NULL, OPEN_EXISTING,
                               FILE_ATTRIBUTE_NORMAL, NULL);
@@ -146,14 +136,8 @@ static void load(void) {
         if (end - p >= 5 && memory_equal(p, "best ", 5)) {
             p += 5;
             long k = parse_int(&p, end), v = parse_int(&p, end);
-            if (k >= 0 && k < RECORD_COUNT && v > 0) best[k] = (float)v / 1000.0f;
-        } else if (end - p >= 7 && memory_equal(p, "sprint ", 7)) {
-            p += 7;
-            long s = parse_int(&p, end);
-            for (int i = 0; i < 3; ++i) gate_start[i] = (float)parse_int(&p, end) / 100.0f;
-            for (int i = 0; i < 3; ++i) gate_finish[i] = (float)parse_int(&p, end) / 100.0f;
-            sprint_state = s >= 1 && s <= 2 ? (int)s : 0;
-        }
+            if (k >= 0 && k < RECORD_COUNT && k != RECORD_OWN && v > 0) best[k] = (float)v / 1000.0f;
+        } /* "sprint ..." lines of the removed own sprint (V7 test builds) are skipped */
         while (p < end && *p != '\n') ++p;
         ++p;
     }
@@ -163,20 +147,13 @@ static void save(void) {
     static char out[FILE_LIMIT];
     size_t n = 0;
     AcquireSRWLockShared(&lock);
-    put(out, &n, sizeof(out), "# Gripline records (value * 1000: s, m, m/s), own sprint (cm)\r\n");
+    put(out, &n, sizeof(out), "# Gripline records (value * 1000: s, m, m/s)\r\n");
     for (unsigned k = 0; k < RECORD_COUNT; ++k) {
         if (best[k] <= 0.0f) continue;
         put(out, &n, sizeof(out), "best ");
         put_int(out, &n, sizeof(out), (long)k);
         put(out, &n, sizeof(out), " ");
         put_int(out, &n, sizeof(out), (long)(best[k] * 1000.0f + 0.5f));
-        put(out, &n, sizeof(out), "\r\n");
-    }
-    if (sprint_state) {
-        put(out, &n, sizeof(out), "sprint ");
-        put_int(out, &n, sizeof(out), sprint_state);
-        for (int i = 0; i < 3; ++i) put(out, &n, sizeof(out), " "), put_int(out, &n, sizeof(out), (long)(gate_start[i] * 100.0f));
-        for (int i = 0; i < 3; ++i) put(out, &n, sizeof(out), " "), put_int(out, &n, sizeof(out), (long)(gate_finish[i] * 100.0f));
         put(out, &n, sizeof(out), "\r\n");
     }
     ReleaseSRWLockShared(&lock);
@@ -217,6 +194,11 @@ float records_best(unsigned kind) {
     return v;
 }
 
+int records_fresh(unsigned kind) {
+    if (kind >= RECORD_COUNT || !fresh_at[kind]) return 0;
+    return GetTickCount64() - (ULONGLONG)fresh_at[kind] < RECORDS_FRESH_MS;
+}
+
 void records_clear(void) {
     AcquireSRWLockExclusive(&lock);
     for (unsigned k = 0; k < RECORD_COUNT; ++k) best[k] = pending[k] = 0.0f;
@@ -242,85 +224,14 @@ static void record_card(unsigned kind, float value, float old) {
     notify_show_tinted(text, NOTIFY_COLOR_YELLOW, de ? "NEUER REKORD" : "NEW RECORD", 0);
 }
 
-/* ------------------------------------------------------------------ own sprint */
-
-static float distance(const float a[3], const float b[3]) {
-    float x = a[0] - b[0], y = a[1] - b[1], z = a[2] - b[2];
-    return root(x * x + y * y + z * z);
-}
+/* ------------------------------------------------------------------ position (CSV) */
 
 void records_sample(float dt, const float p[3], float speed) {
+    (void)speed;
     if (!(dt > 0.0f) || dt > 0.25f) return;
     AcquireSRWLockExclusive(&lock);
     pos_now[0] = p[0], pos_now[1] = p[1], pos_now[2] = p[2];
-    have_pos = 1;
-    if (sprint_state == 2) {
-        float to_start = distance(p, gate_start), to_finish = distance(p, gate_finish);
-        if (run_phase == 2) {
-            run_time += dt;
-            if (to_finish < GATE && run_time > 3.0f) {
-                run_result = run_time;
-                run_phase = to_start < GATE ? 1 : 0;
-                InterlockedExchange(&run_card, 2);
-            } else if (run_time > SPRINT_MAX || speed > 150.0f) {
-                run_phase = 0; /* too long, or a teleport */
-            }
-        } else if (to_start < GATE) {
-            run_phase = 1;
-        } else if (run_phase == 1 && speed > 1.0f) {
-            run_phase = 2; /* out of the start circle: the clock runs */
-            run_time = 0.0f;
-            InterlockedExchange(&run_card, 1);
-        } else {
-            run_phase = 0;
-        }
-    }
     ReleaseSRWLockExclusive(&lock);
-}
-
-int records_set_start(void) {
-    AcquireSRWLockExclusive(&lock);
-    int ok = have_pos;
-    if (ok) {
-        gate_start[0] = pos_now[0], gate_start[1] = pos_now[1], gate_start[2] = pos_now[2];
-        if (sprint_state == 0) sprint_state = 1;
-        run_phase = 1;
-        best[RECORD_OWN] = 0.0f; /* a new track: a new record */
-        dirty = 1;
-    }
-    ReleaseSRWLockExclusive(&lock);
-    return ok;
-}
-
-int records_set_finish(void) {
-    AcquireSRWLockExclusive(&lock);
-    int ok = have_pos && sprint_state >= 1 && distance(pos_now, gate_start) > 2.0f * GATE;
-    if (ok) {
-        gate_finish[0] = pos_now[0], gate_finish[1] = pos_now[1], gate_finish[2] = pos_now[2];
-        sprint_state = 2;
-        run_phase = 0;
-        best[RECORD_OWN] = 0.0f;
-        dirty = 1;
-    }
-    ReleaseSRWLockExclusive(&lock);
-    return ok;
-}
-
-void records_clear_sprint(void) {
-    AcquireSRWLockExclusive(&lock);
-    sprint_state = 0;
-    run_phase = 0;
-    best[RECORD_OWN] = 0.0f;
-    dirty = 1;
-    ReleaseSRWLockExclusive(&lock);
-}
-
-int records_sprint_state(float *metres) {
-    AcquireSRWLockShared(&lock);
-    int s = sprint_state;
-    *metres = s == 2 ? distance(gate_start, gate_finish) : 0.0f;
-    ReleaseSRWLockShared(&lock);
-    return s;
 }
 
 /* ------------------------------------------------------------------ CSV */
@@ -424,25 +335,9 @@ void records_step(unsigned long long now) {
     ReleaseSRWLockExclusive(&lock);
     if (show < RECORD_COUNT) {
         /* the first top speed after the install is no news: every drive would make one */
-        if (!(show == RECORD_TOP && old <= 0.0f)) record_card(show, value, old);
-    }
-    LONG rc = InterlockedExchange(&run_card, 0);
-    if (rc) {
-        int de = game_language_is_german(game);
-        if (rc == 1) {
-            notify_show(de ? "Eigener Sprint\nLos! Die Zeit läuft" : "Own sprint\nGo! The clock runs");
-        } else {
-            float old_best = records_best(RECORD_OWN);
-            records_offer(RECORD_OWN, run_result);
-            if (old_best > 0.0f && run_result >= old_best - 0.004f) {
-                char text[96];
-                size_t n = 0;
-                put(text, &n, sizeof(text), de ? "Eigener Sprint: " : "Own sprint: ");
-                put_value(text, &n, sizeof(text), RECORD_OWN, run_result, de);
-                put(text, &n, sizeof(text), de ? "\nRekord " : "\nRecord ");
-                put_value(text, &n, sizeof(text), RECORD_OWN, old_best, de);
-                notify_show(text);
-            } /* else the record card follows */
+        if (!(show == RECORD_TOP && old <= 0.0f)) {
+            InterlockedExchange64(&fresh_at[show], (LONG64)GetTickCount64()); /* telemetry panel lights the row */
+            if (notify_kind_on(NOTIFY_KIND_RECORDS)) record_card(show, value, old);
         }
     }
     static ULONGLONG saved_at;

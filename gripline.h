@@ -11,6 +11,8 @@
 #define GRIPLINE_RELEASE_MAJOR 7
 #define GRIPLINE_RELEASE_MINOR 0
 #define GRIPLINE_RELEASE_PATCH 0 /* third number of the release tag (fork6.4.1), update_check.c */
+/* NewsSeen value of this version (70 = V7.0): what's-new cards and the F8 hint card show until then */
+#define GRIPLINE_NEWS_VERSION (GRIPLINE_RELEASE_MAJOR * 10 + GRIPLINE_RELEASE_MINOR)
 #define MOD_INI_NAME L"Gripline.ini"
 #define MOD_LOG_NAME L"Gripline.log"
 #define GAME_EXE_NAME L"forza_durango_release_final.exe"
@@ -29,6 +31,7 @@ typedef struct {
     int speed_cameras, car_labels, telemetry, event_icons;
     int news_seen; /* [Gripline] NewsSeen: version whose what's-new cards were shown (70 = V7.0), logbook.c */
     int no_damage; /* [Gripline] NoDamage: 0 off, 1 other cars, 2 all cars (V7, no_damage.h) */
+    int cards_hidden; /* [Gripline] CardsHidden: bits of notify.h NOTIFY_KIND_* that are not shown (V7) */
     int telemetry_show; /* [Gripline] TelemetryShow: bits of telemetry.h TELEMETRY_SHOW_*, -1 = default */ /* [Gripline] SpeedCameras / CarLabels: 0 = off (V7, world_files.c) */
 } ModOptions;
 #endif

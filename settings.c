@@ -21,6 +21,7 @@ const SettingDefinition setting_definitions[] = {
     SETTING("Gripline", "EventIcons", event_icons, SETTING_BOOLEAN),
     SETTING("Gripline", "NewsSeen", news_seen, SETTING_MASK),
     SETTING("Gripline", "NoDamage", no_damage, SETTING_NO_DAMAGE),
+    SETTING("Gripline", "CardsHidden", cards_hidden, SETTING_MASK),
 };
 
 const size_t setting_count = ARRAY_COUNT(setting_definitions);

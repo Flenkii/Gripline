@@ -596,7 +596,7 @@ static void info_step(ULONGLONG now) {
     put_text(text, &n, de ? "H\xc3\xb6he " : "Height ");
     put_int(text, &n, (int)(height < 0 ? height - 0.5f : height + 0.5f));
     put_text(text, &n, imperial ? " ft" : " m");
-    notify_show_live(text, INFO_TAG, 1000);
+    if (notify_kind_on(NOTIFY_KIND_LIVE)) notify_show_live(text, INFO_TAG, 1000);
 }
 
 /* The key, the online check, the noclip card, the trip card and the wheel watch run on an own thread; in the game's

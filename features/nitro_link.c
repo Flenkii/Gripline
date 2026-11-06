@@ -53,14 +53,14 @@ static int nitro_blocked(void) {
         if (before != online && (before != -1 || online)) {
             if (online) {
                 log_append("NITRO: online session - nitro off.\r\n");
-                if (linked_module) {
+                if (linked_module && notify_kind_on(NOTIFY_KIND_WHEEL)) {
                     int de = game_language_is_german(game);
                     notify_show_tinted(de ? "Nitro aus\nGrund: Du bist online (FH2MP)" : "Nitro off\nReason: you are online (FH2MP)",
                                        NOTIFY_COLOR_RED, de ? "WARNUNG" : "WARNING", 0);
                 }
             } else {
                 log_append("NITRO: offline again - nitro on.\r\n");
-                if (linked_module)
+                if (linked_module && notify_kind_on(NOTIFY_KIND_WHEEL))
                     notify_show_tinted(game_language_is_german(game) ? "Nitro wieder an\nGrund: Du bist wieder offline"
                                                                      : "Nitro on again\nReason: you are offline again",
                                        NOTIFY_COLOR_GREEN, NULL, 0);
@@ -197,7 +197,7 @@ static int link_module(HMODULE module, const wchar_t *ini) {
     read_button();
     log_append("NITRO: NitroSystem found - Gripline nitro key and wheel button press its "
                "NitroButton.\r\n");
-    notify_show("NitroSystem found\nNitro: N / wheel button");
+    if (notify_kind_on(NOTIFY_KIND_START)) notify_show("NitroSystem found\nNitro: N / wheel button");
     return 1;
 }
 

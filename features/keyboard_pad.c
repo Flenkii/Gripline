@@ -756,7 +756,7 @@ static void mouse_card(double value, int returning) {
         else c = "\xe2\x96\xa1"; /* □ */
         mouse_put(text, &n, sizeof(text), c);
     }
-    notify_show_live(text, MOUSE_CARD_TAG, 1500);
+    if (notify_kind_on(NOTIFY_KIND_LIVE)) notify_show_live(text, MOUSE_CARD_TAG, 1500);
 }
 
 static int mouse_ready(void) {

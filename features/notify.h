@@ -52,6 +52,26 @@ enum { NOTIFY_STYLE_CLASSIC, NOTIFY_STYLE_ENHANCED, NOTIFY_STYLE_OVERDRIVE, NOTI
 void notify_set_style(int style);
 int notify_style(void);
 
+/* Card groups a player can hide (F8 > Karten & Hinweise, INI [Gripline] CardsHidden = bits, V7).
+   Warnings (red/orange), the F8 menu's own answers and key presses (noclip on/off, nitro...) always show. */
+enum {
+    NOTIFY_KIND_START,      /* start cards: Gripline active + keys, F8 hint, what's new, NitroSystem found */
+    NOTIFY_KIND_RECORDS,    /* "NEW RECORD" */
+    NOTIFY_KIND_MILESTONES, /* logbook: "1000 km driven" */
+    NOTIFY_KIND_TRIP,       /* trip summary in the pause menu */
+    NOTIFY_KIND_LIVE,       /* live cards: noclip/freecam height and speed, mouse steering */
+    NOTIFY_KIND_WHEEL,      /* wheel connected/disconnected, nitro off online / on again */
+    NOTIFY_KIND_CONFIRM,    /* "setting changed" cards of the Mods page */
+    NOTIFY_KIND_COUNT
+};
+#define NOTIFY_KINDS_ALL ((1 << NOTIFY_KIND_COUNT) - 1)
+/* presets: everything / few (records + wheel stay) / warnings only */
+#define NOTIFY_PRESET_FEW ((1 << NOTIFY_KIND_START) | (1 << NOTIFY_KIND_MILESTONES) | (1 << NOTIFY_KIND_TRIP) | \
+                           (1 << NOTIFY_KIND_LIVE) | (1 << NOTIFY_KIND_CONFIRM))
+void notify_set_hidden_kinds(int mask);
+int notify_hidden_kinds(void);
+int notify_kind_on(int kind);
+
 /* Key list panel (keyboard_pad.c, key Keybinds): a tall card at the right edge of the picture,
    one row per key, shown until it is switched off; cards move to its left meanwhile. It is only
    drawn, the game keeps every input. count 0 hides it. Safe from any thread. */

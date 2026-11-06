@@ -95,6 +95,13 @@ def panel_rows():
         e.call('Fh2TestNotifyPanelRow', i, l, k)
         out[e.wstr(l)] = e.wstr(k)
     return out
+def goto(label, limit=40):
+    """moves down on the page until the row label is selected (the order of the first page may change)"""
+    for _ in range(limit):
+        if selected() == label:
+            return True
+        press(DOWN)
+    return selected() == label
 def ini():
     return open(ini_file, 'rb').read().decode('ascii')
 def binding(index, k=0):
@@ -111,7 +118,11 @@ check(ok == 1 and card_text == 'Press F8 to change your keys\nKey menu: arrows, 
 check(e.call('Fh2TestKeyboardBinding', 42, 0) == F8, 'KeyMenu = F8 (Standard)')
 
 press(F8)
-check(tick() == LEVEL_GROUPS and panel() == 15, f'F8 oeffnet das Menue (4 Seiten + Maus-Lenkung + Telemetrie + Fahrtenbuch + Rekorde + Sprints + Welt + Kein Schaden + Karten-Design + Problem-Bericht + Alle auf Standard + Hinweis): {panel()}')
+check(tick() == LEVEL_GROUPS and panel() == 21, f'F8 oeffnet das Menue (4 Abschnitte + 4 Seiten + Maus + Telemetrie + Fahrtenbuch + Rekorde + Welt + Verkehr + Kein Schaden + Einstellungen + Karten & Hinweise + Karten-Design + Problem-Bericht + Alle Tasten + Hinweis): {panel()}')
+top = panel_rows()
+check(top.get('Keys & controls') == '' and top.get('Driving & data') == '' and top.get('World & cars') == '' and top.get('Gripline') == '',
+      f'vier Abschnitte: {list(top)}')
+check(top.get('\u2191\u2193 choose \u00b7 Enter/A OK') == 'Esc/B close', 'Hinweis zeigt Tastatur und Controller')
 check(selected() == 'Driving', f'erste Zeile gewaehlt: {selected()}')
 
 # while open: the game and noclip get no key
@@ -216,22 +227,29 @@ keys.discard(ord('W'))
 # card design page: Overdrive is the default, Classic chosen -> Gripline.ini CardStyle=0
 open(os.path.join(root, 'Gripline.ini'), 'wb').write(b'[Gripline]\r\nCardColor=3\r\n')
 press(0x79)
-press(UP); press(UP); press(UP)
+goto('Card design')
 check(selected() == 'Card design' and panel_rows().get('Card design') == 'Overdrive', f'Karten-Design-Zeile zeigt Overdrive: {panel_rows()}')
 press(ENTER)
 check(selected() == 'Overdrive' and panel_rows().get('Overdrive') == '\u2713 active', f'Design-Seite: Overdrive aktiv gewaehlt {panel_rows()}')
-press(UP); press(UP); press(ENTER)
+press(UP)
+check(e.call('Fh2TestNotifyStyleGet') == 1, 'Vorschau: Pfeil hoch zeigt Enhanced sofort')
+press(UP); press(ENTER)
 gi = open(os.path.join(root, 'Gripline.ini'), 'rb').read()
 check(e.call('Fh2TestNotifyStyleGet') == 0 and b'CardStyle=0' in gi and b'CardColor=3' in gi, f'Classic gewaehlt und gespeichert: {gi!r}')
 check(panel_rows().get('Classic') == '\u2713 active', 'Haken wandert zu Classic')
-press(DOWN); press(DOWN); press(ENTER)
+press(DOWN)
+check(e.call('Fh2TestNotifyStyleGet') == 1, 'Vorschau Enhanced')
+press(ESC)
+check(e.call('Fh2TestNotifyStyleGet') == 0 and b'CardStyle=0' in open(os.path.join(root, 'Gripline.ini'), 'rb').read(),
+      'Esc: Vorschau endet, gespeichertes Classic bleibt')
+press(ENTER); press(DOWN); press(DOWN); press(ENTER)
 check(e.call('Fh2TestNotifyStyleGet') == 2 and b'CardStyle=2' in open(os.path.join(root, 'Gripline.ini'), 'rb').read(), 'zurueck auf Overdrive')
 press(ESC); press(ESC)
 check(tick() == LEVEL_CLOSED, 'Esc, Esc: zu')
 
 # mouse steering page: Off by default, Medium chosen -> FH2_Keyboard.ini MouseSteering=40
 press(0x79)
-for _ in range(10): press(UP)
+goto('Mouse steering (experimental)')
 check(selected() == 'Mouse steering (experimental)' and panel_rows().get('Mouse steering (experimental)') == 'Off', f'Maus-Zeile zeigt Aus: {panel_rows()}')
 press(ENTER)
 check(selected() == 'Off' and panel_rows().get('Off') == '\u2713 active', f'Maus-Seite: Aus gewaehlt {panel_rows()}')
@@ -244,7 +262,7 @@ check(tick() == LEVEL_CLOSED, 'Maus: Esc, Esc: zu')
 
 # telemetry page: Turn rate on -> Gripline.ini TelemetryShow, dead zone 40 % -> FH2_Keyboard.ini
 press(0x79)
-for _ in range(9): press(UP)
+goto('Live telemetry')
 check(selected() == 'Live telemetry', selected())
 press(ENTER)
 check(selected() == 'Telemetry panel', selected())
@@ -263,7 +281,7 @@ check(tick() == LEVEL_CLOSED, 'Telemetrie/Totzone: zu')
 
 # world page: three on/off rows, restart note
 press(0x79)
-press(UP); press(UP); press(UP); press(UP); press(UP)
+goto('World: cameras, names, icons')
 check(selected() == 'World: cameras, names, icons', selected())
 press(ENTER)
 rows = panel_rows()
@@ -279,7 +297,7 @@ check(tick() == LEVEL_CLOSED, 'Welt: zu')
 
 # no damage page: Off by default, "Other cars" chosen -> Gripline.ini NoDamage=1, then back to Off
 press(0x79)
-press(UP); press(UP); press(UP); press(UP)
+goto('No damage on cars')
 check(selected() == 'No damage on cars' and panel_rows().get('No damage on cars') == 'Off', f'Schaden-Zeile zeigt Aus: {panel_rows()}')
 press(ENTER)
 rows = panel_rows()
@@ -299,7 +317,7 @@ check(tick() == LEVEL_CLOSED, 'Schaden: zu')
 
 # logbook page: totals, nothing driven yet
 press(0x79)
-for _ in range(8): press(UP)
+goto('Logbook')
 check(selected() == 'Logbook', repr(selected()))
 press(ENTER)
 rows = panel_rows()
@@ -308,7 +326,7 @@ press(ESC); press(ESC)
 check(tick() == LEVEL_CLOSED, 'Fahrtenbuch: zu')
 # records page: empty, clear asks first
 press(0x79)
-for _ in range(7): press(UP)
+goto('Records')
 check(selected() == 'Records', selected())
 press(ENTER)
 rows = panel_rows()
@@ -316,14 +334,70 @@ check(rows.get('0-100 km/h') == '\u2013' and 'Clear all records' in rows, f'Reko
 press(ENTER)
 check('Sure? Enter again' in panel_rows(), 'Rekorde loeschen fragt nach')
 press(ESC)
-# own sprint page: no car yet -> start not set
-press(DOWN)
-check(selected() == 'Own sprints', selected())
+check('Own sprint' not in rows, f'Eigener Sprint ist weg: {rows}')
+press(ESC)
+check('Own sprints' not in panel_rows(), 'Eigene Sprints nicht mehr im Menue')
+press(ESC)
+check(tick() == LEVEL_CLOSED, 'Rekorde: zu')
+
+# settings page (V7): card colour with preview, cockpit view 2, update notice
+gpath = os.path.join(root, 'Gripline.ini')
+open(gpath, 'wb').write(b'[Gripline]\r\nCardColor=0\r\nUpdateCheck=1\r\n')
+press(0x79)
+check(goto('Settings'), selected())
 press(ENTER)
 rows = panel_rows()
-check('Set start here' in rows and 'Set finish here' in rows and 'Delete sprint' not in rows, f'Sprint-Seite: {rows}')
+check(selected() == 'Card colour' and 'Steering animation 1:1' in rows and 'Cockpit view 2: forward' in rows
+      and 'Cockpit view 2: height' in rows and rows.get('Update notice at start') == 'On', f'Einstellungen: {rows}')
+press(ENTER)
+check(selected() == 'Blue (original)' and panel_rows().get('Blue (original)') == '\u2713 active', f'Farbseite: {panel_rows()}')
+press(DOWN)
+check(e.call('Fh2TestNotifyColorGet') == 1, 'Vorschau: Rot sofort sichtbar')
+press(ESC)
+check(e.call('Fh2TestNotifyColorGet') == 0 and selected() == 'Card colour', 'Esc: zurueck auf Blau, Einstellungen')
+press(ENTER); press(DOWN); press(DOWN); press(ENTER)
+check(e.call('Fh2TestNotifyColorGet') == 2 and panel_rows().get('Green') == '\u2713 active', 'Gruen gewaehlt')
+press(ESC)
+check(goto('Cockpit view 2: forward'), selected())
+press(ENTER)
+check(selected() == '35 cm', f'nach vorn: aktueller Wert gewaehlt {selected()}')
+press(DOWN); press(ENTER)
+check(panel_rows().get('40 cm') == '\u2713 active', f'40 cm gesetzt: {panel_rows()}')
+press(ESC)
+check(goto('Update notice at start'), selected())
+press(ENTER)
+check(panel_rows().get('Update notice at start') == 'Off' and b'UpdateCheck=0' in open(gpath, 'rb').read(), 'Update-Hinweis aus und gespeichert')
+press(ENTER)
+check(b'UpdateCheck=1' in open(gpath, 'rb').read(), 'wieder an')
+press(ESC)
+
+# cards & notices: presets and single groups -> Gripline.ini CardsHidden
+check(goto('Cards & notices') and panel_rows().get('Cards & notices') == 'Show everything', f'Karten-Zeile: {panel_rows().get("Cards & notices")}')
+press(ENTER)
+rows = panel_rows()
+check(selected() == 'Show everything' and rows.get('Show everything') == '\u2713 active' and rows.get('Trip summary (pause)') == '\u2713 on'
+      and 'Warnings always show' in rows, f'Karten-Seite: {rows}')
+press(DOWN); press(DOWN); press(ENTER)
+check(b'CardsHidden=127' in open(gpath, 'rb').read() and panel_rows().get('Start cards') == 'off', 'Nur Warnungen: alles aus, gespeichert')
+press(UP); press(ENTER)
+check(b'CardsHidden=93' in open(gpath, 'rb').read() and panel_rows().get('New record') == '\u2713 on', 'Wenig: Rekorde + Lenkrad bleiben')
+check(goto('Trip summary (pause)'), selected())
+press(ENTER)
+check(b'CardsHidden=85' in open(gpath, 'rb').read(), 'Fahrt-Bilanz wieder an (einzeln)')
+press(ESC)
+check(panel_rows().get('Cards & notices') == 'own choice', 'Hauptseite: eigene Auswahl')
+press(ENTER)
+press(ENTER)  # "Show everything"
+check(b'CardsHidden=0' in open(gpath, 'rb').read(), 'alles wieder an')
+press(ESC)
+
+# traffic page: presets, restart note
+check(goto('Traffic'), selected())
+press(ENTER)
+rows = panel_rows()
+check('Original' in rows and 'No Traffic' in rows and 'Takes effect after a restart' in rows, f'Verkehr: {rows}')
 press(ESC); press(ESC)
-check(tick() == LEVEL_CLOSED, 'Rekorde/Sprint: zu')
+check(tick() == LEVEL_CLOSED, 'Einstellungen/Karten/Verkehr: zu')
 
 # controller: LS + D-pad right opens, D-pad down moves, A chooses, B back / close
 def pad(buttons, ly=0):

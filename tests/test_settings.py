@@ -17,7 +17,7 @@ root = tempfile.mkdtemp(prefix='gl-settings-')
 e = Emu(DLL, root)
 KEYS = ['TrafficLevel', 'RushHourAllDay', 'Notifications', 'SteeringAnimation', 'CockpitViewForward',
         'CockpitViewUp', 'CardColor', 'CardStyle', 'UpdateCheck', 'SpeedCameras', 'CarLabels', 'Telemetry',
-        'TelemetryShow', 'EventIcons', 'NewsSeen', 'NoDamage']
+        'TelemetryShow', 'EventIcons', 'NewsSeen', 'NoDamage', 'CardsHidden']
 
 
 def read(text):
@@ -54,6 +54,9 @@ check(ok == 1 and n == 0 and v['TrafficLevel'] == 2, 'alte Schluessel (Weather) 
 
 ok, v, n, s = read('\ufeff[Gripline]\r\nTelemetryShow=4095\r\n')
 check(ok == 1 and v['TelemetryShow'] == 4095, 'UTF-8 mit BOM')
+
+ok, v, n, s = read('[Gripline]\r\nCardsHidden=117\r\n')
+check(ok == 1 and v['CardsHidden'] == 117, 'CardsHidden gelesen')
 
 print(f'\n{checks[0]} checks, {len(fails)} failed')
 sys.exit(1 if fails else 0)

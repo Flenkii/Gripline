@@ -201,8 +201,19 @@ static int start_card(char *out, unsigned size) {
     return 0;
 }
 
+static volatile LONG enabled_setting = 1;
+
+int update_check_enabled(void) {
+    return (int)enabled_setting;
+}
+
+void update_check_remember(int on) {
+    InterlockedExchange(&enabled_setting, on ? 1 : 0);
+}
+
 void update_check_start(unsigned char *game_image, int enabled) {
     game = game_image;
+    update_check_remember(enabled);
     if (!enabled) {
         log_append("UPDATE: update check off (Gripline.ini UpdateCheck=0).\r\n");
         return;

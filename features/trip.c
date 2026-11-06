@@ -101,7 +101,7 @@ static void show(double m, double s, float t) {
     log_units();
     char text[128];
     format(text, sizeof(text), m, s, t, game_units_imperial(game));
-    notify_show(text);
+    if (notify_kind_on(NOTIFY_KIND_TRIP)) notify_show(text);
 }
 
 void trip_step(unsigned long long now) {

@@ -13,6 +13,7 @@
 #include "support.h"
 #include "report.h"
 #include "no_damage.h"
+#include "update_check.h"
 
 #define VK_UP_ 0x26
 #define VK_DOWN_ 0x28
@@ -24,10 +25,34 @@
 #define FILE_LIMIT 32768u
 #define MAX_ROWS (NOTIFY_PANEL_ROWS - 1)
 
-enum { LEVEL_CLOSED, LEVEL_GROUPS, LEVEL_LIST, LEVEL_BINDING, LEVEL_CAPTURE, LEVEL_RESET_ALL, LEVEL_STYLE, LEVEL_MOUSE, LEVEL_TELEMETRY, LEVEL_WORLD, LEVEL_LOGBOOK, LEVEL_RECORDS, LEVEL_SPRINT, LEVEL_DAMAGE, LEVEL_COUNT };
+enum { LEVEL_CLOSED, LEVEL_GROUPS, LEVEL_LIST, LEVEL_BINDING, LEVEL_CAPTURE, LEVEL_RESET_ALL, LEVEL_STYLE, LEVEL_MOUSE, LEVEL_TELEMETRY, LEVEL_WORLD, LEVEL_LOGBOOK, LEVEL_RECORDS, LEVEL_DAMAGE,
+       LEVEL_SETTINGS, LEVEL_COLOR, LEVEL_VIEW_FORWARD, LEVEL_VIEW_UP, LEVEL_TRAFFIC, LEVEL_CARDS, LEVEL_COUNT };
 
 /* first page: rows after the binding pages */
-enum { TOP_STYLE = 100, TOP_RESET = 101, TOP_MOUSE = 102, TOP_TELEMETRY = 103, TOP_WORLD = 104, TOP_LOGBOOK = 105, TOP_RECORDS = 106, TOP_SPRINT = 107, TOP_REPORT = 108, TOP_DAMAGE = 109 };
+enum { TOP_STYLE = 100, TOP_RESET = 101, TOP_MOUSE = 102, TOP_TELEMETRY = 103, TOP_WORLD = 104, TOP_LOGBOOK = 105, TOP_RECORDS = 106, TOP_REPORT = 108, TOP_DAMAGE = 109,
+       TOP_SETTINGS = 110, TOP_CARDS = 111, TOP_TRAFFIC = 112 };
+
+/* settings page (V7): rows */
+enum { SET_COLOR, SET_STEERING, SET_VIEW_FORWARD, SET_VIEW_UP, SET_UPDATE };
+/* cockpit view 2 choices in cm (rig_settings.c ranges -20..80 and -20..30) */
+#define VIEW_STEP 5
+#define VIEW_FORWARD_MIN (-20)
+#define VIEW_FORWARD_MAX 80
+#define VIEW_UP_MIN (-20)
+#define VIEW_UP_MAX 30
+/* cards page: presets, then one row per card group (actions CARDS_KIND_FIRST + kind) */
+enum { CARDS_PRESET_ALL, CARDS_PRESET_FEW, CARDS_PRESET_WARNINGS, CARDS_PRESET_COUNT };
+#define CARDS_KIND_FIRST 10
+static const int cards_presets[CARDS_PRESET_COUNT] = {0, NOTIFY_PRESET_FEW, NOTIFY_KINDS_ALL};
+static const wchar_t *const preset_german[CARDS_PRESET_COUNT] = {L"Alles zeigen", L"Wenig", L"Nur Warnungen"};
+static const wchar_t *const preset_english[CARDS_PRESET_COUNT] = {L"Show everything", L"Few", L"Warnings only"};
+static const wchar_t *const kind_german[NOTIFY_KIND_COUNT] = {L"Startkarten", L"Neuer Rekord", L"Meilensteine",
+                                                              L"Fahrt-Bilanz (Pause)", L"Live-Infos (Noclip, Maus)",
+                                                              L"Lenkrad & Nitro", L"Bestätigungen (Mods-Seite)"};
+static const wchar_t *const kind_english[NOTIFY_KIND_COUNT] = {L"Start cards", L"New record", L"Milestones",
+                                                               L"Trip summary (pause)", L"Live info (noclip, mouse)",
+                                                               L"Wheel & nitro", L"Confirmations (Mods page)"};
+#define PREVIEW_TAG 0x9e7000u /* design / colour preview card: one card, new text in place */
 
 /* mouse steering choices: FH2_Keyboard.ini MouseSteering values */
 #define MOUSE_CHOICES 6
@@ -443,8 +468,9 @@ static int selected_action(void) {
 }
 
 static void hint(int first_page) {
-    row_add(tr(L"↑↓ wählen · Enter OK", L"↑↓ choose · Enter OK"),
-            first_page ? tr(L"Esc schließen", L"Esc close") : tr(L"Esc zurück", L"Esc back"), NOTIFY_ROW_HINT, -1);
+    /* keyboard and controller at once (A = Enter, B = Esc) */
+    row_add(tr(L"↑↓ wählen · Enter/A OK", L"↑↓ choose · Enter/A OK"),
+            first_page ? tr(L"Esc/B schließen", L"Esc/B close") : tr(L"Esc/B zurück", L"Esc/B back"), NOTIFY_ROW_HINT, -1);
 }
 
 /* digits of v at out[n]; returns the new length */
@@ -484,6 +510,28 @@ static const wchar_t *const damage_english[NO_DAMAGE_COUNT] = {L"Off (as in the 
 static const wchar_t *const damage_short_german[NO_DAMAGE_COUNT] = {L"Aus", L"Andere", L"Alle"};
 static const wchar_t *const damage_short_english[NO_DAMAGE_COUNT] = {L"Off", L"Others", L"All"};
 
+static int style_saved; /* the saved card design (the design page previews others while choosing) */
+
+/* "35 cm" / "-5 cm" */
+static void centimetres(int v, wchar_t out[32]) {
+    unsigned n = 0;
+    if (v < 0) out[n++] = L'-', v = -v;
+    n = wuint(out, n, (unsigned)v);
+    wcopy(out, n, 32, L" cm");
+}
+
+/* traffic preset names (rig_settings.c), 0 = own values */
+static const wchar_t *traffic_name(int preset) {
+    return preset > 0 ? rig_density_choice(keyboard_game_image(), (unsigned)preset) : tr(L"eigene Werte", L"own values");
+}
+
+static const wchar_t *cards_preset_name(void) {
+    int hidden = notify_hidden_kinds();
+    for (int p = 0; p < CARDS_PRESET_COUNT; ++p)
+        if (hidden == cards_presets[p]) return tr(preset_german[p], preset_english[p]);
+    return tr(L"eigene Auswahl", L"own choice");
+}
+
 static void build_page(wchar_t *title) {
     row_count = 0;
     title[0] = 0;
@@ -492,9 +540,12 @@ static void build_page(wchar_t *title) {
     switch (m.level) {
         case LEVEL_GROUPS:
             wcopy(title, 0, 64, tr(L"Gripline-Menü", L"Gripline menu"));
+            /* V7: four sections, so the long list reads at a glance */
+            row_add(tr(L"Tasten & Steuerung", L"Keys & controls"), L"", NOTIFY_ROW_SECTION, -1);
             for (unsigned g = 0; g < GROUP_COUNT; ++g) row_add(tr(groups[g].german, groups[g].english), L"›", 0, (int)g);
             row_add(tr(L"Maus-Lenkung (experimentell)", L"Mouse steering (experimental)"), tr(mouse_german[mouse_choice()], mouse_english[mouse_choice()]), 0,
                     TOP_MOUSE);
+            row_add(tr(L"Fahren & Daten", L"Driving & data"), L"", NOTIFY_ROW_SECTION, -1);
             row_add(tr(L"Live-Telemetrie", L"Live telemetry"), telemetry_enabled() ? tr(L"An", L"On") : tr(L"Aus", L"Off"), 0,
                     TOP_TELEMETRY);
             {
@@ -506,20 +557,82 @@ static void build_page(wchar_t *title) {
                 row_add(tr(L"Fahrtenbuch", L"Logbook"), dist, 0, TOP_LOGBOOK);
             }
             row_add(tr(L"Rekorde", L"Records"), L"›", 0, TOP_RECORDS);
-            {
-                float sm;
-                int ss = records_sprint_state(&sm);
-                row_add(tr(L"Eigene Sprints", L"Own sprints"), ss == 2 ? tr(L"aktiv", L"active") : ss == 1 ? tr(L"Ziel fehlt", L"no finish") : L"›",
-                        0, TOP_SPRINT);
-            }
+            row_add(tr(L"Welt & Autos", L"World & cars"), L"", NOTIFY_ROW_SECTION, -1);
             row_add(tr(L"Welt: Blitzer, Namen, Symbole", L"World: cameras, names, icons"), L"›", 0, TOP_WORLD);
+            row_add(tr(L"Verkehr", L"Traffic"), traffic_name(rig_setting_get(RIG_TRAFFIC_PRESET)), 0, TOP_TRAFFIC);
             row_add(tr(L"Kein Schaden an Autos", L"No damage on cars"),
                     tr(damage_short_german[no_damage_mode()], damage_short_english[no_damage_mode()]), 0, TOP_DAMAGE);
-            row_add(tr(L"Karten-Design", L"Card design"), style_names[notify_style()], 0, TOP_STYLE);
+            row_add(L"Gripline", L"", NOTIFY_ROW_SECTION, -1);
+            row_add(tr(L"Einstellungen", L"Settings"), L"›", 0, TOP_SETTINGS);
+            row_add(tr(L"Karten & Hinweise", L"Cards & notices"), cards_preset_name(), 0, TOP_CARDS);
+            row_add(tr(L"Karten-Design", L"Card design"), style_names[style_saved], 0, TOP_STYLE);
             row_add(tr(L"Problem-Bericht erstellen", L"Create problem report"), L"ZIP", 0, TOP_REPORT);
             row_add(tr(L"Alle Tasten auf Standard", L"Reset all keys to default"), L"›", 0, TOP_RESET); /* keys only, not the other settings */
             hint(1);
             break;
+        case LEVEL_SETTINGS: {
+            wcopy(title, 0, 64, tr(L"Einstellungen", L"Settings"));
+            row_add(tr(L"Kartenfarbe", L"Card colour"), rig_color_choice(keyboard_game_image(), (unsigned)rig_setting_get(RIG_GRIP_CARD_COLOR)), 0, SET_COLOR);
+            row_add(tr(L"Lenkrad-Animation 1:1", L"Steering animation 1:1"), rig_setting_get(RIG_GRIP_STEERING) ? tr(L"An", L"On") : tr(L"Aus", L"Off"), 0,
+                    SET_STEERING);
+            wchar_t cm[32];
+            centimetres(rig_setting_get(RIG_GRIP_VIEW_FORWARD), cm);
+            row_add(tr(L"Cockpit-Ansicht 2: nach vorn", L"Cockpit view 2: forward"), cm, 0, SET_VIEW_FORWARD);
+            centimetres(rig_setting_get(RIG_GRIP_VIEW_UP), cm);
+            row_add(tr(L"Cockpit-Ansicht 2: Höhe", L"Cockpit view 2: height"), cm, 0, SET_VIEW_UP);
+            row_add(tr(L"Update-Hinweis beim Start", L"Update notice at start"), update_check_enabled() ? tr(L"An", L"On") : tr(L"Aus", L"Off"), 0,
+                    SET_UPDATE);
+            row_add(tr(L"Lenkrad-Animation, Update:", L"Steering animation, update:"), L"", NOTIFY_ROW_INFO, -1);
+            row_add(tr(L"wirken nach Spiel-Neustart", L"take effect after a restart"), L"", NOTIFY_ROW_INFO, -1);
+            hint(0);
+            break;
+        }
+        case LEVEL_COLOR:
+            wcopy(title, 0, 64, tr(L"Kartenfarbe", L"Card colour"));
+            for (int i = 0; i < NOTIFY_COLOR_COUNT; ++i)
+                row_add(rig_color_choice(keyboard_game_image(), (unsigned)i), i == rig_setting_get(RIG_GRIP_CARD_COLOR) ? tr(L"✓ aktiv", L"✓ active") : L"",
+                        0, i);
+            row_add(tr(L"Vorschau beim Wählen", L"Preview while choosing"), L"", NOTIFY_ROW_INFO, -1);
+            hint(0);
+            break;
+        case LEVEL_VIEW_FORWARD:
+        case LEVEL_VIEW_UP: {
+            int forward = m.level == LEVEL_VIEW_FORWARD;
+            int now = rig_setting_get(forward ? RIG_GRIP_VIEW_FORWARD : RIG_GRIP_VIEW_UP);
+            wcopy(title, 0, 64, forward ? tr(L"Cockpit 2: nach vorn", L"Cockpit 2: forward") : tr(L"Cockpit 2: Höhe", L"Cockpit 2: height"));
+            int low = forward ? VIEW_FORWARD_MIN : VIEW_UP_MIN, high = forward ? VIEW_FORWARD_MAX : VIEW_UP_MAX;
+            int standard = forward ? 35 : -5;
+            for (int v = low; v <= high; v += VIEW_STEP) {
+                wchar_t cm[32];
+                centimetres(v, cm);
+                row_add(cm, v == now ? tr(L"✓ aktiv", L"✓ active") : v == standard ? tr(L"Standard", L"default") : L"", 0, v - low);
+            }
+            hint(0);
+            break;
+        }
+        case LEVEL_TRAFFIC: {
+            wcopy(title, 0, 64, tr(L"Verkehr", L"Traffic"));
+            int now = rig_setting_get(RIG_TRAFFIC_PRESET);
+            for (int p = 1; p < RIG_DENSITY_COUNT; ++p)
+                row_add(traffic_name(p), p == now ? tr(L"✓ aktiv", L"✓ active") : L"", 0, p);
+            if (!now) row_add(tr(L"Jetzt: eigene Werte", L"Now: own values (Mods page)"), L"", NOTIFY_ROW_INFO, -1);
+            row_add(tr(L"Wirkt nach Spiel-Neustart", L"Takes effect after a restart"), L"", NOTIFY_ROW_INFO, -1);
+            hint(0);
+            break;
+        }
+        case LEVEL_CARDS: {
+            wcopy(title, 0, 64, tr(L"Karten & Hinweise", L"Cards & notices"));
+            int hidden = notify_hidden_kinds();
+            row_add(tr(L"Voreinstellung", L"Preset"), L"", NOTIFY_ROW_SECTION, -1);
+            for (int p = 0; p < CARDS_PRESET_COUNT; ++p)
+                row_add(tr(preset_german[p], preset_english[p]), hidden == cards_presets[p] ? tr(L"✓ aktiv", L"✓ active") : L"", 0, p);
+            row_add(tr(L"Einzeln (Enter = an/aus)", L"One by one (Enter = on/off)"), L"", NOTIFY_ROW_SECTION, -1);
+            for (int k = 0; k < NOTIFY_KIND_COUNT; ++k)
+                row_add(tr(kind_german[k], kind_english[k]), (hidden & (1 << k)) ? tr(L"aus", L"off") : tr(L"✓ an", L"✓ on"), 0, CARDS_KIND_FIRST + k);
+            row_add(tr(L"Warnungen kommen immer", L"Warnings always show"), L"", NOTIFY_ROW_INFO, -1);
+            hint(0);
+            break;
+        }
         case LEVEL_LIST:
             wcopy(title, 0, 64, tr(groups[m.group].german, groups[m.group].english));
             for (int i = 0; i < group_size(m.group); ++i) {
@@ -555,7 +668,7 @@ static void build_page(wchar_t *title) {
         case LEVEL_STYLE:
             wcopy(title, 0, 64, tr(L"Karten-Design", L"Card design"));
             for (int i = 0; i < NOTIFY_STYLE_COUNT; ++i)
-                row_add(style_names[i], i == notify_style() ? tr(L"✓ aktiv", L"✓ active") : L"", 0, i);
+                row_add(style_names[i], i == style_saved ? tr(L"✓ aktiv", L"✓ active") : L"", 0, i);
             hint(0);
             break;
         case LEVEL_MOUSE:
@@ -611,7 +724,8 @@ static void build_page(wchar_t *title) {
                 distance_text(cm, text);
                 row_add(name, text, 0, -1);
             }
-            row_add(tr(L"Meiste Kilometer", L"Most kilometres"), L"", NOTIFY_ROW_SECTION, -1);
+            row_add(game_units_imperial(keyboard_game_image()) ? tr(L"Meiste Meilen", L"Most miles") : tr(L"Meiste Kilometer", L"Most kilometres"), L"",
+                    NOTIFY_ROW_SECTION, -1);
             int any = 0;
             for (unsigned r = 0; r < 5; ++r) {
                 double m;
@@ -627,13 +741,13 @@ static void build_page(wchar_t *title) {
         case LEVEL_RECORDS: {
             wcopy(title, 0, 64, tr(L"Rekorde", L"Records"));
             int imperial = game_units_imperial(keyboard_game_image());
-            static const unsigned kinds_metric[6] = {RECORD_SPRINT, RECORD_SPRINT200, RECORD_QUARTER, RECORD_BRAKE, RECORD_TOP, RECORD_OWN};
-            static const unsigned kinds_imperial[6] = {RECORD_SPRINT_MPH, RECORD_SPRINT200_MPH, RECORD_QUARTER, RECORD_BRAKE_MPH, RECORD_TOP, RECORD_OWN};
-            static const wchar_t *const names_de[6] = {L"0-100 km/h", L"0-200 km/h", L"Viertelmeile", L"Bremsweg 100-0", L"Höchsttempo", L"Eigener Sprint"};
-            static const wchar_t *const names_mph[6] = {L"0-60 mph", L"0-100 mph", L"Quarter mile", L"Braking 60-0", L"Top speed", L"Own sprint"};
-            static const wchar_t *const names_en[6] = {L"0-100 km/h", L"0-200 km/h", L"Quarter mile", L"Braking 100-0", L"Top speed", L"Own sprint"};
-            static const wchar_t *const names_de_mph[6] = {L"0-60 mph", L"0-100 mph", L"Viertelmeile", L"Bremsweg 60-0", L"Höchsttempo", L"Eigener Sprint"};
-            for (unsigned i = 0; i < 6; ++i) {
+            static const unsigned kinds_metric[5] = {RECORD_SPRINT, RECORD_SPRINT200, RECORD_QUARTER, RECORD_BRAKE, RECORD_TOP};
+            static const unsigned kinds_imperial[5] = {RECORD_SPRINT_MPH, RECORD_SPRINT200_MPH, RECORD_QUARTER, RECORD_BRAKE_MPH, RECORD_TOP};
+            static const wchar_t *const names_de[5] = {L"0-100 km/h", L"0-200 km/h", L"Viertelmeile", L"Bremsweg 100-0", L"Höchsttempo"};
+            static const wchar_t *const names_mph[5] = {L"0-60 mph", L"0-100 mph", L"Quarter mile", L"Braking 60-0", L"Top speed"};
+            static const wchar_t *const names_en[5] = {L"0-100 km/h", L"0-200 km/h", L"Quarter mile", L"Braking 100-0", L"Top speed"};
+            static const wchar_t *const names_de_mph[5] = {L"0-60 mph", L"0-100 mph", L"Viertelmeile", L"Bremsweg 60-0", L"Höchsttempo"};
+            for (unsigned i = 0; i < 5; ++i) {
                 unsigned k = imperial ? kinds_imperial[i] : kinds_metric[i];
                 float v = records_best(k);
                 wchar_t text[32];
@@ -658,25 +772,6 @@ static void build_page(wchar_t *title) {
             }
             row_add(confirm_clear ? tr(L"Sicher? Nochmal Enter", L"Sure? Enter again") : tr(L"Alle Rekorde löschen", L"Clear all records"),
                     L"", 0, 0);
-            hint(0);
-            break;
-        }
-        case LEVEL_SPRINT: {
-            wcopy(title, 0, 64, tr(L"Eigene Sprints", L"Own sprints"));
-            float sm;
-            int ss = records_sprint_state(&sm);
-            row_add(tr(L"Start hier setzen", L"Set start here"), ss >= 1 ? tr(L"✓ gesetzt", L"✓ set") : L"", 0, 0);
-            row_add(tr(L"Ziel hier setzen", L"Set finish here"), ss == 2 ? tr(L"✓ gesetzt", L"✓ set") : L"", 0, 1);
-            if (ss) row_add(tr(L"Sprint löschen", L"Delete sprint"), L"", 0, 2);
-            if (ss == 2) {
-                wchar_t text[32];
-                distance_text((double)sm, text);
-                row_add(tr(L"Luftlinie Start-Ziel", L"Start to finish"), text, NOTIFY_ROW_INFO, -1);
-                row_add(tr(L"Durch den Start fahren = los", L"Leave the start = clock runs"), L"", NOTIFY_ROW_INFO, -1);
-            } else {
-                row_add(tr(L"Am Start halten, Start setzen,", L"Stop at the start, set it,"), L"", NOTIFY_ROW_INFO, -1);
-                row_add(tr(L"zum Ziel fahren, Ziel setzen", L"drive to the end, set finish"), L"", NOTIFY_ROW_INFO, -1);
-            }
             hint(0);
             break;
         }
@@ -723,6 +818,7 @@ static void open_menu(void) {
     m.german = game_language_is_german(keyboard_game_image());
     m.level = LEVEL_GROUPS;
     for (unsigned i = 0; i < LEVEL_COUNT; ++i) m.sel[i] = 0;
+    style_saved = notify_style();
     keyboard_block_input(1);
     show();
     log_append("KEYMENU: opened\r\n");
@@ -731,6 +827,8 @@ static void open_menu(void) {
 static volatile LONG pad_swallow; /* after closing: the controller's buttons stay away from the game until released */
 
 static void close_menu(void) {
+    if (m.level == LEVEL_STYLE) notify_set_style(style_saved); /* F8 closed during the preview */
+    if (m.level == LEVEL_COLOR) notify_set_color(rig_setting_get(RIG_GRIP_CARD_COLOR));
     InterlockedExchange(&pad_swallow, 1);
     m.level = LEVEL_CLOSED;
     keyboard_block_input(0);
@@ -743,18 +841,48 @@ static void back(void) {
         case LEVEL_GROUPS: close_menu(); return;
         case LEVEL_LIST: m.level = LEVEL_GROUPS; break;
         case LEVEL_RESET_ALL: m.level = LEVEL_GROUPS; break;
-        case LEVEL_STYLE: m.level = LEVEL_GROUPS; break;
+        case LEVEL_STYLE: notify_set_style(style_saved); m.level = LEVEL_GROUPS; break; /* end of the preview */
+        case LEVEL_SETTINGS: m.level = LEVEL_GROUPS; break;
+        case LEVEL_CARDS: m.level = LEVEL_GROUPS; break;
+        case LEVEL_TRAFFIC: m.level = LEVEL_GROUPS; break;
+        case LEVEL_COLOR: notify_set_color(rig_setting_get(RIG_GRIP_CARD_COLOR)); m.level = LEVEL_SETTINGS; break;
+        case LEVEL_VIEW_FORWARD: m.level = LEVEL_SETTINGS; break;
+        case LEVEL_VIEW_UP: m.level = LEVEL_SETTINGS; break;
         case LEVEL_MOUSE: m.level = LEVEL_GROUPS; break;
         case LEVEL_TELEMETRY: m.level = LEVEL_GROUPS; break;
         case LEVEL_WORLD: m.level = LEVEL_GROUPS; break;
         case LEVEL_DAMAGE: m.level = LEVEL_GROUPS; break;
         case LEVEL_LOGBOOK: m.level = LEVEL_GROUPS; break;
         case LEVEL_RECORDS: confirm_clear = 0; m.level = LEVEL_GROUPS; break;
-        case LEVEL_SPRINT: m.level = LEVEL_GROUPS; break;
         case LEVEL_BINDING: m.level = LEVEL_LIST; break;
         case LEVEL_CAPTURE: m.level = LEVEL_BINDING; break;
     }
     show();
+}
+
+/* design and colour pages: the row the arrows stand on is shown at once (menu and a sample card);
+   Enter keeps it, Esc goes back to the saved one (back(), close_menu()) */
+static void preview(void) {
+    if (m.level != LEVEL_STYLE && m.level != LEVEL_COLOR) return;
+    int i = selected_action();
+    if (i < 0) return;
+    wchar_t line[96];
+    unsigned n;
+    if (m.level == LEVEL_STYLE) {
+        notify_set_style(i);
+        n = wcopy(line, 0, 96, tr(L"Vorschau: ", L"Preview: "));
+        n = wcopy(line, n, 96, style_names[i]);
+    } else {
+        notify_set_color(i);
+        n = wcopy(line, 0, 96, tr(L"Vorschau: ", L"Preview: "));
+        n = wcopy(line, n, 96, rig_color_choice(keyboard_game_image(), (unsigned)i));
+    }
+    wcopy(line, n, 96, tr(L"\nEnter übernimmt, Esc zurück", L"\nEnter keeps it, Esc goes back"));
+    char text[192];
+    unsigned t = 0;
+    utf8(line, text, sizeof(text), &t);
+    text[t] = 0;
+    notify_show_step(text, PREVIEW_TAG, 2500);
 }
 
 static void apply(unsigned index, const unsigned char vk[4]) {
@@ -778,9 +906,6 @@ static void choose(void) {
                 m.level = LEVEL_RECORDS;
                 m.sel[LEVEL_RECORDS] = 0;
                 confirm_clear = 0;
-            } else if (action == TOP_SPRINT) {
-                m.level = LEVEL_SPRINT;
-                m.sel[LEVEL_SPRINT] = 0;
             } else if (action == TOP_LOGBOOK) {
                 m.level = LEVEL_LOGBOOK;
                 m.sel[LEVEL_LOGBOOK] = 0;
@@ -798,7 +923,17 @@ static void choose(void) {
                 m.sel[LEVEL_MOUSE] = mouse_choice();
             } else if (action == TOP_STYLE) {
                 m.level = LEVEL_STYLE;
-                m.sel[LEVEL_STYLE] = notify_style();
+                m.sel[LEVEL_STYLE] = style_saved;
+            } else if (action == TOP_SETTINGS) {
+                m.level = LEVEL_SETTINGS;
+                m.sel[LEVEL_SETTINGS] = 0;
+            } else if (action == TOP_CARDS) {
+                m.level = LEVEL_CARDS;
+                m.sel[LEVEL_CARDS] = 0;
+            } else if (action == TOP_TRAFFIC) {
+                int now = rig_setting_get(RIG_TRAFFIC_PRESET);
+                m.level = LEVEL_TRAFFIC;
+                m.sel[LEVEL_TRAFFIC] = now > 0 ? now - 1 : 0;
             } else {
                 m.group = action;
                 m.level = LEVEL_LIST;
@@ -856,21 +991,6 @@ static void choose(void) {
                     records_clear();
                     notify_show(m.german ? "Rekorde gelöscht" : "Records cleared");
                 }
-            }
-            break;
-        case LEVEL_SPRINT:
-            if (action == 0) {
-                if (records_set_start())
-                    notify_show(m.german ? "Start gesetzt\nJetzt zum Ziel fahren und Ziel setzen" : "Start set\nNow drive to the finish and set it");
-                else notify_show(m.german ? "Start nicht gesetzt\nErst losfahren (kein Auto erkannt)" : "Start not set\nDrive first (no car seen)");
-            } else if (action == 1) {
-                if (records_set_finish())
-                    notify_show(m.german ? "Ziel gesetzt\nZum Start fahren, losfahren = Zeit läuft" : "Finish set\nGo to the start, leaving it starts the clock");
-                else notify_show(m.german ? "Ziel nicht gesetzt\nErst Start setzen, Ziel 30 m+ weg" : "Finish not set\nSet the start first, 30 m+ away");
-            } else if (action == 2) {
-                records_clear_sprint();
-                notify_show(m.german ? "Sprint gelöscht" : "Sprint deleted");
-                m.sel[LEVEL_SPRINT] = 0;
             }
             break;
         case LEVEL_DAMAGE: {
@@ -951,6 +1071,7 @@ static void choose(void) {
         }
         case LEVEL_STYLE: {
             notify_set_style(action);
+            style_saved = action;
             int saved = save_style(action);
             char text[160];
             unsigned t = 0;
@@ -964,6 +1085,63 @@ static void choose(void) {
             notify_show(text);
             log_append(action == 0 ? "KEYMENU: card design Classic\r\n" : action == 1 ? "KEYMENU: card design Enhanced\r\n"
                                                                           : "KEYMENU: card design Overdrive\r\n");
+            break;
+        }
+        case LEVEL_SETTINGS:
+            if (action == SET_COLOR) {
+                m.level = LEVEL_COLOR;
+                m.sel[LEVEL_COLOR] = rig_setting_get(RIG_GRIP_CARD_COLOR);
+            } else if (action == SET_STEERING) {
+                rig_setting_set(RIG_GRIP_STEERING, !rig_setting_get(RIG_GRIP_STEERING)); /* saves, card "after a restart" */
+            } else if (action == SET_VIEW_FORWARD || action == SET_VIEW_UP) {
+                int forward = action == SET_VIEW_FORWARD;
+                int low = forward ? VIEW_FORWARD_MIN : VIEW_UP_MIN, high = forward ? VIEW_FORWARD_MAX : VIEW_UP_MAX;
+                int now = rig_setting_get(forward ? RIG_GRIP_VIEW_FORWARD : RIG_GRIP_VIEW_UP);
+                if (now < low) now = low;
+                if (now > high) now = high;
+                m.level = forward ? LEVEL_VIEW_FORWARD : LEVEL_VIEW_UP;
+                m.sel[m.level] = (now - low + VIEW_STEP / 2) / VIEW_STEP;
+            } else if (action == SET_UPDATE) {
+                int on = !update_check_enabled();
+                int saved = save_gripline_digit("UpdateCheck", on);
+                update_check_remember(on);
+                notify_show(saved ? (on ? (m.german ? "Update-Hinweis an\nab dem nächsten Start" : "Update notice on\nfrom the next start")
+                                        : (m.german ? "Update-Hinweis aus\nGripline fragt GitHub nicht mehr" : "Update notice off\nGripline no longer asks GitHub"))
+                                  : (m.german ? "Update-Hinweis\nNicht gespeichert" : "Update notice\nNot saved"));
+                log_append(on ? "KEYMENU: update check on\r\n" : "KEYMENU: update check off\r\n");
+            }
+            break;
+        case LEVEL_COLOR:
+            if (action >= 0 && action < NOTIFY_COLOR_COUNT) {
+                if (!rig_setting_set(RIG_GRIP_CARD_COLOR, action)) notify_set_color(action); /* rig_settings saves it */
+                log_append_value("KEYMENU: card colour ", action);
+            }
+            break;
+        case LEVEL_VIEW_FORWARD:
+        case LEVEL_VIEW_UP: {
+            int forward = m.level == LEVEL_VIEW_FORWARD;
+            int value = (forward ? VIEW_FORWARD_MIN : VIEW_UP_MIN) + action;
+            rig_setting_set(forward ? RIG_GRIP_VIEW_FORWARD : RIG_GRIP_VIEW_UP, value); /* live, saved, card */
+            log_append_value(forward ? "KEYMENU: cockpit view 2 forward cm " : "KEYMENU: cockpit view 2 up cm ", value);
+            break;
+        }
+        case LEVEL_TRAFFIC:
+            if (action >= 1 && action < RIG_DENSITY_COUNT) {
+                rig_setting_set(RIG_TRAFFIC_PRESET, action); /* saved, card "after a restart" */
+                log_append_value("KEYMENU: traffic preset ", action);
+            }
+            break;
+        case LEVEL_CARDS: {
+            int hidden = notify_hidden_kinds();
+            if (action >= 0 && action < CARDS_PRESET_COUNT) hidden = cards_presets[action];
+            else if (action >= CARDS_KIND_FIRST && action < CARDS_KIND_FIRST + NOTIFY_KIND_COUNT) hidden ^= 1 << (action - CARDS_KIND_FIRST);
+            else break;
+            notify_set_hidden_kinds(hidden);
+            int saved = save_gripline_int("CardsHidden", hidden);
+            if (!saved) notify_show_tinted(m.german ? "Karten & Hinweise\nNur bis zum Spielende (nicht gespeichert)"
+                                                    : "Cards & notices\nUntil the game closes (not saved)",
+                                           NOTIFY_COLOR_ORANGE, m.german ? "HINWEIS" : "NOTE", 0);
+            log_append_value("KEYMENU: hidden card groups ", hidden);
             break;
         }
         case LEVEL_RESET_ALL:
@@ -1180,6 +1358,7 @@ static void key_menu_tick(ULONGLONG now) {
     if (step) {
         int n = selectable_count();
         if (n > 0) m.sel[m.level] = (m.sel[m.level] + step + n) % n;
+        preview();
         show();
     }
 }

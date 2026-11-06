@@ -417,7 +417,7 @@ static void confirm_text(unsigned id, int value, char *text, size_t capacity) {
 }
 
 static void confirm_change(unsigned id, int value) {
-    if (card_quiet || !card_game) return;
+    if (card_quiet || !card_game || !notify_kind_on(NOTIFY_KIND_CONFIRM)) return;
     char text[192];
     confirm_text(id, value, text, sizeof(text));
     notify_show_step(text, 0x5e7000u + id, 3000);

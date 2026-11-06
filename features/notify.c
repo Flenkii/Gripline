@@ -229,6 +229,20 @@ int notify_style(void) {
     return (int)card_style;
 }
 
+static volatile LONG hidden_kinds;
+
+void notify_set_hidden_kinds(int mask) {
+    InterlockedExchange(&hidden_kinds, mask & NOTIFY_KINDS_ALL);
+}
+
+int notify_hidden_kinds(void) {
+    return (int)hidden_kinds;
+}
+
+int notify_kind_on(int kind) {
+    return kind < 0 || kind >= NOTIFY_KIND_COUNT || !(hidden_kinds & (1 << kind));
+}
+
 void notify_set_enabled(int on) {
     InterlockedExchange(&enabled, on ? 1 : 0);
 }
@@ -2864,6 +2878,9 @@ int notify_install_late(void) {
 }
 
 #ifdef FH2_TWEAKS_TEST
+__declspec(dllexport) int Fh2TestNotifyColorGet(void) {
+    return (int)color;
+}
 __declspec(dllexport) int Fh2TestNotifyStyleGet(void) {
     return notify_style();
 }

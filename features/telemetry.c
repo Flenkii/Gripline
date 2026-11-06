@@ -60,6 +60,11 @@ const wchar_t *telemetry_item_name(unsigned item, int german) {
     return item < TELEMETRY_SHOW_COUNT ? (german ? item_german[item] : item_english[item]) : L"";
 }
 
+/* a new record a moment ago: the row stands on a green pill (records.h RECORDS_FRESH_MS) */
+static void light(NotifyPanelRow *r, unsigned kind) {
+    if (records_fresh(kind)) r->style = NOTIFY_ROW_GOOD;
+}
+
 static float root(float x) {
     return _mm_cvtss_f32(_mm_sqrt_ss(_mm_set_ss(x)));
 }
@@ -312,6 +317,7 @@ void telemetry_step(unsigned long long now) {
             }
         } else wput(rows[n].keys, 32, de ? L"aus dem Stand" : L"from standstill");
         ++n;
+        light(&rows[n - 1], imperial ? RECORD_SPRINT_MPH : RECORD_SPRINT);
     }
     if (mask & (1 << TELEMETRY_SHOW_SPRINT200)) {
         row(&rows[n], imperial ? L"0-100 mph" : L"0-200 km/h", NOTIFY_ROW_NORMAL);
@@ -325,6 +331,7 @@ void telemetry_step(unsigned long long now) {
             }
         } else wput(rows[n].keys, 32, de ? L"aus dem Stand" : L"from standstill");
         ++n;
+        light(&rows[n - 1], imperial ? RECORD_SPRINT200_MPH : RECORD_SPRINT200);
     }
     if (mask & (1 << TELEMETRY_SHOW_QUARTER)) {
         row(&rows[n], de ? L"Viertelmeile" : L"Quarter mile", NOTIFY_ROW_NORMAL);
@@ -339,6 +346,7 @@ void telemetry_step(unsigned long long now) {
             wspeed(rows[n].keys, 32, quarter_speed);
         } else wput(rows[n].keys, 32, de ? L"aus dem Stand" : L"from standstill");
         ++n;
+        light(&rows[n - 1], RECORD_QUARTER);
         if (quarter_best > 0.0f && quarter_best < quarter_last - 0.005f) {
             row(&rows[n], de ? L"Beste Viertelmeile" : L"Best quarter mile", NOTIFY_ROW_HINT);
             wsec(rows[n++].keys, 32, quarter_best);
@@ -358,12 +366,14 @@ void telemetry_step(unsigned long long now) {
             }
         } else wput(rows[n].keys, 32, de ? L"voll bremsen" : L"brake hard");
         ++n;
+        light(&rows[n - 1], imperial ? RECORD_BRAKE_MPH : RECORD_BRAKE);
     }
     int best_style = dash ? NOTIFY_ROW_INFO : NOTIFY_ROW_HINT;
     if (dash && (mask & ((1 << TELEMETRY_SHOW_TOP) | (1 << TELEMETRY_SHOW_BEST))))
         row(&rows[n++], de ? L"Bestwerte" : L"Best values", NOTIFY_ROW_SECTION);
     if (mask & (1 << TELEMETRY_SHOW_TOP)) {
         row(&rows[n], de ? L"Höchsttempo" : L"Top speed", best_style);
+        light(&rows[n], RECORD_TOP);
         wspeed(rows[n++].keys, 32, top);
     }
     if (mask & (1 << TELEMETRY_SHOW_BEST)) {
