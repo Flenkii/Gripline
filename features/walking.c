@@ -57,7 +57,7 @@ static float dir[2] = {0, 1}; /* heading (x, z) */
 static float mirror = 1.0f;  /* the game's right row = mirror * (z, 0, -x) of the heading */
 static float pitch, pitch_sin, pitch_cos = 1.0f;
 static float fall;           /* vertical speed, m/s (+ = up) */
-static int grounded, bob_on, no_floor, recovered_logged;
+static int grounded, bob_on, no_floor, recovered_logged, jump_logged;
 static float last_ground;
 static float bob_phase;
 static float car_place[3], car_right[3], car_forward[3];
@@ -93,6 +93,7 @@ static int world_tried; /* tests: no lookup */
 #define WALK_SNAP 0.3f     /* stays on the ground going down up to this per step */
 #define WALK_HOVER 0.01f   /* the sphere rests this far above the floor */
 #define WALK_RECOVER 1.5f  /* sunk into the floor: looked for again from this far above */
+#define WALK_SLIDE_SLACK 0.3f /* a slide result may be this much farther than the move itself */
 #define WALK_RECOVER_MAX 0.6f /* the floor found again lifts the walker at most this much */
 #define WALK_PROBE 25.0f   /* looks this far down for a floor (less than WALK_HIDE_BELOW: not the car) */
 #define WALK_NO_FLOOR 4.0f /* metres of falling without any floor: no collision loaded there */
@@ -246,6 +247,22 @@ static int slide(const float from[3], const float to[3], int floor, float out[3]
     memory_copy(p, result, 16);
     if (!float_is_finite(p[0]) || !float_is_finite(p[1]) || !float_is_finite(p[2])) {
         for (unsigned i = 0; i < 3; ++i) out[i] = from[i];
+        return 1;
+    }
+    /* the sphere can only end within the move (plus a little sliding). When it starts inside something
+       (a trunk, a branch) the game's function sometimes gives back a place far away - near the car, as
+       the photo mode puts its camera back there (Marvin's video 06.11.2026: jumps of 10-20 m between
+       trees). Such a result is thrown away: the sphere stays where it was. */
+    float mx = to[0] - from[0], my = to[1] - from[1], mz = to[2] - from[2];
+    float ex = p[0] - from[0], ey = p[1] - from[1], ez = p[2] - from[2];
+    float reach = root(mx * mx + my * my + mz * mz) + WALK_SLIDE_SLACK;
+    if (ex * ex + ey * ey + ez * ez > reach * reach) {
+        for (unsigned i = 0; i < 3; ++i) out[i] = from[i];
+        if (!jump_logged) {
+            jump_logged = 1;
+            log_append_value("WALKING: a collision result far off the move was ignored, metres: ",
+                             (int)root(ex * ex + ey * ey + ez * ez));
+        }
         return 1;
     }
     out[0] = p[0], out[1] = p[1], out[2] = p[2];
