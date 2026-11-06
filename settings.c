@@ -29,8 +29,8 @@ static wchar_t ini_path[PATH_CAPACITY];
 
 void settings_defaults(ModOptions *options) {
     *options = (ModOptions){
-        .traffic_level = 4,
-        .traffic_all_day = 1,
+        .traffic_level = 0, /* Original: 100 cars hung the first load on some PCs (V6.4.1) */
+        .traffic_all_day = 0,
         .notifications = 1,
         .cockpit_view_forward = 35,
         .cockpit_view_up = -5,

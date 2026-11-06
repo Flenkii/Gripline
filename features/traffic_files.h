@@ -10,4 +10,11 @@ void traffic_files_start(const wchar_t *mount_dir, int traffic_level);
 /* For the mount: 1 = mount the folder, 0 = not. */
 int traffic_files_wait_ready(void);
 
+/* Game start, before the traffic starts: 1 = the last start with raised traffic never reached the road
+   (load hung) - Gripline.ini is set to Original traffic and the caller must use TrafficLevel 0. */
+int traffic_load_guard(const wchar_t *directory, int traffic_level);
+
+/* The own car's update (dt in s): after 5 s of it the start was fine (cheap, call from every update). */
+void traffic_load_reached(float dt);
+
 #endif

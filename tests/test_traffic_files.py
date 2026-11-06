@@ -117,6 +117,31 @@ check('MaxActiveTraffic="100"' in open(os.path.join(out, 'EntityModel', 'AI', 'C
       'MaxActiveTraffic 18 -> 100')
 check(f.call('Fh2TestTrafficFilesStart', f.put_wstr('C:\\test\\Mount'), 6) == 2, 'Kein Verkehr: Ordner wird eingebunden')
 check(f.call('Fh2TestTrafficFilesStart', f.put_wstr('C:\\test\\Mount'), 0) == 3, 'TrafficLevel=0: Ordner wird nicht eingebunden')
+check(not os.path.exists(os.path.join(out, 'EntityModel', 'AI', 'Densities.xml')) and
+      not os.path.exists(os.path.join(out, 'AI', 'CarLoadingSettings.xml')),
+      'TrafficLevel=0: alte Verkehrsdateien entfernt (Original wirkt wirklich)')
+
+# load guard: marker at each start with raised traffic, gone after 5 s on the road
+azi = os.path.join(root, 'Azimuth')
+os.makedirs(azi, exist_ok=True)
+ini = os.path.join(azi, 'Gripline.ini')
+open(ini, 'w').write('[Traffic]\r\nTrafficLevel=4\r\nRushHourAllDay=1\r\n[Gripline]\r\nNotifications=1\r\n')
+marker = os.path.join(azi, 'Gripline_loading.txt')
+check(f.call('Fh2TestLoadGuard', f.put_wstr('C:\\test\\Azimuth'), 4) == 0 and os.path.exists(marker),
+      'Guard: erster Start, Marker angelegt')
+f.call('Fh2TestLoadReached', 3000)
+check(os.path.exists(marker), 'Guard: 3 s gefahren, Marker bleibt')
+f.call('Fh2TestLoadReached', 2500)
+check(not os.path.exists(marker), 'Guard: 5 s gefahren, Marker weg')
+check(f.call('Fh2TestLoadGuard', f.put_wstr('C:\\test\\Azimuth'), 4) == 0, 'Guard: Start nach gutem Start normal')
+# no driving: the start "hung"
+check(f.call('Fh2TestLoadGuard', f.put_wstr('C:\\test\\Azimuth'), 4) == 1, 'Guard: Start nach Hänger erkannt')
+text = open(ini, newline='').read()
+check('TrafficLevel=0\r\n' in text and 'RushHourAllDay=0\r\n' in text and 'Notifications=1' in text,
+      f'Guard: Gripline.ini auf Original, Rest bleibt: {text!r}')
+check(not os.path.exists(marker), 'Guard: bei Original kein Marker')
+check(f.call('Fh2TestLoadGuard', f.put_wstr('C:\\test\\Azimuth'), 6) == 0 and not os.path.exists(marker),
+      'Guard: Kein Verkehr = kein Marker')
 
 print(f'\n{checks[0] - len(fails)}/{checks[0]} ok')
 sys.exit(1 if fails else 0)

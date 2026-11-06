@@ -26,6 +26,7 @@
 #include "wheel_watch.h"
 #include "cockpit_view.h"
 #include "no_damage.h"
+#include "traffic_files.h"
 
 #define RVA_DYNAMICS_VTABLE 0x2eb4bb8u
 #define RVA_DYNAMICS_REF_VTABLE 0x2eb5e18u
@@ -509,6 +510,7 @@ static void sample_trip(void *car, float dt) {
 void noclip_car_update(void *car, float dt, float frame_dt, unsigned frame) {
     void *dynamics = NULL;
     int local = game && car && is_local_car(car);
+    if (local) traffic_load_reached(dt); /* the start reached the road (load guard, traffic_files.c) */
     if (on && local) {
         dynamics = car_body(car);
         if (dynamics && dynamics != body && !begin(dynamics)) dynamics = NULL;

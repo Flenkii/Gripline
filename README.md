@@ -3,9 +3,9 @@
 **Keyboard driving, cockpit and traffic for Forza Horizon 2 on PC** (Xbox One version on the **Azimuth** wrapper).
 Works offline and online with [FH2MP](https://github.com/Charelene/FH2MP).
 
-**[⬇ Download the latest version](../../releases/latest)** · current version: **V6.4**
+**[⬇ Download the latest version](../../releases/latest)** · current version: **V6.4.1**
 
-**[Join the Gripline Discord](https://discord.gg/FEnY2nvc)** · help, bug reports, ideas for V7 and showcase
+**[Join the Gripline Discord](https://discord.gg/g83eBcrq)** · problems, questions, ideas for V7 and showcase. Join to always stay up to date with every new version.
 
 Gripline is an add-on next to Azimuth, the official [Extra Options](https://github.com/RokkuDayo/ForzaHorizon2_ExtraOptions)
 by RokkuDayo and FH2MP. It is one file, `fh2-mods\Gripline.dll`, a [FH2 Mod Platform](https://github.com/Trinculo54/fh2-mod-platform)
@@ -16,7 +16,7 @@ mod. Since V6 Gripline only does what the others don't:
 | **Keyboard** | Drive with WASD, arrow keys move the camera while driving and scroll in menus, Enter/Backspace/Esc in menus. Works together with a controller (one merged pad). Bindings in `FH2_Keyboard.ini`. |
 | **Steering animation** *(off by default)* | Cockpit: hands hidden, the in-game steering wheel turns 1:1 with your real wheel, as far as the rotation set in the Azimuth launcher. Files are made once into `mods\Gripline\media`, game files stay untouched. Applies after a restart. |
 | **Cockpit view 2** | A second interior camera like in FH5: Tab goes cockpit → cockpit 2 → next camera (also **V**). Distance: *Cockpit View 2: Forward / Up*. |
-| **More traffic** | Presets Original / Much More Traffic (100 cars, all day) / No Traffic / Drivatars Only, or an amount from 30 to 100 cars, picked by name on the *Traffic* page (MODS › Installed mods › Gripline). Gripline raises the game's own traffic data (copies, game files unchanged). Applies after a restart; offline only. |
+| **More traffic** | Presets Original / Much More Traffic (100 cars, all day) / No Traffic / Drivatars Only, or an amount from 30 to 100 cars, picked by name on the *Traffic* page (MODS › Installed mods › Gripline). Gripline raises the game's own traffic data (copies, game files unchanged). Applies after a restart; offline only. New installs start with Original (V6.4.1). If a start with more traffic hangs while loading, Gripline sets the traffic back to Original at the next start and shows a card. |
 | **Nitro key** | For [NitroSystem](https://github.com/qiangqiang101/NitroSystem) by qiangqiang101: **N** presses its nitro button. Off in online sessions. |
 | **Key list** | **F5** shows all your key bindings at the right of the picture; F5 again hides it. |
 | **Noclip** *(V6.4)* | **F6** lets your car fly through the map: through walls, the ground and buildings. W/S fly forward/back, A/D turn, Space/Left Ctrl up/down, Left Shift held = 4x faster; the arrow keys still move the camera. A card says on/off and shows speed and height while flying (mph/ft or km/h/m, like the game's speedometer). Offline only: a card says when it is locked in an online session and available again offline (like nitro). |
@@ -71,13 +71,20 @@ Gripline is a mod for the [FH2 Mod Platform](https://github.com/Trinculo54/fh2-m
 2. Get the FH2 Mod Platform: download the ZIP from its [releases](https://github.com/Trinculo54/fh2-mod-platform/releases) (version 2.8.0 or newer) and copy **`DWrite.dll`** next to `azimuth.exe`. (Any other mod's ZIP that ships platform 2.8.0+ has this file too.)
 3. Copy `fh2-mods\Gripline.dll` from the release ZIP's `Azimuth` folder next to `azimuth.exe` (so it ends up in `fh2-mods`).
 4. Start the game. Check: `fh2-mods\platform.log` lists Gripline, and Pause › Settings › MODS shows it.
-   Nothing there? Send `platform.log` (or the problem report) on [Discord](https://discord.gg/FEnY2nvc) or as an issue.
+   Nothing there? Send `platform.log` (or the problem report) on [Discord](https://discord.gg/g83eBcrq) or as an issue.
 
 Updating from V5: let the FH2MP launcher put the official `winmm.dll` back and delete `mods\Gripline\plugins\GriplineTick.dll`
 if you have it. Your `[Traffic]` and `[Gripline]` settings move from `FH2_ExtraOptions.ini` to `Gripline.ini` on the first
 start (copy of the old INI: `FH2_ExtraOptions.ini.before-gripline`). `FH2_Wheel.ini` is not used any more.
 
-Uninstall: delete `fh2-mods\Gripline.dll` and the folder `mods\Gripline`.
+Uninstall: delete `fh2-mods\Gripline.dll` **and** the folder `mods\Gripline`.
+
+Gripline never changes the game's own files. It only writes its own copies into `mods\Gripline\media`
+(cockpit animations, traffic data), and Extra Options loads that folder over the game's files. If you remove or
+switch off only `Gripline.dll`, those copies are still loaded without Gripline - the cockpit then looks wrong
+(hands missing, wheel or driver gone at full lock). Delete the folder `mods\Gripline` as well and everything is
+original again; Gripline makes the files new at its next start. From V7 Gripline also removes its cockpit files by
+itself when it cannot hook the game, and makes them new when the game's car files change.
 
 ## Keyboard bindings (default, editable in `FH2_Keyboard.ini`)
 
@@ -102,6 +109,7 @@ Uninstall: delete `fh2-mods\Gripline.dll` and the folder `mods\Gripline`.
 GitHub: [**Issues → New issue**](../../issues/new/choose). Pause › Settings › MODS › *Gripline: Create Problem Report*,
 then attach `Gripline_Report.zip` (next to `azimuth.exe`). It contains `Gripline.log/.ini`, `FH2_Keyboard.ini`,
 `FH2_ExtraOptions.log/.ini`, `fh2-mods\platform.log`, `data\logs\azimuth.log` and the Extra Options load order.
+Or just join the [Discord](https://discord.gg/g83eBcrq) and post your problem and `Gripline.log` in help-and-bug-reports. Join to also stay up to date with every new version.
 Wheel problems belong to Azimuth (report them there without mods).
 
 ## Known limits

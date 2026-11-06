@@ -1,5 +1,5 @@
-GRIPLINE V6.4 – keyboard, cockpit & traffic for Forza Horizon 2 (Azimuth)
-=======================================================================
+GRIPLINE V6.4.1 – keyboard, cockpit & traffic for Forza Horizon 2 (Azimuth)
+=========================================================================
 An add-on next to Azimuth, the official Extra Options and FH2MP.
 
 Source code: https://github.com/Flenkii/Gripline
@@ -25,7 +25,12 @@ official one back), and mods\Gripline\plugins\GriplineTick.dll if you have it.
 Your [Traffic]/[Gripline] settings move to Gripline.ini on the first start.
 FH2_Wheel.ini is not used any more.
 
-Uninstall: delete fh2-mods\Gripline.dll (and the folder mods\Gripline).
+Uninstall: delete fh2-mods\Gripline.dll AND the folder mods\Gripline.
+
+Gripline never changes the game files. It writes its own copies (cockpit animations,
+traffic data) into mods\Gripline\media, which Extra Options loads over the game's files.
+Cockpit looks wrong (hands missing, wheel/driver gone) or the game hangs while loading
+after removing Gripline? Delete the folder mods\Gripline - then everything is original.
 
 
 2. WHAT GRIPLINE DOES - AND WHAT THE OTHERS DO
@@ -42,8 +47,15 @@ Azimuth (its launcher): wheel, pedals, buttons, rotation and force feedback.
 Extra Options: weather, time of day, hiding the HUD (F1), autodrive (F2).
 
 
-3. NEW IN V6.4
---------------
+3. NEW IN V6.4.1
+----------------
+  - Fix: a start with more traffic could hang on the loading screen. If that happens,
+    Gripline sets the traffic back to Original at the next start and shows a card.
+  - Fix: "Original" traffic now really is original (old traffic files are removed).
+  - New installs start with Original traffic. Your Gripline.ini settings stay.
+
+NEW IN V6.4
+-----------
   - Noclip (F6): fly through walls, ground and buildings. W/S forward/back, A/D turn,
     Space/Left Ctrl up/down, Left Shift = 4x faster. Offline only (locked online, like nitro).
   - New cards: speed and height while flying, trip summary in the pause menu, wheel
