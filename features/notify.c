@@ -611,6 +611,25 @@ static float over_inside(const Layout *l, int cw, int ch, float px_, float py_) 
     return d; /* > 0 inside, distance to the nearest edge */
 }
 
+/* V7 telemetry: background see-through, text and the edge stay solid (base = the panel before its text) */
+static const unsigned char *see_base, *see_px;
+static float see_back = 1.0f;
+static void see_through_begin(const unsigned char *base, const unsigned char *px, float back) {
+    see_base = base, see_px = px, see_back = back;
+}
+static void see_through_end(void) {
+    see_base = see_px = NULL, see_back = 1.0f;
+}
+static float see_through(const unsigned char *src, float rim) {
+    if (!see_base) return 1.0f;
+    const unsigned char *b = see_base + (src - see_px);
+    int d = 0;
+    for (int k = 0; k < 3; ++k) d += src[k] > b[k] ? src[k] - b[k] : b[k] - src[k];
+    float keep = d > 24 ? 1.0f : (float)d / 24.0f; /* text (and its anti-aliased edge) */
+    if (rim * 1.5f > keep) keep = clamp01(rim * 1.5f);
+    return see_back + (1.0f - see_back) * keep;
+}
+
 static void finish_pixel_over(const unsigned char *src, unsigned char *dst, int x, int y, int w, int h, int g,
                               const Layout *l, float opacity, const unsigned char (*tone)[3]) {
     int cw = w - 2 * g, ch = h - 2 * g;
@@ -630,8 +649,10 @@ static void finish_pixel_over(const unsigned char *src, unsigned char *dst, int 
     float e = d < 0.0f ? -d : 0.0f;
     float glow = e < (float)g ? 0.60f * (1.0f - e / (float)g) * (1.0f - e / (float)g) : 0.0f;
     unsigned char gc[3] = {mix8(tone[0][2], b2[2], fx), mix8(tone[0][1], b2[1], fx), mix8(tone[0][0], b2[0], fx)};
-    float a = opacity * outer;
+    float a = opacity * outer * see_through(src, rim);
+    if (see_base) glow *= 1.0f - outer; /* see-through: no glow or shadow behind the panel itself */
     float ga = glow * (1.0f - a);
+    if (see_base) shadow *= 1.0f - outer;
     float sa = shadow * (1.0f - a - ga > 0.0f ? 1.0f - a - ga : 0.0f);
     for (int k = 0; k < 3; ++k) {
         float v = c[k] * a + gc[k] * ga; /* shadow adds darkness only (black) */
@@ -762,7 +783,8 @@ static void finish_pixel(const unsigned char *src, unsigned char *dst, int x, in
             glow = (over ? 0.70f : 0.50f) * t * t * (1.15f - 0.4f * side);
         }
     }
-    float a = opacity * outer;
+    float a = opacity * outer * see_through(src, rim);
+    if (see_base) glow *= 1.0f - outer; /* see-through: no glow or shadow behind the panel itself */
     float ga = glow * (1.0f - a);
     for (int k = 0; k < 3; ++k) {
         float v = c[k] * a + accent[k] * ga;
@@ -1467,7 +1489,14 @@ static int draw_panel_v7(const wchar_t *title, const NotifyPanelRow *rows, unsig
     }
     gdi.GdiFlush();
 
-    /* ---- pass 2: the text */
+    /* ---- pass 2: the text. V7 telemetry with a see-through background: what pass 1 painted is kept,
+       so the finish can tell text (changed by pass 2) from background */
+    unsigned char *base = NULL;
+    if (panel_at_top == 2 && tele_opacity < 100) {
+        gdi.GdiFlush();
+        base = (unsigned char *)HeapAlloc(GetProcessHeap(), 0, (SIZE_T)w * h * 4);
+        if (base) memory_copy(base, px, (size_t)w * h * 4);
+    }
     int title_x = lx + logo_size + (int)(12 * s);
     RECT clip = {title_x, g, right - l->pad, g + ch};
     HGDIOBJ old_font = gdi.SelectObject(dc, main);
@@ -1600,17 +1629,14 @@ static int draw_panel_v7(const wchar_t *title, const NotifyPanelRow *rows, unsig
     }
     gdi.SelectObject(dc, old_font);
     gdi.GdiFlush();
-    for (int y = 0; y < l->panel_height; ++y) {
+    if (base) see_through_begin(base, px, (float)tele_opacity / 100.0f);
+    for (int y = 0; y < h; ++y) { /* rows below h are never shown */
         unsigned char *src = px + (size_t)y * w * 4;
         unsigned char *dst = pixels + (size_t)y * pitch;
-        for (int x = 0; x < w; ++x) {
-            if (y >= h) {
-                dst[x * 4 + 0] = dst[x * 4 + 1] = dst[x * 4 + 2] = dst[x * 4 + 3] = 0;
-                continue;
-            }
-            finish_pixel(src + x * 4, dst + x * 4, x, y, w, h, g, l, 0.94f, tone);
-        }
+        for (int x = 0; x < w; ++x) finish_pixel(src + x * 4, dst + x * 4, x, y, w, h, g, l, 0.94f, tone);
     }
+    see_through_end();
+    if (base) HeapFree(GetProcessHeap(), 0, base);
     gdi.SelectObject(dc, old_bitmap);
     gdi.DeleteObject(small_bold);
     gdi.DeleteObject(main);
@@ -2320,7 +2346,7 @@ static void render(IDXGISwapChain *swapchain) {
             int tx, ty;
             tele_place((int)tele_pos, l, count, (int)width, (int)height, pl->width, (int)ph, &tx, &ty);
             x0 = (float)tx, y0 = (float)ty;
-            open_a *= (float)tele_opacity / 100.0f;
+            if (l->style == NOTIFY_STYLE_CLASSIC) open_a *= (float)tele_opacity / 100.0f; /* V7 looks: background only */
         }
         float c[12] = {x0 / width * 2.0f - 1.0f,
                        1.0f - y0 / height * 2.0f,
@@ -2522,7 +2548,15 @@ static DWORD WINAPI overlay_thread(void *unused) {
         if ((size_t)l.width * l.height * MAX_CARDS * 4 > sizeof(scratch_cards) ||
             (size_t)l.width * l.panel_height * 4 > sizeof(scratch_panel))
             continue;
+        /* V7: the telemetry panel at its own size and place (left: the window spans the whole width) */
+        int tele = panel && panel_at_top == 2;
+        Layout pl = l;
+        if (tele && tele_size != 100) {
+            pl = layout_for((UINT)((unsigned long long)screen_h * (unsigned)tele_size / 100u));
+            if ((size_t)pl.width * panel_pixels(&pl, panel) * 4 > sizeof(scratch_panel)) pl = l;
+        }
         int want_w = l.margin + 2 * l.width + l.gap + (int)(40.0f * l.scale) + 4;
+        if (tele && (tele_pos >= NOTIFY_TELE_LEFT_TOP || pl.width + l.margin + 4 > want_w)) want_w = screen_w;
         if (want_w > screen_w) want_w = screen_w;
         if (want_w != frame_w || screen_h != frame_h) {
             if (bitmap) gdi.DeleteObject(bitmap);
@@ -2555,7 +2589,7 @@ static DWORD WINAPI overlay_thread(void *unused) {
         if (redraw) window_drawn_at = now;
         if (redraw) {
             if (!draw_cards(list, count, &l, scratch_cards, l.width * 4) ||
-                (panel && !draw_panel(title, rows, panel, &l, scratch_panel, l.width * 4))) {
+                (panel && !draw_panel(title, rows, panel, tele ? &pl : &l, scratch_panel, (tele ? pl.width : l.width) * 4))) {
                 fail("could not draw the cards");
                 break;
             }
@@ -2567,19 +2601,17 @@ static DWORD WINAPI overlay_thread(void *unused) {
         memset(frame, 0, frame_bytes);
         int shift = 0;
         if (panel) {
-            int ph = panel_pixels(&l, panel);
+            const Layout *use = tele ? &pl : &l;
+            int ph = panel_pixels(use, panel);
             int y0 = panel_at_top == 1 ? l.margin : (screen_h - ph) / 2;
             if (y0 < l.margin) y0 = l.margin;
             float open_slide, open_a = panel_open_alpha(now, &open_slide);
-            if (panel_at_top == 2) { /* this window only covers the right side: left positions use the right one */
-                static const int to_right[NOTIFY_TELE_POS_COUNT] = {NOTIFY_TELE_RIGHT_MIDDLE, NOTIFY_TELE_RIGHT_TOP, NOTIFY_TELE_RIGHT_BOTTOM,
-                                                                    NOTIFY_TELE_RIGHT_TOP, NOTIFY_TELE_RIGHT_MIDDLE, NOTIFY_TELE_RIGHT_BOTTOM};
-                int tx;
-                tele_place(to_right[tele_pos], &l, count, frame_w, screen_h, l.width, ph, &tx, &y0);
-                open_a *= (float)tele_opacity / 100.0f;
+            int x0 = frame_w - l.margin - l.width + (int)(open_slide * 36.0f * l.scale);
+            if (tele) {
+                tele_place((int)tele_pos, &l, count, frame_w, screen_h, pl.width, ph, &x0, &y0);
+                if (l.style == NOTIFY_STYLE_CLASSIC) open_a *= (float)tele_opacity / 100.0f; /* V7 looks: background only */
             }
-            blend_block(frame, frame_w, frame_h, frame_w - l.margin - l.width + (int)(open_slide * 36.0f * l.scale), y0,
-                        scratch_panel, l.width * 4, l.width, ph, open_a);
+            blend_block(frame, frame_w, frame_h, x0, y0, scratch_panel, use->width * 4, use->width, ph, open_a);
             if (panel_at_top != 2) shift = l.width + l.gap;
         }
         int y = l.margin;

@@ -17,6 +17,8 @@
 #include "cruise.h"
 
 #define VK_UP_ 0x26
+#define VK_LEFT_ 0x25
+#define VK_RIGHT_ 0x27
 #define VK_DOWN_ 0x28
 #define VK_ENTER_ 0x0d
 #define VK_ESC_ 0x1b
@@ -488,33 +490,40 @@ static unsigned wuint(wchar_t *out, unsigned n, unsigned v) {
     return n;
 }
 
-/* V7: telemetry panel look (notify.h); Enter steps to the next value, the card says what it is now */
+/* V7: telemetry panel look (notify.h). Left / right (arrow keys, D-pad, stick) change the value of the
+   selected row, Enter steps on and starts again at the end; the card says what it is now */
 enum { TELE_LOOK_POS = 60, TELE_LOOK_OPACITY, TELE_LOOK_SIZE };
 static const wchar_t *const tele_pos_german[NOTIFY_TELE_POS_COUNT] = {L"Rechts Mitte", L"Rechts oben", L"Rechts unten",
                                                                       L"Links oben", L"Links Mitte", L"Links unten"};
 static const wchar_t *const tele_pos_english[NOTIFY_TELE_POS_COUNT] = {L"Right middle", L"Right top", L"Right bottom",
                                                                        L"Left top", L"Left middle", L"Left bottom"};
-static const int tele_opacities[] = {100, 90, 80, 70, 60, 50, 40, 30};
-static const int tele_sizes[] = {100, 115, 130, 150, 175, 200, 60, 70, 85};
+static const int tele_opacities[] = {10, 20, 30, 40, 50, 60, 70, 80, 90, 100}; /* background only */
+static const int tele_sizes[] = {60, 70, 85, 100, 115, 130, 150, 175, 200};
 
 static void percent_text(int value, wchar_t out[16]) {
     unsigned n = wuint(out, 0, (unsigned)value);
     out[n++] = L' ', out[n++] = L'%', out[n] = 0;
 }
 
-static int next_in(const int *list, unsigned count, int now) {
-    for (unsigned i = 0; i < count; ++i)
-        if (list[i] == now) return list[(i + 1) % count];
-    return list[0];
+/* dir +1 / -1 stops at the ends; dir 2 (Enter) goes on and starts again at the end */
+static int step_in(const int *list, int count, int now, int dir) {
+    int at = 0;
+    for (int i = 0; i < count; ++i)
+        if (list[i] == now) at = i;
+    if (dir == 2) return list[(at + 1) % count];
+    at += dir;
+    return list[at < 0 ? 0 : at >= count ? count - 1 : at];
 }
 
-static void tele_look_next(int action) {
+static void tele_look_step(int action, int dir) {
     int pos = notify_telemetry_position(), opacity = notify_telemetry_opacity(), size = notify_telemetry_size();
     const char *key;
     int value;
-    if (action == TELE_LOOK_POS) key = "TelemetryPosition", value = pos = (pos + 1) % NOTIFY_TELE_POS_COUNT;
-    else if (action == TELE_LOOK_OPACITY) key = "TelemetryOpacity", value = opacity = next_in(tele_opacities, ARRAY_COUNT(tele_opacities), opacity);
-    else key = "TelemetrySize", value = size = next_in(tele_sizes, ARRAY_COUNT(tele_sizes), size);
+    if (action == TELE_LOOK_POS)
+        key = "TelemetryPosition", value = pos = (pos + (dir == -1 ? NOTIFY_TELE_POS_COUNT - 1 : 1)) % NOTIFY_TELE_POS_COUNT;
+    else if (action == TELE_LOOK_OPACITY)
+        key = "TelemetryOpacity", value = opacity = step_in(tele_opacities, (int)ARRAY_COUNT(tele_opacities), opacity, dir);
+    else key = "TelemetrySize", value = size = step_in(tele_sizes, (int)ARRAY_COUNT(tele_sizes), size, dir);
     notify_set_telemetry_look(pos, opacity, size);
     if (!save_gripline_int(key, value)) log_append("KEYMENU: Gripline.ini could not be written - telemetry look not saved.\r\n");
     wchar_t line[96], v[16];
@@ -522,7 +531,7 @@ static void tele_look_next(int action) {
     if (action == TELE_LOOK_POS) n = wcopy(line, n, 96, tr(tele_pos_german[pos], tele_pos_english[pos]));
     else {
         percent_text(value, v);
-        n = wcopy(line, n, 96, action == TELE_LOOK_OPACITY ? tr(L"Deckkraft ", L"opacity ") : tr(L"Größe ", L"size "));
+        n = wcopy(line, n, 96, action == TELE_LOOK_OPACITY ? tr(L"Hintergrund ", L"background ") : tr(L"Größe ", L"size "));
         n = wcopy(line, n, 96, v);
     }
     wcopy(line, n, 96, tr(L"\nZu sehen, wenn das Menü zu ist", L"\nShown once the menu is closed"));
@@ -774,11 +783,11 @@ static void build_page(wchar_t *title) {
             for (unsigned i = 0; i < TELEMETRY_SHOW_COUNT; ++i)
                 row_add(telemetry_item_name(i, m.german), (mask & (1 << i)) ? tr(L"✓ an", L"✓ on") : tr(L"aus", L"off"), 0,
                         1 + (int)i);
-            row_add(tr(L"Aussehen (Enter = weiter)", L"Look (Enter = next)"), L"", NOTIFY_ROW_SECTION, -1);
+            row_add(tr(L"Aussehen (◄ ► ändern)", L"Look (◄ ► change)"), L"", NOTIFY_ROW_SECTION, -1);
             wchar_t v[16];
             row_add(tr(L"Position", L"Position"), tr(tele_pos_german[notify_telemetry_position()], tele_pos_english[notify_telemetry_position()]), 0, TELE_LOOK_POS);
             percent_text(notify_telemetry_opacity(), v);
-            row_add(tr(L"Deckkraft", L"Opacity"), v, 0, TELE_LOOK_OPACITY);
+            row_add(tr(L"Hintergrund-Deckkraft", L"Background opacity"), v, 0, TELE_LOOK_OPACITY);
             percent_text(notify_telemetry_size(), v);
             row_add(tr(L"Größe", L"Size"), v, 0, TELE_LOOK_SIZE);
             hint(0);
@@ -1057,7 +1066,7 @@ static void choose(void) {
         }
         case LEVEL_TELEMETRY: {
             if (action >= TELE_LOOK_POS && action <= TELE_LOOK_SIZE) {
-                tele_look_next(action);
+                tele_look_step(action, 2);
                 break;
             }
             if (action == 50) {
@@ -1313,6 +1322,8 @@ static void captured(unsigned char key) {
 #define PAD_DOWN 2
 #define PAD_A 4
 #define PAD_B 8
+#define PAD_LEFT 16
+#define PAD_RIGHT 32
 static volatile LONG pad_now, pad_toggle;
 static volatile LONG64 pad_tick;
 static LONG pad_was;
@@ -1347,13 +1358,14 @@ static void xinput_load(void) {
 static LONG xinput_bits(int *toggle) {
     static unsigned short before;
     unsigned short buttons = 0;
-    short ly = 0;
+    short ly = 0, lx = 0;
     for (unsigned long u = 0; u < 4; ++u) {
         XPadState st;
         memset(&st, 0, sizeof(st));
         if (xinput_get(u, &st) != 0) continue;
         buttons |= st.buttons;
         if ((st.ly < 0 ? -st.ly : st.ly) > (ly < 0 ? -ly : ly)) ly = st.ly;
+        if ((st.lx < 0 ? -st.lx : st.lx) > (lx < 0 ? -lx : lx)) lx = st.lx;
     }
     unsigned short pressed = (unsigned short)(buttons & ~before);
     before = buttons;
@@ -1363,6 +1375,8 @@ static LONG xinput_bits(int *toggle) {
     if ((buttons & 0x0002u) || ly < -20000) bits |= PAD_DOWN;
     if (buttons & 0x1000u) bits |= PAD_A;
     if (buttons & 0x2000u) bits |= PAD_B;
+    if ((buttons & 0x0004u) || lx < -20000) bits |= PAD_LEFT;
+    if (((buttons & 0x0008u) && !(buttons & 0x0040u)) || lx > 20000) bits |= PAD_RIGHT; /* LS + right = the menu toggle */
     return bits;
 }
 
@@ -1381,6 +1395,10 @@ int key_menu_pad_input(unsigned char *gamepad) {
     if ((buttons & 0x0002u) || ly < -20000) bits |= PAD_DOWN;
     if (buttons & 0x1000u) bits |= PAD_A;
     if (buttons & 0x2000u) bits |= PAD_B;
+    short lx;
+    memory_copy(&lx, gamepad + 4, sizeof(lx));
+    if ((buttons & 0x0004u) || lx < -20000) bits |= PAD_LEFT;
+    if (((buttons & 0x0008u) && !(buttons & 0x0040u)) || lx > 20000) bits |= PAD_RIGHT;
     InterlockedExchange(&pad_now, bits);
     InterlockedExchange64(&pad_tick, (LONG64)GetTickCount64());
     int take = m.level != LEVEL_CLOSED || (buttons & 0x0040u);
@@ -1467,6 +1485,16 @@ static void key_menu_tick(ULONGLONG now) {
     if (enter) {
         choose();
         return;
+    }
+    int left = edge(VK_LEFT_, keyboard_key_down(VK_LEFT_)) || (pad_pressed & PAD_LEFT);
+    int right = edge(VK_RIGHT_, keyboard_key_down(VK_RIGHT_)) || (pad_pressed & PAD_RIGHT);
+    if ((left || right) && m.level == LEVEL_TELEMETRY) {
+        int action = selected_action();
+        if (action >= TELE_LOOK_POS && action <= TELE_LOOK_SIZE) {
+            tele_look_step(action, left ? -1 : 1);
+            show();
+            return;
+        }
     }
     int step = 0;
     if (up_pressed || down_pressed) {
