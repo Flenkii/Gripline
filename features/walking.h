@@ -44,6 +44,11 @@ int walking_speed_kmh(void);
 int walking_has_collision(void);
 /* 1 while the walker is where the game has no floor collision loaded (walks on flat, no falling) */
 int walking_no_floor(void);
+/* The game loads floor collision only around the car (~65 m, Gripline.log 06.11.2026). Farther
+   than WALK_HIDE_FROM m from the car, noclip.c holds the car under the ground below the walker, so
+   the collision comes along; nearer than WALK_HIDE_BACK m it stands at its place again.
+   1 = hold the car at out (car update thread). */
+int walking_car_hidden(float out[3]);
 
 /* Input of one step (noclip.c fills it from the keyboard and the controllers). */
 typedef struct {

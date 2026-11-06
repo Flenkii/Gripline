@@ -334,6 +334,20 @@ static void put_back(void *dynamics) {
     if (set) set(dynamics, &parked);
 }
 
+/* walking: the car at its place, or (far from it) under the ground below the walker, see walking.h */
+static void hold_walking(void *dynamics) {
+    float at[3];
+    if (!walking_car_hidden(at) || !float_is_finite(at[0]) || !float_is_finite(at[1]) || !float_is_finite(at[2])) {
+        put_back(dynamics);
+        return;
+    }
+    SetStateFn set = (SetStateFn)slot(dynamics, SLOT_SET_STATE);
+    if (!set) return;
+    _Alignas(16) BodyState state = parked;
+    state.position = _mm_setr_ps(at[0], at[1], at[2], 0.0f);
+    set(dynamics, &state);
+}
+
 static void sin_cos(float a, float *s, float *c) {
     float a2 = a * a; /* |a| <= 1.4: the series is exact to about 1e-4 */
     *s = a * (1.0f - a2 / 6.0f * (1.0f - a2 / 20.0f * (1.0f - a2 / 42.0f * (1.0f - a2 / 72.0f))));
@@ -452,6 +466,8 @@ static void set_on(LONG value) {
         driver_wait = GetTickCount64() + FREE_DRIVER_WAIT_MS;
         cockpit_view_want_driver(1); /* the freecam is the driver camera, moved out of the car */
     }
+    if (before == MODE_WALK && value != MODE_WALK) /* the car back at its place (it may be under the walker) */
+        InterlockedExchange64(&park_until, (LONG64)(GetTickCount64() + FREE_PARK_MS));
     if (value == MODE_WALK) {
         parked_body = NULL;
         InterlockedExchange64(&park_until, 0);
@@ -625,7 +641,7 @@ void noclip_car_update(void *car, float dt, float frame_dt, unsigned frame) {
         /* on foot: the car stands where it was; the walker is moved in the camera (walking.c) */
         void *walk_body = car_body(car);
         if (walk_body && walk_body != body && !begin(walk_body)) walk_body = NULL;
-        if (walk_body && walk_body == parked_body) park = walk_body, put_back(park);
+        if (walk_body && walk_body == parked_body) park = walk_body, hold_walking(park);
     } else if (on && local) {
         dynamics = car_body(car);
         if (dynamics && dynamics != body && !begin(dynamics)) dynamics = NULL;
@@ -650,6 +666,7 @@ void noclip_car_update(void *car, float dt, float frame_dt, unsigned frame) {
     }
     original(car, dt, frame_dt, frame);
     if (dynamics && on) place(dynamics); /* ... and what the game moved in it is taken back */
+    else if (park && on == MODE_WALK) hold_walking(park);
     else if (park) put_back(park);
     else if (local && !on) sample_trip(car, dt);
     no_damage_after_update(car, local, local_car != NULL);

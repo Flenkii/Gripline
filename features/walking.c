@@ -81,7 +81,10 @@ static int world_tried; /* tests: no lookup */
 #define WALK_GRAVITY 9.81f
 #define WALK_LOOK 1.6f       /* rad/s */
 #define WALK_PITCH_MAX 1.4f
-#define WALK_MAX_DISTANCE 300.0f /* from the car: the game streams collision around the car (guess) */
+#define WALK_MAX_DISTANCE 2000.0f /* from the car */
+#define WALK_HIDE_FROM 45.0f /* the game loads floor collision only ~65 m around the car: farther away the car */
+#define WALK_HIDE_BACK 40.0f /* goes along under the walker (under the ground), back at its place nearer */
+#define WALK_HIDE_BELOW 30.0f
 #define WALK_FALL_LIMIT 150.0f   /* below the car: fell through the world, back to the car */
 #define WALK_STEP 0.4f     /* steps and curbs up to 40 cm */
 #define WALK_SNAP 0.3f     /* stays on the ground going down up to this per step */
@@ -110,12 +113,25 @@ int walking_has_collision(void) {
     return collision_ok != 0;
 }
 
+/* noclip.c, car update thread: 1 = hold the car at out (under the walker) instead of its place */
+static volatile LONG hiding;
+static float hide_at[3];
+int walking_car_hidden(float out[3]) {
+    if (!active || !entered || !stepped) return 0;
+    float d = walking_car_distance();
+    if (d > WALK_HIDE_FROM) InterlockedExchange(&hiding, 1);
+    else if (d >= 0.0f && d < WALK_HIDE_BACK) InterlockedExchange(&hiding, 0);
+    if (!hiding) return 0;
+    out[0] = hide_at[0], out[1] = hide_at[1], out[2] = hide_at[2];
+    return 1;
+}
+
 int walking_no_floor(void) {
     return no_floor;
 }
 
 void walking_set_active(int on) {
-    if (!on) InterlockedExchange(&entered, 0);
+    if (!on) InterlockedExchange(&entered, 0), InterlockedExchange(&hiding, 0);
     InterlockedExchange(&active, on ? 1 : 0);
 }
 
@@ -371,6 +387,7 @@ static void step(float dt) {
         bob = s * (in.run ? 0.05f : 0.03f);
     }
     eye[0] = centre[0], eye[1] = centre[1] + WALK_EYE + bob, eye[2] = centre[2];
+    hide_at[0] = centre[0], hide_at[1] = centre[1] - WALK_HIDE_BELOW, hide_at[2] = centre[2];
     float cx = centre[0] - car_place[0], cz = centre[2] - car_place[2];
     InterlockedExchange(&distance_cm, (LONG)(root(cx * cx + cz * cz) * 100.0f));
     stepped = 1;
@@ -541,6 +558,9 @@ int walking_start(unsigned char *game_image) {
 }
 
 #ifdef FH2_TWEAKS_TEST
+__declspec(dllexport) int Fh2TestWalkHidden(float *out) {
+    return walking_car_hidden(out);
+}
 /* tests/test_walking.py: one step without a game world (no collision) */
 __declspec(dllexport) void Fh2TestWalkStep(unsigned char *game_image, int reset, unsigned dt_ms, float *out) {
     game = game_image;
