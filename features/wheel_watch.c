@@ -69,6 +69,7 @@ static void card(unsigned char *game, unsigned index, int plugged) {
     for (const char *p = first; *p; ++p) text[n++] = *p;
     for (const char *p = wheels[index].name; *p && n + 1 < sizeof(text); ++p) text[n++] = *p;
     text[n] = 0;
+    if (!notify_kind_on(NOTIFY_KIND_WHEEL)) return;
     if (plugged) notify_show_tinted(text, NOTIFY_COLOR_GREEN, NULL, 0);
     else notify_show_tinted(text, NOTIFY_COLOR_RED, de ? "WARNUNG" : "WARNING", 0);
 }

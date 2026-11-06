@@ -9,5 +9,7 @@ void report_init(const wchar_t *settings_directory);
 
 /* Writes Gripline_Report.zip. Returns the number of files packed (0 = failed). Shows a card. */
 int report_create(void);
+/* same from the Gripline menu: the card in the game's language */
+int report_create_lang(int german);
 
 #endif

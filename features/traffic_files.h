@@ -7,8 +7,6 @@
 /* Game start: makes the files for TrafficLevel 1..5 (6 = no traffic, 0 = original, folder not mounted). */
 void traffic_files_start(const wchar_t *mount_dir, int traffic_level);
 
-/* For the mount: 1 = mount the folder, 0 = not. */
-int traffic_files_wait_ready(void);
 
 /* Game start, before the traffic starts: 1 = the last start with raised traffic never reached the road
    (load hung) - Gripline.ini is set to Original traffic and the caller must use TrafficLevel 0. */

@@ -19,6 +19,7 @@ python build.py /path/to/zig --test --output out-test
 cd tests
 python test_plugin.py ../out-test/fh2-mods/Gripline.dll
 python test_keyboard.py ../out-test/fh2-mods/Gripline.dll
+python test_key_menu.py ../out-test/fh2-mods/Gripline.dll
 python test_traffic_files.py ../out-test/fh2-mods/Gripline.dll
 python test_modscan.py ../out-test/fh2-mods/Gripline.dll
 python test_report.py ../out-test/fh2-mods/Gripline.dll
@@ -26,6 +27,7 @@ python test_ini_migrate.py ../out-test/fh2-mods/Gripline.dll
 python test_cockpit_view.py ../out-test/fh2-mods/Gripline.dll
 python test_nitro.py ../out-test/fh2-mods/Gripline.dll
 python test_cockpit.py ../out-test/fh2-mods/Gripline.dll
+python test_no_damage.py ../out-test/fh2-mods/Gripline.dll path/to/forza_durango_release_final.exe
 ```
 
 `test_cockpit_range.py` needs locally extracted game files in `tests/game` (not part of the repository);
@@ -34,5 +36,5 @@ python test_cockpit.py ../out-test/fh2-mods/Gripline.dll
 ## Release ZIP
 
 ```text
-python tools/make_release.py out Gripline_V6.zip
+python tools/make_release.py out Gripline_V7.zip
 ```

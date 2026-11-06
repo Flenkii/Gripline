@@ -45,7 +45,6 @@ int wheel_buttons_install(unsigned char *game_image);
    report bits for byte 0 / byte 1 of the wheel report. */
 void wheel_buttons_update(unsigned held_functions, unsigned char *byte0, unsigned char *byte1);
 
-const wchar_t *wheel_function_name(unsigned char *game_image, unsigned function);
 
 /* Controller (gamepad) layout of the game: input that triggers a game action (-1 = none).
    Layout 0 until the game loads the player's layout. Used by the keyboard. */

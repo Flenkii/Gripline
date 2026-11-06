@@ -631,17 +631,6 @@ void traffic_load_reached(float dt) {
     log_append("TRAFFIC: load guard - the game reached the road, marker removed.\r\n");
 }
 
-int traffic_files_wait_ready(void) {
-    /* the game may ask for its first file before traffic_files_start ran */
-    for (int i = 0; i < 100; ++i) {
-        LONG s = state;
-        if (s == 2) return 1;
-        if (s == 3) return 0;
-        Sleep(50);
-    }
-    return 0;
-}
-
 #ifdef FH2_TWEAKS_TEST
 /* tests: runs the rules on one file in memory (kind 0 = CarLoadingSettings, 1 = Densities) */
 __declspec(dllexport) size_t Fh2TestTrafficPatch(int kind, int level, const char *in, size_t size, char *out,

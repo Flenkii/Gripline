@@ -73,3 +73,14 @@ Plugin build on Azimuth 1.0.3 (October 29, 2026, tested in the game by Flenkii):
 - start card "Gripline V6 active"
 - traffic: amounts 30/45/70/100/200 cars, faster spawning; presets Original / Much More Traffic / No Traffic /
   Drivatars Only, chosen by name on the platform page *Traffic* (MODS > Installed mods > Gripline)
+
+## V7 – The Big Update (November 2026)
+New files:
+- `features/key_menu.c/.h` – Gripline menu (F8 / LS + D-pad right), keys saved to `FH2_Keyboard.ini`, other settings to `Gripline.ini`
+- `features/walking.c/.h` – walking on foot with the photo mode's collision, door sounds (`assets/sounds`, `features/door_sounds.h` from `tools/make_door_sounds.py`, played with PlaySoundW from System32)
+- `features/cruise.c/.h` – cruise control (K)
+- `features/telemetry.c/.h`, `features/records.c/.h`, `features/logbook.c/.h` – live telemetry, records, CSV, logbook, what's-new cards
+- `features/no_damage.c/.h` – visible damage reset for other / all cars (the game's own ForzaCar function)
+- `features/world_files.c/.h` – speed cameras, names over cars, event icons (copies in `mods\Gripline\media`)
+- `features/update_check.c/.h` – one HTTPS request to the GitHub releases API at start (winhttp loaded at run time)
+Changed: `noclip.c` (freecam, walking, controller combos), `notify.c` (3 card designs, panels, fade to black), `cockpit.c` (V6.5 cockpit file repair), `settings.c` (a wrong line is skipped, not the rest), one shared lock for writing `Gripline.ini`; `sha256.c` and unused functions removed. Imports of `Gripline.dll` unchanged (51).

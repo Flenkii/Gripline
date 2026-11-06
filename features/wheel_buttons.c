@@ -73,25 +73,6 @@ static const signed char function_actions[WHEEL_FUNCTION_COUNT] = {
     [WHEEL_FUNCTION_COCKPIT_VIEW] = -1,
 };
 
-static const wchar_t *const names_german[WHEEL_FUNCTION_COUNT] = {
-    L"Aus",          L"Kamera wechseln", L"Blick zurück", L"Blick links",     L"Blick rechts",
-    L"Zurückspulen", L"Telemetrie",      L"Fotomodus",    L"Radio: zurück",   L"Radio: weiter",
-    L"Handbremse",   L"Kupplung",        L"Hochschalten", L"Runterschalten", L"Nitro (NitroSystem)",
-    L"Cockpit-Ansicht 2"};
-static const wchar_t *const names_english[WHEEL_FUNCTION_COUNT] = {
-    L"Off",    L"Change Camera", L"Look Back",     L"Look Left",      L"Look Right",
-    L"Rewind", L"Telemetry",     L"Photo Mode",    L"Radio: Previous", L"Radio: Next",
-    L"Handbrake", L"Clutch",     L"Shift Up",      L"Shift Down",    L"Nitro (NitroSystem)",
-    L"Cockpit View 2"};
-
-const wchar_t *wheel_function_name(unsigned char *game_image, unsigned function) {
-    if (function >= WHEEL_FUNCTION_COUNT) {
-        return L"";
-    }
-    return game_language_is_german(game_image) ? names_german[function]
-                                                     : names_english[function];
-}
-
 /* ------------------------------------------------------------------ input of the wheel layout */
 
 typedef struct {
@@ -130,12 +111,12 @@ static int virtual_input(int input) {
 }
 
 static const char *input_name(int input) {
-    static const char *const names[16] = {"Steuerkreuz hoch", "Steuerkreuz runter", "Steuerkreuz links",
-                                          "Steuerkreuz rechts", "Menu", "View", "LS", "RS",
-                                          "Wippe links", "Wippe rechts", "LT", "RT", "A", "B", "X", "Y"};
+    static const char *const names[16] = {"D-pad up", "D-pad down", "D-pad left",
+                                          "D-pad right", "Menu", "View", "LS", "RS",
+                                          "left paddle", "right paddle", "LT", "RT", "A", "B", "X", "Y"};
     if (input >= 0 && input < 16) return names[input];
-    if (input == INPUT_LY_UP) return "linker Stick hoch";
-    if (input == INPUT_LY_DOWN) return "linker Stick runter";
+    if (input == INPUT_LY_UP) return "left stick up";
+    if (input == INPUT_LY_DOWN) return "left stick down";
     return "-";
 }
 
@@ -146,15 +127,15 @@ static void append(char *line, size_t capacity, size_t *length, const char *text
 
 static void log_table(uint64_t id) {
     static const char *const labels[WHEEL_FUNCTION_COUNT] = {
-        "", "Kamera", "Blick zurueck", "Blick links", "Blick rechts", "Zurueckspulen", "Telemetrie",
-        "Fotomodus", "Radio zurueck", "Radio weiter", "Handbremse", "Kupplung", "Hochschalten",
-        "Runterschalten", "Nitro", "Cockpit-Ansicht"};
+        "", "Camera", "Look back", "Look left", "Look right", "Rewind", "Telemetry",
+        "Photo mode", "Radio previous", "Radio next", "Handbrake", "Clutch", "Shift up",
+        "Shift down", "Nitro", "Cockpit view"};
     char line[700];
     size_t length = 0;
     char number[4] = {(char)('0' + (id % 100) / 10), (char)('0' + id % 10), 0, 0};
-    append(line, sizeof(line), &length, "Spiel laedt Lenkrad-Layout ");
+    append(line, sizeof(line), &length, "game loads wheel layout ");
     append(line, sizeof(line), &length, id >= 10 ? number : number + 1);
-    append(line, sizeof(line), &length, " - Zusatztasten loesen aus:");
+    append(line, sizeof(line), &length, " - extra wheel functions on:");
     for (unsigned f = 1; f < WHEEL_FUNCTION_NITRO; ++f) {
         append(line, sizeof(line), &length, " ");
         append(line, sizeof(line), &length, labels[f]);
@@ -175,14 +156,14 @@ static void adapt_wheel_map(void *map, uint64_t id) {
     }
     Binding *first = *(Binding **)contexts, *last = *(Binding **)(contexts + 8);
     if (!first || last < first || last - first > 256) {
-        wheel_log_text("Zusatztasten: Lenkrad-Layout hat ein unerwartetes Format - nichts geaendert.");
+        wheel_log_text("wheel layout has an unexpected format - nothing changed.");
         return;
     }
     int has_rs = 0;
     for (Binding *b = first; b < last; ++b) {
         if (b->context != 0 || b->action < 0 || b->action >= ACTION_COUNT || b->input < 0 ||
             b->input > 0x40) {
-            wheel_log_text("Zusatztasten: unerwarteter Eintrag im Lenkrad-Layout - nichts geaendert.");
+            wheel_log_text("unexpected entry in the wheel layout - nothing changed.");
             return;
         }
     }
@@ -276,7 +257,7 @@ static uint64_t layout_hook(void *map, uint64_t id, uint64_t kind, void *options
         __try {
             adapt_wheel_map(map, id & 0xffffffff);
         } __except (EXCEPTION_EXECUTE_HANDLER) {
-            wheel_log_text("FEHLER: Ausnahme beim Anpassen des Lenkrad-Layouts - Zusatztasten fuer Blicke aus.");
+            wheel_log_text("ERROR: exception while adapting the wheel layout - look buttons off.");
         }
     }
     return result;
@@ -412,13 +393,13 @@ int wheel_buttons_install(unsigned char *game_image) {
              memory_equal(site + 1, &expected, 4);
     }
     if (!ok) {
-        wheel_log_text("Zusatztasten: Spielcode weicht ab - Blick zurueck/links/rechts nicht verfuegbar, "
-                       "andere Funktionen gehen trotzdem.");
+        wheel_log_text("game code differs - look back/left/right not available, "
+                       "the other functions still work.");
         return 0;
     }
     unsigned char *page = memory_alloc_near(image, 0x1000);
     if (!page) {
-        wheel_log_text("Zusatztasten: kein Speicher nahe am Spiel - Blicke nicht verfuegbar.");
+        wheel_log_text("no memory near the game - look buttons not available.");
         return 0;
     }
     unsigned char *rs_stub = page, *ly_stub = page + 0x40, *layout_stub = page + 0x80;
@@ -439,7 +420,7 @@ int wheel_buttons_install(unsigned char *game_image) {
                   {load_calls[2], layout_stub}, {load_calls[3], layout_stub}};
     for (unsigned i = 0; i < ARRAY_COUNT(sites); ++i) {
         if (!rel32(image + sites[i].rva + 5, sites[i].target, &offset)) {
-            wheel_log_text("Zusatztasten: Sprungweite zu gross - Blicke nicht verfuegbar.");
+            wheel_log_text("jump too far - look buttons not available.");
             return 0;
         }
     }
@@ -447,12 +428,12 @@ int wheel_buttons_install(unsigned char *game_image) {
         rel32(image + sites[i].rva + 5, sites[i].target, &offset);
         memory_copy(call + 1, &offset, 4);
         if (!write_code(image + sites[i].rva, call, 5)) {
-            wheel_log_text("FEHLER: Spielcode fuer Zusatztasten nicht beschreibbar.");
+            wheel_log_text("ERROR: game code for the look buttons not writable.");
             return 0; /* earlier sites stay hooked; the hooks are safe on their own */
         }
     }
     installed = 1;
-    wheel_log_text("Zusatztasten: Spiel-Hooks gesetzt (RS = Blick zurueck, linker Stick = Blick links/rechts).");
+    wheel_log_text("game hooks set (RS = look back, left stick = look left/right).");
     log_append("WHEEL: free wheel buttons ready (look back/left/right hooks installed).\r\n");
     return 1;
 }

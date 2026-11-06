@@ -1,4 +1,4 @@
-Gripline V6.5 – Keyboard bindings / Tastenbelegung
+Gripline V7 – Keyboard bindings / Tastenbelegung
 ========================================================================
 Default bindings. Change them in FH2_Keyboard.ini next to azimuth.exe (several keys with a
 comma, e.g. Throttle=W,Up; the key names are listed at the top of the file).
@@ -31,12 +31,36 @@ FUNKTIONEN / FUNCTIONS
 GRIPLINE
   F5                 Tastenliste ein/aus          Key list on/off
   F6                 Noclip ein/aus (offline)     Noclip on/off (offline)
+  F7                 Freecam ein/aus (offline)    Freecam on/off (offline)
+  F8                 Gripline-Menü                Gripline menu
+  F                  Aussteigen/Laufen (offline)  Get out / walk (offline)
+  K                  Tempomat ein/aus             Cruise control on/off
 
 NOCLIP (wenn an / while on)
   W / S              Vorwärts / rückwärts fliegen Fly forward / back
   A / D              Drehen                       Turn
   Leertaste / Strg   Steigen / sinken             Space / Left Ctrl: up / down
   Linke Shift-Taste  Schneller (halten)           Left Shift: faster (hold)
+
+LAUFEN (wenn ausgestiegen) / WALKING (when out of the car)
+  W A S D            Laufen                       Walk
+  Pfeiltasten        Umschauen                    Arrow keys: look around
+  Linke Shift-Taste  Rennen                       Left Shift: run
+  Leertaste          Springen                     Space: jump
+  F (nah am Auto)    Einsteigen                   F (near the car): get back in
+
+FREECAM: wie Noclip (W/S/A/D fliegen, Leertaste/Strg hoch/runter, Shift schneller,
+Pfeile schauen) / like noclip, arrow keys look.
+
+CONTROLLER (LS = linker Stick gedrückt halten / hold left stick)
+  LS + Steuerkreuz ►   Gripline-Menü              LS + D-pad right: Gripline menu
+  LS + Steuerkreuz ▲   Noclip                     LS + D-pad up: noclip
+  LS + Steuerkreuz ▼   Freecam                    LS + D-pad down: freecam
+  LS + Steuerkreuz ◄   Tempomat                   LS + D-pad left: cruise control
+  LS + Y               Aussteigen / Laufen        LS + Y: get out / walk
+  Y (nah am Auto)      Einsteigen                 Y (near the car): get back in
+  Laufen: linker Stick laufen, rechter schauen, RT rennen, A springen
+  Walking: left stick walk, right stick look, RT run, A jump
 
 MENÜS / MENUS
   Pfeiltasten        Blättern                     Arrow keys: navigate

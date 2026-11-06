@@ -104,12 +104,21 @@ static int add_entry(HANDLE zip, Entry *e, unsigned *offset, unsigned when, cons
     return 1;
 }
 
+static int german;
+
+int report_create_lang(int de) {
+    german = de;
+    return report_create();
+}
+
 int report_create(void) {
     if (!directory[0] || !path_join(path, directory, REPORT_NAME)) return 0;
     HANDLE zip = CreateFileW(path, GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
     if (zip == INVALID_HANDLE_VALUE) {
         log_append("REPORT: could not write Gripline_Report.zip\r\n");
-        notify_show("Problem report failed\nCould not write Gripline_Report.zip");
+        notify_show_tinted(german ? "Problem-Bericht fehlgeschlagen\nGripline_Report.zip nicht schreibbar"
+                                  : "Problem report failed\nCould not write Gripline_Report.zip",
+                           NOTIFY_COLOR_RED, german ? "FEHLER" : "ERROR", 0);
         return 0;
     }
     Entry entries[MAX_ENTRIES];
@@ -185,11 +194,16 @@ int report_create(void) {
     CloseHandle(zip);
     if (!ok) {
         log_append("REPORT: writing Gripline_Report.zip failed\r\n");
-        notify_show("Problem report failed\nCould not write Gripline_Report.zip");
+        notify_show_tinted(german ? "Problem-Bericht fehlgeschlagen\nGripline_Report.zip nicht schreibbar"
+                                  : "Problem report failed\nCould not write Gripline_Report.zip",
+                           NOTIFY_COLOR_RED, german ? "FEHLER" : "ERROR", 0);
         return 0;
     }
     log_append("REPORT: Gripline_Report.zip written next to the INIs.\r\n");
-    notify_show("Problem report saved\nGripline_Report.zip next to azimuth.exe");
+    notify_show_tinted(german ? "Problem-Bericht gespeichert\nGripline_Report.zip neben azimuth.exe"
+                              : "Problem report saved\nGripline_Report.zip next to azimuth.exe",
+                       NOTIFY_COLOR_GREEN, german ? "BERICHT" : "REPORT", 1);
+    german = 0;
     return (int)count;
 }
 

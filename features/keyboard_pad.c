@@ -7,8 +7,11 @@
 #include "support.h"
 #include "nitro_link.h"
 #include "cockpit_view.h"
+#include "noclip.h"
 #include "notify.h"
+#include "cruise.h"
 #include "game_language.h"
+#include "key_menu.h"
 
 #define KEY_INI L"FH2_Keyboard.ini"
 #define MAX_PADS 8
@@ -58,6 +61,9 @@ static const GUID IID_Gamepad = {0xbc7bb43c, 0x0a69, 0x3903, {0x9e, 0x9d, 0xa5, 
 /* ------------------------------------------------------------------ settings */
 
 static wchar_t ini_path[PATH_CAPACITY];
+static int mouse_sensitivity; /* [Keyboard] MouseSteering, 0 = off */
+static int mouse_dead = 30;   /* [Keyboard] MouseDeadZone: percent of the game's stick dead zone the mouse skips */
+static int mouse_center;      /* [Keyboard] MouseCenter: seconds without mouse movement until the wheel turns back straight, 0 = never */
 static volatile LONG values[KEY_SETTING_COUNT];
 static int loaded;
 static const wchar_t *const setting_keys[KEY_SETTING_COUNT] = {L"Enabled", L"SteerTime", L"ReturnTime",
@@ -75,6 +81,7 @@ enum {
     KIND_COCKPIT_VIEW, /* second cockpit view on/off, see cockpit_view.h */
     KIND_KEYLIST, /* key list panel on/off (notify.h), the game keeps the key */
     KIND_NOCLIP,  /* noclip keys (noclip.c reads them through keyboard_held), not in the pad reading */
+    KIND_MENU,    /* Gripline key menu on/off (key_menu.c reads it), not in the pad reading */
 };
 
 typedef struct {
@@ -134,6 +141,10 @@ static Binding bindings[] = {
     {L"NoclipUp", KIND_NOCLIP, 0, L"Space", {0}},
     {L"NoclipDown", KIND_NOCLIP, 0, L"LCtrl", {0}},
     {L"NoclipFast", KIND_NOCLIP, 0, L"LShift", {0}},
+    {L"Freecam", KIND_NOCLIP, 0, L"F7", {0}},
+    {L"KeyMenu", KIND_MENU, 0, L"F8", {0}},
+    {L"CruiseControl", KIND_NOCLIP, 0, L"K", {0}}, /* cruise.c reads it through keyboard_held */
+    {L"Walk", KIND_NOCLIP, 0, L"F", {0}},          /* walking.h: out of / into the car (V7 test) */
 };
 
 static const struct {
@@ -239,7 +250,15 @@ static const char default_ini[] =
     "; CockpitView: second cockpit view on/off (close to the dashboard, set on the MODS page).\r\n"
     "; Keybinds: shows this key list at the right of the picture, again = off (the game keeps running).\r\n"
     "; Noclip: fly through the map (offline only), again = off. Throttle/Brake fly forward/back,\r\n"
-    ";   SteerLeft/SteerRight turn, NoclipUp/NoclipDown rise/sink, NoclipFast held = faster.\r\n";
+    ";   SteerLeft/SteerRight turn, NoclipUp/NoclipDown rise/sink, NoclipFast held = faster.\r\n"
+    "; Freecam: the camera flies without the car (offline only), again = off, the car stays where it was.\r\n"
+    ";   Arrow keys look, Throttle/Brake fly forward/back, SteerLeft/SteerRight sideways,\r\n"
+    ";   NoclipUp/NoclipDown up/down, NoclipFast held = faster.\r\n"
+    "; KeyMenu: Gripline menu to change these keys in the game (arrows, Enter, Esc/Backspace = back).\r\n"
+    ";   It saves its changes into this file.\r\n"
+    "; CruiseControl: keeps the speed of the moment, again/brake = off (controller: LS + D-pad left; settings: F8).\r\n"
+    "; Walk: get out and walk (offline only, controller: LS + Y), again near the car = get in (or Y).\r\n"
+    ";   Throttle/Brake/SteerLeft/SteerRight walk, arrow keys look, NoclipFast runs, NoclipUp jumps.\r\n";
 
 /* Default file text including the key bindings (also used by ini_migrate.c). Returns the
    length, 0 if it does not fit. */
@@ -282,7 +301,8 @@ static const wchar_t *const labels_german[ARRAY_COUNT(bindings)] = {
     L"Bestätigen (A)", L"Zurück (B)", L"Taste X", L"Taste Y", L"Reiter links (LB)", L"Reiter rechts (RB)",
     L"Menü/Kamera hoch", L"Menü/Kamera runter", L"Menü/Kamera links", L"Menü/Kamera rechts",
     L"Steuerkreuz hoch", L"Steuerkreuz runter", L"Steuerkreuz links", L"Steuerkreuz rechts",
-    L"Noclip ein/aus", L"Noclip: steigen", L"Noclip: sinken", L"Noclip: schneller (halten)"};
+    L"Noclip ein/aus", L"Noclip: steigen", L"Noclip: sinken", L"Noclip: schneller (halten)", L"Freecam ein/aus",
+    L"Tastenmenü öffnen", L"Tempomat ein/aus", L"Walking: aus-/einsteigen"};
 static const wchar_t *const labels_english[ARRAY_COUNT(bindings)] = {
     L"Throttle", L"Brake", L"Steer left", L"Steer right", L"Handbrake", L"Shift up", L"Shift down",
     L"Clutch", L"Change camera", L"Rewind", L"Telemetry (hold)", L"Photo mode (hold)", L"Radio: previous",
@@ -291,12 +311,15 @@ static const wchar_t *const labels_english[ARRAY_COUNT(bindings)] = {
     L"Confirm (A)", L"Back (B)", L"Button X", L"Button Y", L"Tab left (LB)", L"Tab right (RB)",
     L"Menu/camera up", L"Menu/camera down", L"Menu/camera left", L"Menu/camera right",
     L"D-pad up", L"D-pad down", L"D-pad left", L"D-pad right",
-    L"Noclip on/off", L"Noclip: rise", L"Noclip: sink", L"Noclip: faster (hold)"};
+    L"Noclip on/off", L"Noclip: rise", L"Noclip: sink", L"Noclip: faster (hold)", L"Freecam on/off",
+    L"Open key menu", L"Cruise control on/off", L"Walking: get out / in"};
 _Static_assert(ARRAY_COUNT(bindings) + 1 <= NOTIFY_PANEL_ROWS, "key list rows");
 
 static unsigned char *game_base;
 static HMODULE user32;
 static volatile LONG key_list_held, key_list_on;
+static volatile LONG input_blocked; /* key menu open: the game and noclip get no key */
+static volatile unsigned char swallowed[256]; /* held when the menu closed: ignored until released */
 
 typedef int(WINAPI *MapKeyFn)(UINT, UINT);
 typedef int(WINAPI *KeyNameFn)(LONG, LPWSTR, int);
@@ -398,6 +421,7 @@ static void key_list_show(void) {
         if (!bindings[i].vk[0]) continue;
         copy_text(rows[count].label, german ? labels_german[i] : labels_english[i], 32);
         key_list_keys(&bindings[i], german, rows[count].keys, 32);
+        rows[count].style = NOTIFY_ROW_NORMAL;
         ++count;
     }
     notify_panel_set(german ? L"Tastenbelegung" : L"Key Bindings", rows, count);
@@ -423,6 +447,14 @@ static void settings_load(void) {
         if (v < setting_min[id] || v > setting_max[id]) v = setting_defaults[id];
         values[id] = v;
     }
+    /* V7: mouse steering (0 = off, 1..100 = sensitivity) */
+    mouse_sensitivity = read_int(L"MouseSteering", 0);
+    if (mouse_sensitivity < 0 || mouse_sensitivity > 100) mouse_sensitivity = 0;
+    if (mouse_sensitivity) log_append_value("KEYBOARD: mouse steering on, sensitivity ", mouse_sensitivity);
+    mouse_center = read_int(L"MouseCenter", 0);
+    mouse_dead = read_int(L"MouseDeadZone", 30);
+    if (mouse_dead < 0 || mouse_dead > 60) mouse_dead = 30;
+    if (mouse_center < 0 || mouse_center > 30) mouse_center = 0;
     for (unsigned i = 0; i < ARRAY_COUNT(bindings); ++i) {
         wchar_t text[96];
         GetPrivateProfileStringW(L"Keyboard", bindings[i].key, bindings[i].defaults, text, 96, ini_path);
@@ -438,6 +470,32 @@ int keyboard_setting(unsigned id) {
 void keyboard_set_setting(unsigned id, int value) {
     if (id < KEY_SETTING_COUNT && value >= setting_min[id] && value <= setting_max[id])
         InterlockedExchange(&values[id], value);
+}
+
+int keyboard_mouse_steering(void) {
+    return mouse_sensitivity;
+}
+
+void keyboard_set_mouse_steering(int sensitivity) {
+    if (sensitivity < 0 || sensitivity > 100) return;
+    mouse_sensitivity = sensitivity;
+}
+
+int keyboard_mouse_dead_zone(void) {
+    return mouse_dead;
+}
+
+void keyboard_set_mouse_dead_zone(int percent) {
+    if (percent >= 0 && percent <= 60) mouse_dead = percent;
+}
+
+int keyboard_mouse_center(void) {
+    return mouse_center;
+}
+
+void keyboard_set_mouse_center(int seconds) {
+    if (seconds < 0 || seconds > 30) return;
+    mouse_center = seconds;
 }
 
 const wchar_t *keyboard_ini_path(void) {
@@ -509,7 +567,13 @@ int game_simulation_running(void) {
 
 static int down(const Binding *b) {
     for (unsigned k = 0; k < 4 && b->vk[k]; ++k) {
-        if (async_key(b->vk[k]) & 0x8000) return 1;
+        unsigned char vk = b->vk[k];
+        int held = (async_key(vk) & 0x8000) != 0;
+        if (swallowed[vk]) {
+            if (held) continue;
+            swallowed[vk] = 0;
+        }
+        if (held) return 1;
     }
     return 0;
 }
@@ -558,6 +622,209 @@ static void apply_input(PadReading *r, int input, double amount) {
     }
 }
 
+
+/* ------------------------------------------------------------------ mouse steering (V7) */
+
+/* Moving the mouse left or right turns the wheel and it stays where you
+   left it (no spring back; optional: back to straight after MouseCenter seconds of rest).
+   The movement comes from DirectInput (the mouse's own counts, see below) - not from the cursor
+   position, which Azimuth holds in place itself.
+   Only while driving with the game window in front; the cursor is parked in the middle of the window
+   then so a click cannot land outside. In menus and the pause menu the wheel goes back to the middle. */
+/* DirectInput mouse, non-exclusive and in the background: Azimuth reads the mouse with DirectInput
+   itself (which takes the process's Raw Input registration and holds the cursor), so Gripline asks
+   DirectInput as well - several DirectInput devices share one process without taking anything away.
+   dinput8.dll is loaded at run time (no new import). */
+typedef struct { const GUID *guid; DWORD offset, type, flags; } DiObjectFormat;
+typedef struct { DWORD size, object_size, flags, data_size, count; DiObjectFormat *objects; } DiDataFormat;
+typedef struct { LONG x, y, z; BYTE buttons[4]; } DiMouseState;
+typedef HRESULT(WINAPI *DirectInput8CreateFn)(HINSTANCE, DWORD, const GUID *, void **, void *);
+typedef HRESULT(WINAPI *DiCreateDeviceFn)(void *, const GUID *, void **, void *);
+typedef HRESULT(WINAPI *DiDeviceFn)(void *);
+typedef HRESULT(WINAPI *DiStateFn)(void *, DWORD, void *);
+typedef HRESULT(WINAPI *DiFormatFn)(void *, const DiDataFormat *);
+typedef HRESULT(WINAPI *DiCoopFn)(void *, HWND, DWORD);
+
+static const GUID IID_DirectInput8W = {0xbf798031, 0x483a, 0x4da2, {0xaa, 0x99, 0x5d, 0x64, 0xed, 0x36, 0x97, 0x00}};
+static const GUID GUID_SysMouse_ = {0x6f1d2b60, 0xd5a0, 0x11cf, {0xbf, 0xc7, 0x44, 0x45, 0x53, 0x54, 0x00, 0x00}};
+static const GUID GUID_XAxis_ = {0xa36d02e0, 0xc9f3, 0x11cf, {0xbf, 0xc7, 0x44, 0x45, 0x53, 0x54, 0x00, 0x00}};
+static const GUID GUID_YAxis_ = {0xa36d02e1, 0xc9f3, 0x11cf, {0xbf, 0xc7, 0x44, 0x45, 0x53, 0x54, 0x00, 0x00}};
+static const GUID GUID_ZAxis_ = {0xa36d02e2, 0xc9f3, 0x11cf, {0xbf, 0xc7, 0x44, 0x45, 0x53, 0x54, 0x00, 0x00}};
+#define DIDFT_AXIS_ANY 0x00ffff03u     /* DIDFT_AXIS | DIDFT_ANYINSTANCE */
+#define DIDFT_BUTTON_ANY 0x00ffff0cu   /* DIDFT_BUTTON | DIDFT_ANYINSTANCE */
+#define DIDFT_OPTIONAL_ 0x80000000u
+static DiObjectFormat mouse_objects[] = {
+    {&GUID_XAxis_, 0, DIDFT_AXIS_ANY, 0},
+    {&GUID_YAxis_, 4, DIDFT_AXIS_ANY, 0},
+    {&GUID_ZAxis_, 8, DIDFT_AXIS_ANY | DIDFT_OPTIONAL_, 0},
+    {NULL, 12, DIDFT_BUTTON_ANY, 0},
+    {NULL, 13, DIDFT_BUTTON_ANY, 0},
+    {NULL, 14, DIDFT_BUTTON_ANY | DIDFT_OPTIONAL_, 0},
+    {NULL, 15, DIDFT_BUTTON_ANY | DIDFT_OPTIONAL_, 0},
+};
+static const DiDataFormat mouse_format = {sizeof(DiDataFormat), sizeof(DiObjectFormat), 2 /* DIDF_RELAXIS */,
+                                         sizeof(DiMouseState), ARRAY_COUNT(mouse_objects), mouse_objects};
+
+static struct {
+    void *device;
+    int state; /* 0 not tried, 1 ready, -1 failed */
+    HWND window;
+} di;
+
+#define DI_SLOT(object, index) ((*(void ***)(object))[index])
+
+static int di_open(HWND window) {
+    if (di.state) return di.state > 0;
+    di.state = -1;
+    HMODULE dll = LoadLibraryExW(L"dinput8.dll", NULL, LOAD_LIBRARY_SEARCH_SYSTEM32);
+    DirectInput8CreateFn create = dll ? (DirectInput8CreateFn)(uintptr_t)GetProcAddress(dll, "DirectInput8Create") : NULL;
+    void *input = NULL, *device = NULL;
+    HRESULT hr = create ? create(GetModuleHandleW(NULL), 0x0800, &IID_DirectInput8W, &input, NULL) : E_FAIL;
+    if (SUCCEEDED(hr)) hr = ((DiCreateDeviceFn)DI_SLOT(input, 3))(input, &GUID_SysMouse_, &device, NULL);
+    if (SUCCEEDED(hr)) hr = ((DiFormatFn)DI_SLOT(device, 11))(device, &mouse_format);
+    if (SUCCEEDED(hr)) hr = ((DiCoopFn)DI_SLOT(device, 13))(device, window, 0x2 | 0x8); /* NONEXCLUSIVE | BACKGROUND */
+    if (FAILED(hr)) {
+        log_append_value("KEYBOARD: mouse steering - DirectInput mouse not available, error ", (int)hr);
+        return 0;
+    }
+    ((DiDeviceFn)DI_SLOT(device, 7))(device); /* Acquire */
+    di.device = device;
+    di.window = window;
+    di.state = 1;
+    log_append("KEYBOARD: mouse steering - DirectInput mouse ready.\r\n");
+    return 1;
+}
+
+/* mouse counts left/right since the last call */
+static LONG di_dx(void) {
+    DiMouseState state;
+    memory_copy(&state, &(DiMouseState){0}, sizeof(state));
+    HRESULT hr = ((DiStateFn)DI_SLOT(di.device, 9))(di.device, sizeof(state), &state);
+    if (FAILED(hr)) { /* lost or not acquired: once more next reading */
+        ((DiDeviceFn)DI_SLOT(di.device, 7))(di.device);
+        return 0;
+    }
+    return state.x;
+}
+
+typedef struct { LONG x, y; } MousePoint;
+typedef BOOL(WINAPI *CursorPosFn)(MousePoint *);
+typedef BOOL(WINAPI *SetCursorPosFn)(int, int);
+typedef BOOL(WINAPI *ClientRectFn)(HWND, RECT *);
+typedef BOOL(WINAPI *ClientToScreenFn)(HWND, MousePoint *);
+
+static struct {
+    CursorPosFn get_pos;
+    SetCursorPosFn set_pos;
+    ClientRectFn client_rect;
+    ClientToScreenFn to_screen;
+    int ready, active;
+    double target, out;
+    ULONGLONG moved, card_next; /* last mouse movement, next live card */
+} mouse;
+
+#define MOUSE_CARD_TAG 0x3a05e000u
+#define MOUSE_DEAD_ZONE (mouse_dead / 100.0) /* the game's stick dead zone, skipped by the mouse */
+#define MOUSE_WHEEL_DEGREES 900.0 /* the card shows degrees of a 900 degree wheel (like the G920) */
+
+static void mouse_put(char *out, size_t *n, size_t cap, const char *text) {
+    while (*text && *n + 1 < cap) out[(*n)++] = *text++;
+    out[*n] = 0;
+}
+
+/* "Maus-Lenkung" / "135° links  □□□■■│□□□□□" while the mouse steers or the wheel turns back */
+static void mouse_card(double value, int returning) {
+    int de = game_language_is_german(game_base);
+    int degrees = (int)(value * MOUSE_WHEEL_DEGREES / 2.0 + (value < 0 ? -0.5 : 0.5));
+    int a = degrees < 0 ? -degrees : degrees;
+    char text[160], digits[8];
+    size_t n = 0;
+    unsigned d = 0;
+    text[0] = 0;
+    mouse_put(text, &n, sizeof(text), returning ? (de ? "Maus-Lenkung - zur\xc3\xbc" "ck zur Mitte\n" : "Mouse steering - back to centre\n")
+                                                : (de ? "Maus-Lenkung\n" : "Mouse steering\n"));
+    do digits[d++] = (char)('0' + a % 10); while ((a /= 10) && d < sizeof(digits));
+    while (d && n + 1 < sizeof(text)) text[n++] = digits[--d];
+    text[n] = 0;
+    mouse_put(text, &n, sizeof(text), "\xc2\xb0 ");
+    mouse_put(text, &n, sizeof(text), degrees < 0 ? (de ? "links   " : "left   ") : degrees > 0 ? (de ? "rechts   " : "right   ")
+                                                                                          : (de ? "gerade   " : "straight   "));
+    /* 5 cells per side, filled from the middle */
+    int cells = (int)((value < 0 ? -value : value) * 5.0 + 0.5);
+    for (int i = 0; i < 11; ++i) {
+        const char *c;
+        if (i == 5) c = "\xe2\x94\x82"; /* │ */
+        else if (value < 0 && i < 5 && 5 - i <= cells) c = "\xe2\x96\xa0"; /* ■ */
+        else if (value > 0 && i > 5 && i - 5 <= cells) c = "\xe2\x96\xa0";
+        else c = "\xe2\x96\xa1"; /* □ */
+        mouse_put(text, &n, sizeof(text), c);
+    }
+    if (notify_kind_on(NOTIFY_KIND_LIVE)) notify_show_live(text, MOUSE_CARD_TAG, 1500);
+}
+
+static int mouse_ready(void) {
+    if (mouse.ready) return mouse.ready > 0;
+    mouse.ready = -1;
+    if (!user32_ready()) return 0;
+    mouse.get_pos = (CursorPosFn)(uintptr_t)GetProcAddress(user32, "GetCursorPos");
+    mouse.set_pos = (SetCursorPosFn)(uintptr_t)GetProcAddress(user32, "SetCursorPos");
+    mouse.client_rect = (ClientRectFn)(uintptr_t)GetProcAddress(user32, "GetClientRect");
+    mouse.to_screen = (ClientToScreenFn)(uintptr_t)GetProcAddress(user32, "ClientToScreen");
+    if (mouse.get_pos && mouse.set_pos && mouse.client_rect && mouse.to_screen) mouse.ready = 1;
+    return mouse.ready > 0;
+}
+
+static double mouse_steer(int focused, double dt) {
+    if (!mouse_sensitivity || !mouse_ready()) return 0.0;
+    int on = focused && !input_blocked && driving_now() && !noclip_active();
+    HWND window = on ? foreground() : NULL;
+    RECT rect;
+    MousePoint centre = {0, 0}, now;
+    if (window && mouse.client_rect(window, &rect) && rect.right > 0 && rect.bottom > 0) {
+        centre.x = rect.right / 2;
+        centre.y = rect.bottom / 2;
+        if (!mouse.to_screen(window, &centre)) window = NULL;
+    } else {
+        window = NULL;
+    }
+    if (window && !di_open(window)) window = NULL;
+    if (!window) {
+        mouse.active = 0;
+        mouse.target = 0.0;
+    } else if (!mouse.active) { /* first reading: only park the cursor, forget older movement */
+        mouse.active = 1;
+        di_dx(); /* forget older movement */
+        mouse.set_pos((int)centre.x, (int)centre.y);
+    } else {
+        LONG dx = di_dx();
+        if (dx) {
+            mouse.target = clamp1(mouse.target + (double)dx * (double)mouse_sensitivity / 200000.0); /* Medium (45): about 15 cm at 1600 dpi from lock to lock */
+            mouse.moved = GetTickCount64();
+        }
+        if (mouse.get_pos(&now) && (now.x != centre.x || now.y != centre.y)) mouse.set_pos((int)centre.x, (int)centre.y);
+    }
+    /* back to the middle after MouseCenter seconds without moving the mouse (about 0.7 s from full lock) */
+    ULONGLONG tick = GetTickCount64();
+    int returning = 0;
+    if (mouse.active && mouse_center && mouse.target != 0.0 && tick - mouse.moved >= (ULONGLONG)mouse_center * 1000u) {
+        double step = dt * 1.4;
+        mouse.target = mouse.target > 0.0 ? (mouse.target > step ? mouse.target - step : 0.0)
+                                           : (mouse.target < -step ? mouse.target + step : 0.0);
+        returning = 1;
+    }
+    /* gentle: the wheel follows the mouse with a short delay instead of jumping */
+    double k = dt * 14.0;
+    if (k > 1.0 || dt <= 0.0) k = 1.0;
+    mouse.out += (mouse.target - mouse.out) * k;
+    if (mouse.out > -0.002 && mouse.out < 0.002 && mouse.target == 0.0) mouse.out = 0.0;
+    /* live card while the mouse steers, while the wheel turns back and a moment after */
+    if (mouse.active && tick >= mouse.card_next && (tick - mouse.moved < 1500 || returning)) {
+        mouse.card_next = tick + 33;
+        mouse_card(mouse.out, returning);
+    }
+    return mouse.out;
+}
+
 static struct {
     double steer, pedal[ARRAY_COUNT(bindings)];
     LARGE_INTEGER last;
@@ -572,9 +839,13 @@ static void keyboard_reading(PadReading *r) {
     kb.last = now;
     int focused = game_has_focus();
     double steer_target = 0.0, nav_x = 0.0, nav_y = 0.0;
+    int flying = noclip_active() && driving_now();
     for (unsigned i = 0; i < ARRAY_COUNT(bindings); ++i) {
         const Binding *b = &bindings[i];
-        int pressed = focused && b->vk[0] && down(b);
+        int pressed = focused && !input_blocked && b->vk[0] && down(b);
+        /* noclip / freecam: the driving keys only fly (noclip.c), so they do not look like a controller there */
+        if (flying && (b->kind == KIND_ACTION || b->kind == KIND_STEER || (b->kind == KIND_NAV && noclip_own_look())))
+            pressed = 0; /* noclip keeps the arrows for the game's camera, freecam looks with them itself */
         switch (b->kind) {
             case KIND_STEER:
                 if (pressed) steer_target += b->target ? 1.0 : -1.0;
@@ -600,6 +871,7 @@ static void keyboard_reading(PadReading *r) {
                 key_list_input(pressed);
                 break;
             case KIND_NOCLIP:
+            case KIND_MENU:
                 break;
             case KIND_ACTION: {
                 int input = controller_action_input(b->target);
@@ -623,7 +895,20 @@ static void keyboard_reading(PadReading *r) {
         if (nav_y != 0.0 && r->ry == 0.0) r->ry = clamp1(nav_y);
         nav_x = nav_y = 0.0;
     }
-    double lx = clamp1(kb.steer + nav_x);
+    double ms = mouse_steer(focused, dt);
+    /* curve: fine around the middle, full lock still at the end (|x|^1.6) */
+    if (ms != 0.0) {
+        double a = ms < 0.0 ? -ms : ms, c = a * a;
+        double r = a > 0.0 ? c / (a * 0.6 + 0.4 * 1.0) : 0.0; /* about a^1.6 without a maths library */
+        if (r > 1.0) r = 1.0;
+        ms = ms < 0.0 ? -r : r;
+    }
+    /* the game ignores the inner part of the stick (Marvin's test: nothing until about 140 of 450 degrees),
+       so mouse steering starts right behind that dead zone: the first mouse movement already turns the car */
+    if (ms > 0.003) ms = MOUSE_DEAD_ZONE + (1.0 - MOUSE_DEAD_ZONE) * ms;
+    else if (ms < -0.003) ms = -MOUSE_DEAD_ZONE + (1.0 - MOUSE_DEAD_ZONE) * ms;
+    else ms = 0.0;
+    double lx = clamp1(kb.steer + nav_x + ms);
     if (lx != 0.0) r->lx = lx;
     if (nav_y != 0.0) r->ly = clamp1(nav_y);
 }
@@ -772,6 +1057,15 @@ static HRESULT WINAPI pad_reading(void *self, PadReading *out) {
         if (magnitude(k.rx, k.ry) > magnitude(r.rx, r.ry)) r.rx = k.rx, r.ry = k.ry;
     }
     ReleaseSRWLockExclusive(&pad_lock);
+    { /* cruise control: holds the throttle for the player */
+        int gas = controller_action_input(0), brake = controller_action_input(1);
+        double *g = gas == IN_LT ? &r.left_trigger : gas == IN_RT ? &r.right_trigger : NULL;
+        double *b = brake == IN_LT ? &r.left_trigger : brake == IN_RT ? &r.right_trigger : NULL;
+        if (g) {
+            double c = cruise_throttle(*g, b ? *b : 0.0);
+            if (c > *g) *g = c;
+        }
+    }
     r.timestamp = timestamp;
     *out = r;
     return S_OK;
@@ -1110,7 +1404,9 @@ static int wide_equal(const wchar_t *a, const wchar_t *b) {
 int keyboard_held(unsigned which) {
     static const wchar_t *const names[KEYBOARD_HOLD_COUNT] = {L"Throttle", L"Brake",      L"SteerLeft",
                                                               L"SteerRight", L"NoclipUp", L"NoclipDown",
-                                                              L"NoclipFast", L"Noclip"};
+                                                              L"NoclipFast", L"Noclip", L"Freecam",
+                                                              L"ArrowUp", L"ArrowDown", L"ArrowLeft",
+                                                              L"ArrowRight", L"CruiseControl", L"Walk"};
     static int index[KEYBOARD_HOLD_COUNT];
     if (which >= KEYBOARD_HOLD_COUNT || !loaded || !user32_ready()) return 0;
     if (!index[which]) {
@@ -1120,7 +1416,124 @@ int keyboard_held(unsigned which) {
         if (!index[which]) return 0;
     }
     const Binding *b = &bindings[index[which] - 1];
-    return b->vk[0] && game_has_focus() && down(b);
+    return b->vk[0] && !input_blocked && game_has_focus() && down(b);
+}
+
+/* ------------------------------------------------------------------ key menu (key_menu.c) */
+
+unsigned keyboard_binding_count(void) {
+    return ARRAY_COUNT(bindings);
+}
+
+int keyboard_binding_find(const wchar_t *key) {
+    for (unsigned i = 0; i < ARRAY_COUNT(bindings); ++i)
+        if (wide_equal(bindings[i].key, key)) return (int)i;
+    return -1;
+}
+
+const wchar_t *keyboard_binding_key(unsigned index) {
+    return index < ARRAY_COUNT(bindings) ? bindings[index].key : L"";
+}
+
+const wchar_t *keyboard_binding_label(unsigned index, int german) {
+    if (index >= ARRAY_COUNT(bindings)) return L"";
+    return german ? labels_german[index] : labels_english[index];
+}
+
+void keyboard_binding_vks(unsigned index, unsigned char vk[4]) {
+    for (unsigned k = 0; k < 4; ++k) vk[k] = index < ARRAY_COUNT(bindings) ? bindings[index].vk[k] : 0;
+}
+
+void keyboard_binding_default_vks(unsigned index, unsigned char vk[4]) {
+    Binding parsed = {0};
+    if (index < ARRAY_COUNT(bindings)) parse_keys(&parsed, bindings[index].defaults);
+    for (unsigned k = 0; k < 4; ++k) vk[k] = parsed.vk[k];
+}
+
+void keyboard_binding_set(unsigned index, const unsigned char vk[4]) {
+    if (index >= ARRAY_COUNT(bindings)) return;
+    /* all four at once: the game thread may read them meanwhile */
+    UINT32 packed = (UINT32)vk[0] | (UINT32)vk[1] << 8 | (UINT32)vk[2] << 16 | (UINT32)vk[3] << 24;
+    InterlockedExchange((volatile LONG *)(void *)bindings[index].vk, (LONG)packed);
+}
+
+void keyboard_keys_text(const unsigned char vk[4], int german, wchar_t *out, unsigned capacity) {
+    Binding b = {0};
+    for (unsigned k = 0; k < 4; ++k) b.vk[k] = vk[k];
+    key_list_keys(&b, german, out, capacity);
+    if (!out[0]) append(out, 0, capacity, german ? L"keine" : L"none");
+}
+
+/* name of a key as FH2_Keyboard.ini writes it ("W", "F8", "Num2", "LShift"); "" = not bindable */
+const char *keyboard_key_ini_name(unsigned char vk, char buffer[8]) {
+    static const struct {
+        unsigned char vk;
+        const char *name;
+    } names[] = {{0x20, "Space"},   {0x0d, "Enter"},    {0x1b, "Esc"},     {0x09, "Tab"},      {0x08, "Backspace"},
+                 {0xa0, "LShift"},  {0xa1, "RShift"},   {0xa2, "LCtrl"},   {0xa3, "RCtrl"},    {0x12, "Alt"},
+                 {0x26, "Up"},      {0x28, "Down"},     {0x25, "Left"},    {0x27, "Right"},    {0x21, "PageUp"},
+                 {0x22, "PageDown"}, {0x24, "Home"},    {0x23, "End"},     {0x2d, "Insert"},   {0x2e, "Delete"},
+                 {0xbd, "Minus"},   {0xbb, "Plus"},     {0xbc, "Comma"},   {0xbe, "Period"},   {0x01, "Mouse1"},
+                 {0x02, "Mouse2"},  {0x04, "Mouse3"},   {0x05, "Mouse4"},  {0x06, "Mouse5"},   {0x10, "Shift"},
+                 {0x11, "Ctrl"}};
+    buffer[0] = 0;
+    if ((vk >= 'A' && vk <= 'Z') || (vk >= '0' && vk <= '9')) {
+        buffer[0] = (char)vk, buffer[1] = 0;
+    } else if (vk >= 0x70 && vk <= 0x7b) {
+        int f = vk - 0x70 + 1;
+        buffer[0] = 'F', buffer[1] = (char)(f >= 10 ? '1' : '0' + f);
+        buffer[2] = f >= 10 ? (char)('0' + f - 10) : 0, buffer[3] = 0;
+    } else if (vk >= 0x60 && vk <= 0x69) {
+        buffer[0] = 'N', buffer[1] = 'u', buffer[2] = 'm', buffer[3] = (char)('0' + vk - 0x60), buffer[4] = 0;
+    } else {
+        for (unsigned i = 0; i < ARRAY_COUNT(names); ++i)
+            if (names[i].vk == vk) return names[i].name;
+    }
+    return buffer;
+}
+
+int keyboard_key_down(unsigned char vk) {
+    return vk && user32_ready() && game_has_focus() && (async_key(vk) & 0x8000) != 0;
+}
+
+void keyboard_block_input(int blocked) {
+    if (!blocked && input_blocked && user32_ready()) {
+        /* keys still held when the menu closes (Esc, Enter, the menu key) do nothing in the game */
+        for (unsigned vk = 1; vk < 256; ++vk)
+            if (async_key((int)vk) & 0x8000) swallowed[vk] = 1;
+    }
+    InterlockedExchange(&input_blocked, blocked ? 1 : 0);
+}
+
+/* the key list (F5) was on: shown again with the current keys; off: the panel is cleared */
+void keyboard_key_list_restore(void) {
+    if (key_list_on) key_list_show();
+    else notify_panel_set(NULL, NULL, 0);
+}
+
+unsigned char *keyboard_game_image(void) {
+    return game_base;
+}
+
+/* start card: "F5 keys, F6 noclip, F7 freecam, F8 menu" with the keys bound now */
+size_t keyboard_start_keys(char *out, size_t capacity) {
+    static const struct {
+        const wchar_t *key;
+        const char *word;
+    } parts[] = {{L"Keybinds", " keys"}, {L"Noclip", " noclip"}, {L"Freecam", " freecam"}, {L"KeyMenu", " menu"}};
+    size_t n = 0;
+    out[0] = 0;
+    for (unsigned p = 0; p < ARRAY_COUNT(parts); ++p) {
+        int i = keyboard_binding_find(parts[p].key);
+        if (i < 0 || !bindings[i].vk[0]) continue;
+        char buffer[8];
+        const char *name = keyboard_key_ini_name(bindings[i].vk[0], buffer);
+        if (n && n + 2 < capacity) out[n++] = ',', out[n++] = ' ';
+        while (*name && n + 1 < capacity) out[n++] = *name++;
+        for (const char *w = parts[p].word; *w && n + 1 < capacity; ++w) out[n++] = *w;
+    }
+    out[n] = 0;
+    return n;
 }
 
 void keyboard_pad_game_start(unsigned char *game_image, const wchar_t *settings_directory) {
@@ -1128,6 +1541,7 @@ void keyboard_pad_game_start(unsigned char *game_image, const wchar_t *settings_
     ini_migrate(settings_directory);
     if (!loaded) settings_load();
     game_base = game_image;
+    key_menu_start();
     if (values[KEY_SETTING_ENABLED] && !mod_scan_mapper_running()) wheel_buttons_install(game_image); /* follows the controller layout */
 }
 

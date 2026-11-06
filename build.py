@@ -18,24 +18,32 @@ PLUGIN_SOURCES = [
     "support.c",
     "logging.c",
     "settings.c",
-    "sha256.c",
     "plugin/gripline_plugin.c",
     "features/game_language.c",
     "features/traffic_tunables.c",
     "features/traffic_files.c",
+    "features/world_files.c",
+    "features/telemetry.c",
+    "features/logbook.c",
+    "features/cruise.c",
+    "features/records.c",
     "features/ini_edit.c",
     "features/ini_migrate.c",
     "features/rig_settings.c",
     "features/wheel_buttons.c",
     "features/keyboard_pad.c",
+    "features/key_menu.c",
     "features/mod_scan.c",
     "features/report.c",
     "features/cockpit_view.c",
     "features/nitro_link.c",
     "features/noclip.c",
+    "features/walking.c",
+    "features/no_damage.c",
     "features/trip.c",
     "features/wheel_watch.c",
     "features/version_check.c",
+    "features/update_check.c",
     "features/game_units.c",
     "features/notify.c",
     "features/cockpit.c",
@@ -88,7 +96,7 @@ def compiler_arguments(compiler, options):
 
 
 def version_resource(filename):
-    version = "6.5.0"
+    version = "7.0.0"
     numbers = [int(part) for part in version.split(".")]
     numbers += [0] * (4 - len(numbers))
 
@@ -105,10 +113,10 @@ def version_resource(filename):
             data = padded(data) + children
         return struct.pack("<H", len(data)) + data[2:]
 
-    strings = {"FileDescription": "Gripline V6.5 - FH2 Mod Platform mod",
+    strings = {"FileDescription": "Gripline V7 - The Big Update - FH2 Mod Platform mod",
                "FileVersion": version, "InternalName": "Gripline",
                "OriginalFilename": filename, "ProductName": "Gripline",
-               "ProductVersion": "V6.5",
+               "ProductVersion": "V7",
                "LegalCopyright": "Flenkii, GPL-3.0; based on Extra Options by Arthur (RokkuDayo)"}
     entries = b"".join(padded(block(key, wide(value), text=True)) for key, value in strings.items())
     string_info = block("StringFileInfo", children=block("040904b0", children=entries))

@@ -19,10 +19,11 @@
 #include "support.h"
 #include "notify.h"
 #include "gripline_logo.h"
+#include "gripline_symbol.h"
 
 #define MAX_CARDS 3
 #define CARD_MS 5000u
-#define STARTUP_CARD_MS 9000u /* start cards (mods found, Mapper) stay longer */
+#define STARTUP_CARD_MS 15000u /* start cards (start, key menu, mods found, version check) stay 15 s (Marvin, V7) */
 #define FADE_IN_MS 250u
 #define FADE_OUT_MS 500u
 #define TEXT_CAPACITY 96
@@ -34,7 +35,7 @@ typedef struct {
     unsigned id;
     unsigned tag; /* notify_show_step: the card a later step replaces (0 = none) */
     int color; /* fixed NOTIFY_COLOR_* of this card, -1 = the colour from the settings */
-    wchar_t badge[24]; /* after GRIPLINE in the title line, e.g. WARNUNG; empty = none */
+    wchar_t badge[24]; /* line above the text, e.g. WARNUNG; empty = none (the logo carries the name) */
 } Card;
 
 static SRWLOCK lock = SRWLOCK_INIT;
@@ -42,9 +43,13 @@ static Card cards[MAX_CARDS]; /* [0] = newest */
 static unsigned card_count, next_id = 1;
 static volatile LONG cards_changed;
 static volatile LONG enabled = 1, broken;
+/* V7 walking: the whole picture darkened, 0..1000, fading from black_from to black_to (under lock) */
+static int black_from, black_to;
+static ULONGLONG black_start;
+static unsigned black_ms;
 
 /* card colours (NOTIFY_COLOR_*): bar, and the light tone of the logo and the GRIPLINE title; R, G, B */
-static const unsigned char palette[NOTIFY_COLOR_COUNT][2][3] = {
+static unsigned char palette[NOTIFY_COLOR_COUNT][2][3] = { /* [RAINBOW] is filled by rainbow_tick */
     {{38, 120, 225}, {110, 185, 255}},  /* blue (original) */
     {{215, 45, 45}, {255, 135, 130}},   /* red */
     {{40, 165, 70}, {125, 230, 145}},   /* green */
@@ -53,12 +58,70 @@ static const unsigned char palette[NOTIFY_COLOR_COUNT][2][3] = {
     {{225, 185, 20}, {255, 230, 110}},  /* yellow */
     {{225, 60, 150}, {255, 150, 205}},  /* pink */
     {{215, 220, 228}, {255, 255, 255}}, /* white */
+    {{44, 47, 54}, {185, 192, 204}},    /* black (very dark grey, the light tone keeps titles readable) */
+    {{38, 120, 225}, {110, 185, 255}},  /* rainbow (changes every frame) */
 };
 static volatile LONG color;
+/* Overdrive: second colour of the two-colour fade, per card colour (R, G, B) */
+static unsigned char palette_second[NOTIFY_COLOR_COUNT][3] = {
+    {150, 60, 235},  /* blue -> violet */
+    {255, 120, 30},  /* red -> orange */
+    {20, 190, 170},  /* green -> teal */
+    {235, 70, 170},  /* purple -> pink */
+    {235, 45, 70},   /* orange -> red */
+    {255, 135, 20},  /* yellow -> orange */
+    {140, 70, 230},  /* pink -> purple */
+    {140, 165, 205}, /* white -> steel blue */
+    {88, 94, 108},   /* black -> graphite */
+    {150, 60, 235},  /* rainbow: the next hue (rainbow_tick) */
+};
+
+/* V7 rainbow: hue runs once round in RAINBOW_MS, like an RGB keyboard; redrawn with every card frame */
+#define RAINBOW_MS 6000u
+static void hue_rgb(float hue, float sat, float val, unsigned char out[3]) {
+    hue -= (float)(int)hue; /* 0..1 */
+    float h6 = hue * 6.0f;
+    int sector = (int)h6;
+    float f = h6 - (float)sector, p = val * (1.0f - sat), q = val * (1.0f - sat * f), t = val * (1.0f - sat * (1.0f - f));
+    float r, g, b;
+    switch (sector % 6) {
+        case 0: r = val, g = t, b = p; break;
+        case 1: r = q, g = val, b = p; break;
+        case 2: r = p, g = val, b = t; break;
+        case 3: r = p, g = q, b = val; break;
+        case 4: r = t, g = p, b = val; break;
+        default: r = val, g = p, b = q; break;
+    }
+    out[0] = (unsigned char)(r * 255.0f + 0.5f), out[1] = (unsigned char)(g * 255.0f + 0.5f), out[2] = (unsigned char)(b * 255.0f + 0.5f);
+}
+static void rainbow_at(ULONGLONG now) {
+    float hue = (float)(now % RAINBOW_MS) / (float)RAINBOW_MS;
+    hue_rgb(hue, 0.85f, 0.88f, palette[NOTIFY_COLOR_RAINBOW][0]);
+    hue_rgb(hue, 0.45f, 1.0f, palette[NOTIFY_COLOR_RAINBOW][1]);
+    hue_rgb(hue + 0.12f, 0.85f, 0.92f, palette_second[NOTIFY_COLOR_RAINBOW]);
+}
+static void rainbow_tick(void) {
+    if (color == NOTIFY_COLOR_RAINBOW) rainbow_at(GetTickCount64());
+}
+static volatile LONG card_style = NOTIFY_STYLE_OVERDRIVE;
 
 static wchar_t panel_title[TEXT_CAPACITY];
 static NotifyPanelRow panel_rows[NOTIFY_PANEL_ROWS];
 static volatile LONG panel_count; /* 0 = panel off */
+static volatile ULONGLONG panel_opened; /* V7 overhaul: when the menu panel came up (open animation) */
+static volatile ULONGLONG panel_paged;  /* V7 overhaul: when the menu went to another page (short glide) */
+static volatile LONG panel_at_top; /* 1 key menu: top right instead of centred; 2 telemetry: centred, cards stay */
+static volatile LONG tele_pos = NOTIFY_TELE_RIGHT_MIDDLE, tele_opacity = 100, tele_size = 100; /* V7: telemetry look */
+/* V7: the telemetry panel has its own rows, so it can stay up next to the Gripline menu when it sits
+   on the left (Marvin: see what one changes live); on the right the menu covers it */
+static wchar_t tele_title[TEXT_CAPACITY];
+static NotifyPanelRow tele_rows[NOTIFY_PANEL_ROWS];
+static volatile LONG tele_count;
+static unsigned tele_id;
+static int draw_kind; /* panel_at_top of the panel being drawn (2 = telemetry) */
+static unsigned tele_visible(void) {
+    return tele_count && (panel_count == 0 || tele_pos >= NOTIFY_TELE_LEFT_TOP) ? (unsigned)tele_count : 0;
+}
 static unsigned panel_id; /* changes with every notify_panel_set: the panel is drawn again */
 
 /* ------------------------------------------------------------------ public */
@@ -170,7 +233,6 @@ static void show_card_full(const char *text, ULONGLONG hold, unsigned tag, int l
         wchar_t wide[TEXT_CAPACITY];
         utf8_line(badge, text_length(badge), wide);
         unsigned i = 0;
-        for (const wchar_t *g = L"GRIPLINE \x00b7 "; *g; ++g) card.badge[i++] = *g;
         for (const wchar_t *b = wide; *b && i + 1 < sizeof(card.badge) / sizeof(card.badge[0]); ++b) card.badge[i++] = *b;
         card.badge[i] = 0;
     }
@@ -201,8 +263,31 @@ void notify_set_color(int index) {
     ReleaseSRWLockExclusive(&lock);
 }
 
-int notify_color(void) {
-    return (int)color;
+void notify_set_style(int style) {
+    if (style < 0 || style >= NOTIFY_STYLE_COUNT || InterlockedExchange(&card_style, style) == style) return;
+    AcquireSRWLockExclusive(&lock);
+    for (unsigned i = 0; i < card_count; ++i) cards[i].id = next_id++; /* drawn again in the new look */
+    ++panel_id;
+    InterlockedExchange(&cards_changed, 1);
+    ReleaseSRWLockExclusive(&lock);
+}
+
+int notify_style(void) {
+    return (int)card_style;
+}
+
+static volatile LONG hidden_kinds;
+
+void notify_set_hidden_kinds(int mask) {
+    InterlockedExchange(&hidden_kinds, mask & NOTIFY_KINDS_ALL);
+}
+
+int notify_hidden_kinds(void) {
+    return (int)hidden_kinds;
+}
+
+int notify_kind_on(int kind) {
+    return kind < 0 || kind >= NOTIFY_KIND_COUNT || !(hidden_kinds & (1 << kind));
 }
 
 void notify_set_enabled(int on) {
@@ -214,11 +299,37 @@ int notify_enabled(void) {
     return (int)enabled;
 }
 
+static int black_at(ULONGLONG now) { /* under lock */
+    if (!black_ms || now >= black_start + black_ms) return black_to;
+    return black_from + (int)((long long)(black_to - black_from) * (long long)(now - black_start) / (long long)black_ms);
+}
+
+void notify_fade_black(int permille, unsigned ms) {
+    if (permille < 0) permille = 0;
+    if (permille > 1000) permille = 1000;
+    ULONGLONG now = GetTickCount64();
+    AcquireSRWLockExclusive(&lock);
+    black_from = black_at(now);
+    black_to = permille;
+    black_start = now;
+    black_ms = ms;
+    ReleaseSRWLockExclusive(&lock);
+}
+
 void notify_panel_set(const wchar_t *title, const NotifyPanelRow *rows, unsigned count) {
+    notify_panel_show(title, rows, count, 0);
+}
+
+void notify_panel_show(const wchar_t *title, const NotifyPanelRow *rows, unsigned count, int at_top) {
     if (count > NOTIFY_PANEL_ROWS) count = NOTIFY_PANEL_ROWS;
     if (!rows) count = 0;
     AcquireSRWLockExclusive(&lock);
     unsigned n = 0;
+    if (at_top == 1 && panel_at_top == 1 && panel_count && count && title) {
+        unsigned k = 0;
+        while (title[k] && panel_title[k] == title[k]) ++k;
+        if (title[k] != panel_title[k]) panel_paged = GetTickCount64();
+    }
     while (title && title[n] && n < TEXT_CAPACITY - 1) {
         panel_title[n] = title[n];
         ++n;
@@ -226,13 +337,55 @@ void notify_panel_set(const wchar_t *title, const NotifyPanelRow *rows, unsigned
     panel_title[n] = 0;
     for (unsigned i = 0; i < count; ++i) panel_rows[i] = rows[i];
     ++panel_id;
+    if (at_top != 2 && count && (panel_count == 0 || panel_at_top == 2)) panel_opened = GetTickCount64();
+    InterlockedExchange(&panel_at_top, at_top == 2 ? 2 : at_top ? 1 : 0);
     InterlockedExchange(&panel_count, (LONG)count);
     InterlockedExchange(&cards_changed, 1);
     ReleaseSRWLockExclusive(&lock);
 }
 
-int notify_panel_visible(void) {
-    return panel_count != 0;
+/* A panel that gives way to the others (live telemetry): shown only while no other panel is up.
+   owner = the id this function returned last time (0 at first). Returns the new id, 0 = not shown. */
+unsigned notify_panel_show_owned(const wchar_t *title, const NotifyPanelRow *rows, unsigned count, unsigned owner) {
+    (void)owner;
+    if (count > NOTIFY_PANEL_ROWS) count = NOTIFY_PANEL_ROWS;
+    if (!rows) count = 0;
+    AcquireSRWLockExclusive(&lock);
+    unsigned n = 0;
+    while (title && title[n] && n < TEXT_CAPACITY - 1) tele_title[n] = title[n], ++n;
+    tele_title[n] = 0;
+    for (unsigned i = 0; i < count; ++i) tele_rows[i] = rows[i];
+    if (!++tele_id) ++tele_id;
+    InterlockedExchange(&tele_count, (LONG)count);
+    InterlockedExchange(&cards_changed, 1);
+    unsigned id = tele_id;
+    ReleaseSRWLockExclusive(&lock);
+    return id;
+}
+
+void notify_set_telemetry_look(int position, int opacity, int size) {
+    if (position < 0 || position >= NOTIFY_TELE_POS_COUNT) position = NOTIFY_TELE_RIGHT_MIDDLE;
+    opacity = opacity < 10 ? 10 : opacity > 100 ? 100 : opacity;
+    size = size < 50 ? 50 : size > 200 ? 200 : size;
+    InterlockedExchange(&tele_pos, position);
+    InterlockedExchange(&tele_opacity, opacity);
+    InterlockedExchange(&tele_size, size);
+    AcquireSRWLockExclusive(&lock);
+    ++panel_id, ++tele_id; /* drawn again */
+    InterlockedExchange(&cards_changed, 1);
+    ReleaseSRWLockExclusive(&lock);
+}
+int notify_telemetry_position(void) { return (int)tele_pos; }
+int notify_telemetry_opacity(void) { return (int)tele_opacity; }
+int notify_telemetry_size(void) { return (int)tele_size; }
+
+void notify_panel_clear_owned(unsigned owner) {
+    (void)owner;
+    AcquireSRWLockExclusive(&lock);
+    InterlockedExchange(&tele_count, 0);
+    ++tele_id;
+    InterlockedExchange(&cards_changed, 1);
+    ReleaseSRWLockExclusive(&lock);
 }
 
 /* ------------------------------------------------------------------ GDI card bitmap */
@@ -248,6 +401,8 @@ typedef COLORREF(WINAPI *SetTextColorFn)(HDC, COLORREF);
 typedef int(WINAPI *SetBkModeFn)(HDC, int);
 typedef BOOL(WINAPI *ExtTextOutWFn)(HDC, int, int, UINT, const RECT *, LPCWSTR, UINT, const INT *);
 typedef BOOL(WINAPI *GdiFlushFn)(void);
+typedef BOOL(WINAPI *GetTextExtentPoint32WFn)(HDC, LPCWSTR, int, SIZE *);
+typedef BOOL(WINAPI *GetTextMetricsWFn)(HDC, TEXTMETRICW *);
 
 static struct {
     CreateCompatibleDCFn CreateCompatibleDC;
@@ -260,6 +415,8 @@ static struct {
     SetBkModeFn SetBkMode;
     ExtTextOutWFn ExtTextOutW;
     GdiFlushFn GdiFlush;
+    GetTextExtentPoint32WFn GetTextExtentPoint32W; /* optional: key caps in the panel */
+    GetTextMetricsWFn GetTextMetricsW;             /* optional: text sits in the middle of its row */
 } gdi;
 
 static int gdi_ready(void) {
@@ -277,6 +434,8 @@ static int gdi_ready(void) {
     LOAD(SetBkMode);
     LOAD(ExtTextOutW);
     LOAD(GdiFlush);
+    LOAD(GetTextExtentPoint32W);
+    LOAD(GetTextMetricsW);
 #undef LOAD
     return gdi.CreateCompatibleDC && gdi.CreateDIBSection && gdi.SelectObject && gdi.DeleteObject &&
            gdi.DeleteDC && gdi.CreateFontW && gdi.SetTextColor && gdi.SetBkMode && gdi.ExtTextOutW &&
@@ -286,6 +445,10 @@ static int gdi_ready(void) {
 /* layout in pixels for the current screen height */
 typedef struct {
     int width, height, gap, margin, radius, icon, pad, bar;
+    int glow;    /* V7: the cards glow out this far; width/height include it, gap/margin are shrunk by it */
+    float scale; /* screen height / 1080 */
+    int style;   /* NOTIFY_STYLE_* this layout was made for */
+    int skew;    /* Overdrive: the left/right edges lean over this many pixels (a racing banner) */
     int panel_header, panel_row, panel_height; /* key list panel; panel_height = all rows */
 } Layout;
 
@@ -294,18 +457,43 @@ static Layout layout_for(UINT screen_height) {
     if (s < 0.6f) s = 0.6f;
     if (s > 2.5f) s = 2.5f;
     Layout l;
-    l.width = (int)(430 * s);
-    l.height = (int)(88 * s);
-    l.gap = (int)(10 * s);
-    l.margin = (int)(28 * s);
+    l.scale = s;
+    l.style = (int)card_style;
+    l.glow = l.style == NOTIFY_STYLE_CLASSIC ? 0 : l.style == NOTIFY_STYLE_OVERDRIVE ? (int)(12 * s) : (int)(9 * s);
+    l.width = (int)(430 * s) + 2 * l.glow;
+    l.height = (int)(88 * s) + 2 * l.glow;
+    /* visible gap between two cards = gap + 2 * glow: at least the glow plus a little, so the next
+       card's glow and shadow never fall onto the card above (they overlapped by 2-4 px before) */
+    int visible_gap = (int)(10 * s) > l.glow + (int)(4 * s) ? (int)(10 * s) : l.glow + (int)(4 * s);
+    l.gap = visible_gap - 2 * l.glow;
+    l.margin = (int)(28 * s) - l.glow;
     l.radius = (int)(12 * s);
-    l.icon = (int)(58 * s);
+    l.icon = l.style == NOTIFY_STYLE_CLASSIC ? (int)(58 * s) : (int)(70 * s);
     l.pad = (int)(14 * s);
     l.bar = (int)(5 * s) > 2 ? (int)(5 * s) : 2;
+    l.skew = 0;
+    if (l.style == NOTIFY_STYLE_OVERDRIVE) {
+        l.bar = (int)(6 * s) > 3 ? (int)(6 * s) : 3;
+        l.skew = (int)(18 * s);
+        l.width += l.skew; /* the lean takes room; the text keeps the width it has in the other looks */
+    }
     l.panel_header = (int)(60 * s);
     l.panel_row = (int)(20 * s);
-    l.panel_height = l.panel_header + NOTIFY_PANEL_ROWS * l.panel_row + l.pad;
+    l.panel_height = l.panel_header + NOTIFY_PANEL_ROWS * l.panel_row + l.pad + 2 * l.glow;
     return l;
+}
+
+/* top left corner of the telemetry panel (pw x ph) on a w x h screen; cards (count, layout l) stay top right */
+static void tele_place(int pos, const Layout *l, unsigned count, int w, int h, int pw, int ph, int *x, int *y) {
+    int below_cards = l->margin + (int)count * (l->height + l->gap);
+    int left = pos >= NOTIFY_TELE_LEFT_TOP;
+    int row = pos == NOTIFY_TELE_RIGHT_TOP || pos == NOTIFY_TELE_LEFT_TOP ? 0
+            : pos == NOTIFY_TELE_RIGHT_BOTTOM || pos == NOTIFY_TELE_LEFT_BOTTOM ? 2 : 1;
+    *x = left ? l->margin : w - l->margin - pw;
+    *y = row == 0 ? l->margin : row == 2 ? h - l->margin - ph : (h - ph) / 2;
+    if (!left && *y < below_cards) *y = below_cards; /* right side: below the cards */
+    if (*y + ph > h - l->margin && !left && row != 0) *y = h - l->margin - ph;
+    if (*y < l->margin) *y = l->margin;
 }
 
 static int text_width_chars(const wchar_t *t) {
@@ -332,8 +520,1177 @@ static float card_coverage(int x, int y, int w, int h, int r) {
     return clamp01((outer - d2) / (outer - inner));
 }
 
+static int text_px(HDC dc, const wchar_t *t, float fallback_per_char);
+static void font_metrics(HDC dc, float em_px, int *ascent, int *cap);
+static void paint_pill(unsigned char *px, int w, int x0, int y0, int pw, int ph, const unsigned char accent[3], float fill,
+                       float rim);
+static void paint_band_glow(unsigned char *px, int w, int h, int x0, int y0, int bw, int bh, int spread,
+                            const unsigned char col[3], float strength);
+static void paint_disc(unsigned char *px, int w, int h, float cx, float cy, float r, const unsigned char col[3], float alpha);
+
 /* Draws every card into a top-down BGRA bitmap (premultiplied alpha), one row per card. */
-static int draw_cards(const Card *list, unsigned count, const Layout *l, unsigned char *pixels, int pitch) {
+/* ------------------------------------------------------------------ card look (V7)
+   Every card / the panel sits in its bitmap with a margin of l->glow pixels: there the card colour
+   glows out softly. Inside: dark navy that takes on the card colour from the left, light from the
+   colour bar, a glassy sheen at the top, a rim that is bright at the top, and the Gripline logo
+   (with its name, so there is no extra GRIPLINE heading) on a soft light. */
+
+static unsigned char mix8(int a, int b, float t) {
+    float v = (float)a + ((float)b - (float)a) * t;
+    return (unsigned char)(v < 0.0f ? 0.0f : v > 255.0f ? 255.0f : v + 0.5f);
+}
+
+static float root(float v) {
+    if (v <= 0.0f) return 0.0f;
+    float r = v > 1.0f ? v * 0.5f : 1.0f;
+    for (int i = 0; i < 8; ++i) r = 0.5f * (r + v / r);
+    return r;
+}
+
+/* ------------------------------------------------------------------ Overdrive look
+   A bright racing banner instead of a dark box: the card leans forward (slanted sides), it is filled
+   with a fade between two colours (blue -> violet ...), a glossy lacquer highlight cuts diagonally
+   across the top, speed streaks run to the right, a white light bar sits at the leading edge, and
+   it floats on a dark drop shadow plus a glow in its colours. */
+
+static const unsigned char *second_colour(const unsigned char (*tone)[3]) {
+    for (int i = 0; i < NOTIFY_COLOR_COUNT; ++i)
+        if (palette[i] == tone) return palette_second[i];
+    return palette_second[0];
+}
+
+/* left edge of the slanted box at row y (0 = top) */
+static float lean_left(const Layout *l, int ch, float y) {
+    return (float)l->skew * (1.0f - y / (float)ch);
+}
+
+/* 1 when white text would be hard to read on this card colour (yellow, white) */
+static int over_light_card(const unsigned char (*tone)[3]) {
+    if (tone == palette[NOTIFY_COLOR_RAINBOW]) return 0; /* white text the whole way round */
+    const unsigned char *b = second_colour(tone);
+    float lum = 0.299f * (tone[0][0] + b[0]) * 0.5f + 0.587f * (tone[0][1] + b[1]) * 0.5f +
+                0.114f * (tone[0][2] + b[2]) * 0.5f;
+    return lum > 150.0f;
+}
+
+static void paint_overdrive_back(unsigned char *px, int w, int x0, int y0, int cw, int ch, int body_from,
+                                 const Layout *l, const unsigned char (*tone)[3]) {
+    const unsigned char *b2 = second_colour(tone);
+    const unsigned char one[3] = {tone[0][2], tone[0][1], tone[0][0]}; /* B, G, R */
+    const unsigned char two[3] = {b2[2], b2[1], b2[0]};
+    const unsigned char navy[3] = {30, 18, 12};
+    float s = l->scale;
+    float span = (float)(cw - l->skew);
+    /* speed streaks: row (fraction of the height), start (fraction of the width), thickness */
+    static const float streaks[][3] = {{0.22f, 0.62f, 1.0f}, {0.30f, 0.80f, 1.0f}, {0.71f, 0.55f, 2.0f},
+                                       {0.80f, 0.72f, 1.0f}, {0.87f, 0.48f, 1.0f}};
+    int banner_h = body_from > 0 ? body_from : ch; /* panel: colour only in the header */
+    for (int y = 0; y < ch; ++y) {
+        unsigned char *row = px + (size_t)(y0 + y) * w * 4 + (size_t)x0 * 4;
+        float le = lean_left(l, ch, (float)y);
+        int banner = y < banner_h;
+        float fy = banner ? (float)y / (float)(banner_h > 1 ? banner_h - 1 : 1) : 1.0f;
+        float gloss_edge = (float)banner_h * 0.52f; /* lacquer highlight: diagonal lower edge */
+        for (int x = 0; x < cw; ++x) {
+            unsigned char *p = row + x * 4;
+            p[3] = 0;
+            float xr = (float)x - le;
+            if (xr < 0.0f) {
+                p[0] = p[1] = p[2] = 0;
+                continue;
+            }
+            if (xr < (float)l->bar) { /* white light bar at the leading edge, coloured at its foot */
+                float t = banner ? fy * 0.5f : 0.6f;
+                for (int k = 0; k < 3; ++k) p[k] = mix8(255, one[k], t);
+                continue;
+            }
+            float fx = (xr - (float)l->bar) / span;
+            if (fx > 1.0f) fx = 1.0f;
+            if (!banner) { /* panel body: deep navy that takes on the colours faintly */
+                float vy = (float)(y - banner_h) / (float)(ch - banner_h > 1 ? ch - banner_h : 1);
+                for (int k = 0; k < 3; ++k) {
+                    float v = (float)navy[k];
+                    v += ((float)mix8(one[k], two[k], fx) - v) * (0.10f + 0.10f * (1.0f - vy) * (1.0f - fx));
+                    p[k] = mix8(0, 255, v / 255.0f);
+                }
+                continue;
+            }
+            float shade = 1.0f - 0.30f * fy; /* darker towards the bottom */
+            for (int k = 0; k < 3; ++k) {
+                float v = (float)mix8(one[k], two[k], fx) * shade;
+                p[k] = mix8(0, 255, v / 255.0f);
+            }
+            float edge = gloss_edge - xr * 0.18f;
+            if ((float)y < edge) { /* glossy lacquer, strongest at the very top */
+                float t = 0.10f + 0.20f * (1.0f - (float)y / edge);
+                float soft = edge - (float)y < 1.5f * s ? (edge - (float)y) / (1.5f * s) : 1.0f;
+                for (int k = 0; k < 3; ++k) p[k] = mix8(p[k], 255, t * soft);
+            }
+            for (unsigned i = 0; i < sizeof(streaks) / sizeof(streaks[0]); ++i) {
+                int sy = (int)(streaks[i][0] * (float)banner_h);
+                int th = (int)(streaks[i][2] * s) > 1 ? (int)(streaks[i][2] * s) : 1;
+                if (y >= sy && y < sy + th && fx > streaks[i][1]) {
+                    float t = (fx - streaks[i][1]) / (1.0f - streaks[i][1]);
+                    for (int k = 0; k < 3; ++k) p[k] = mix8(p[k], 255, 0.35f * t);
+                }
+            }
+        }
+    }
+}
+
+/* Overdrive: finished pixel of the slanted banner, its colour glow and drop shadow (premultiplied) */
+static float over_inside(const Layout *l, int cw, int ch, float px_, float py_) {
+    float le = lean_left(l, ch, py_);
+    float re = (float)cw - ((float)l->skew - lean_left(l, ch, py_));
+    float d = px_ - le;
+    if (re - px_ < d) d = re - px_;
+    if (py_ < d) d = py_;
+    if ((float)ch - py_ < d) d = (float)ch - py_;
+    return d; /* > 0 inside, distance to the nearest edge */
+}
+
+/* V7 telemetry: background see-through, text and the edge stay solid (base = the panel before its text) */
+static const unsigned char *see_base, *see_px;
+static float see_back = 1.0f;
+static void see_through_begin(const unsigned char *base, const unsigned char *px, float back) {
+    see_base = base, see_px = px, see_back = back;
+}
+static void see_through_end(void) {
+    see_base = see_px = NULL, see_back = 1.0f;
+}
+static float see_through(const unsigned char *src, float rim) {
+    if (!see_base) return 1.0f;
+    const unsigned char *b = see_base + (src - see_px);
+    int d = 0;
+    for (int k = 0; k < 3; ++k) d += src[k] > b[k] ? src[k] - b[k] : b[k] - src[k];
+    float keep = d > 24 ? 1.0f : (float)d / 24.0f; /* text (and its anti-aliased edge) */
+    if (rim * 1.5f > keep) keep = clamp01(rim * 1.5f);
+    return see_back + (1.0f - see_back) * keep;
+}
+
+static void finish_pixel_over(const unsigned char *src, unsigned char *dst, int x, int y, int w, int h, int g,
+                              const Layout *l, float opacity, const unsigned char (*tone)[3]) {
+    int cw = w - 2 * g, ch = h - 2 * g;
+    float s = l->scale;
+    float px_ = (float)(x - g) + 0.5f, py_ = (float)(y - g) + 0.5f;
+    float d = over_inside(l, cw, ch, px_, py_);
+    float outer = clamp01(d + 0.5f), inner = clamp01(d - 0.7f);
+    const unsigned char *b2 = second_colour(tone);
+    float fx = clamp01(px_ / (float)cw);
+    unsigned char c[3] = {src[0], src[1], src[2]};
+    float rim = outer - inner;
+    if (rim > 0.0f) /* thin bright edge */
+        for (int k = 0; k < 3; ++k) c[k] = mix8(c[k], 255, rim * (0.85f - 0.45f * clamp01(py_ / (float)ch)));
+    /* drop shadow (down right) and glow in the two colours */
+    float sd = over_inside(l, cw, ch, px_ - 4.0f * s, py_ - 5.0f * s);
+    float shadow = sd > -(float)g ? 0.55f * clamp01(1.0f + sd / (float)g) * clamp01(1.0f + sd / (float)g) : 0.0f;
+    float e = d < 0.0f ? -d : 0.0f;
+    float glow = e < (float)g ? 0.60f * (1.0f - e / (float)g) * (1.0f - e / (float)g) : 0.0f;
+    unsigned char gc[3] = {mix8(tone[0][2], b2[2], fx), mix8(tone[0][1], b2[1], fx), mix8(tone[0][0], b2[0], fx)};
+    float a = opacity * outer * see_through(src, rim);
+    if (see_base) glow *= 1.0f - outer; /* see-through: no glow or shadow behind the panel itself */
+    float ga = glow * (1.0f - a);
+    if (see_base) shadow *= 1.0f - outer;
+    float sa = shadow * (1.0f - a - ga > 0.0f ? 1.0f - a - ga : 0.0f);
+    for (int k = 0; k < 3; ++k) {
+        float v = c[k] * a + gc[k] * ga; /* shadow adds darkness only (black) */
+        dst[k] = (unsigned char)(v > 255.0f ? 255.0f : v + 0.5f);
+    }
+    float alpha = a + ga + sa;
+    dst[3] = (unsigned char)(255.0f * (alpha > 1.0f ? 1.0f : alpha) + 0.5f);
+}
+
+/* inside of one card or panel: the cw x ch box at (x0, y0) of a w wide BGRA bitmap */
+static void paint_card_back(unsigned char *px, int w, int x0, int y0, int cw, int ch, const Layout *l,
+                            const unsigned char (*tone)[3]) {
+    const unsigned char navy[3] = {28, 17, 11}; /* B, G, R */
+    const unsigned char accent[3] = {tone[0][2], tone[0][1], tone[0][0]};
+    const unsigned char light[3] = {tone[1][2], tone[1][1], tone[1][0]};
+    float glow_width = 30.0f * l->scale;
+    for (int y = 0; y < ch; ++y) {
+        unsigned char *row = px + (size_t)(y0 + y) * w * 4 + (size_t)x0 * 4;
+        float fy = ch > 1 ? (float)y / (float)(ch - 1) : 0.0f;
+        float sheen = fy < 0.45f ? 0.09f * (1.0f - fy / 0.45f) * (1.0f - fy / 0.45f) : 0.0f;
+        for (int x = 0; x < cw; ++x) {
+            unsigned char *p = row + x * 4;
+            if (x < l->bar) { /* colour bar: almost white at the top, full colour below */
+                for (int k = 0; k < 3; ++k) p[k] = mix8(mix8(light[k], 255, 0.35f), accent[k], fy);
+            } else {
+                float fx = (float)(x - l->bar) / (float)(cw - l->bar);
+                float left = 1.0f - fx;
+                float tint = 0.26f * left * left * left; /* colour wash from the left */
+                float d = (float)(x - l->bar) / glow_width;
+                float glow = 0.42f / (1.0f + d * d);    /* light from the bar */
+                float right = fx > 0.6f ? (fx - 0.6f) / 0.4f : 0.0f;
+                float back = 0.10f * right * right;     /* a faint second light at the right edge */
+                for (int k = 0; k < 3; ++k) {
+                    float v = (float)navy[k];
+                    v += ((float)accent[k] - v) * (tint + glow + back);
+                    v += (255.0f - v) * sheen;
+                    p[k] = mix8(0, 255, v / 255.0f);
+                }
+            }
+            p[3] = 0;
+        }
+    }
+}
+
+/* soft round light in the card colour (behind the logo) */
+static void paint_halo(unsigned char *px, int w, int y_min, int y_end, int cx, int cy, int radius, float strength,
+                       const unsigned char (*tone)[3]) {
+    const unsigned char accent[3] = {tone[0][2], tone[0][1], tone[0][0]};
+    float r2 = (float)radius * (float)radius;
+    for (int y = cy - radius; y < cy + radius; ++y) {
+        for (int x = cx - radius; x < cx + radius; ++x) {
+            if (x < 0 || x >= w || y < y_min || y >= y_end) continue;
+            float dx = (float)(x - cx) + 0.5f, dy = (float)(y - cy) + 0.5f, d2 = dx * dx + dy * dy;
+            if (d2 >= r2) continue;
+            float t = 1.0f - d2 / r2;
+            unsigned char *p = px + ((size_t)y * w + x) * 4;
+            for (int k = 0; k < 3; ++k) p[k] = mix8(p[k], accent[k], strength * t * t);
+        }
+    }
+}
+
+/* the logo (alpha mask) in colour col into a size x size box, 2x2 samples per pixel */
+static void paint_logo(unsigned char *px, int w, int ix, int iy, int size, const unsigned char col[3], float strength) {
+    for (int y = 0; y < size; ++y) {
+        for (int x = 0; x < size; ++x) {
+            float a = 0.0f;
+            for (int sy = 0; sy < 2; ++sy) {
+                for (int sx = 0; sx < 2; ++sx) {
+                    float fx = (x + 0.25f + 0.5f * sx) * GRIPLINE_LOGO_SIZE / size - 0.5f;
+                    float fy = (y + 0.25f + 0.5f * sy) * GRIPLINE_LOGO_SIZE / size - 0.5f;
+                    if (fx < 0) fx = 0;
+                    if (fy < 0) fy = 0;
+                    int x0 = (int)fx, y0 = (int)fy;
+                    int x1 = x0 + 1 < GRIPLINE_LOGO_SIZE ? x0 + 1 : x0;
+                    int y1 = y0 + 1 < GRIPLINE_LOGO_SIZE ? y0 + 1 : y0;
+                    float ax = fx - x0, ay = fy - y0;
+                    a += (gripline_logo_alpha[y0 * GRIPLINE_LOGO_SIZE + x0] * (1 - ax) +
+                          gripline_logo_alpha[y0 * GRIPLINE_LOGO_SIZE + x1] * ax) * (1 - ay) +
+                         (gripline_logo_alpha[y1 * GRIPLINE_LOGO_SIZE + x0] * (1 - ax) +
+                          gripline_logo_alpha[y1 * GRIPLINE_LOGO_SIZE + x1] * ax) * ay;
+                }
+            }
+            a *= strength / (4.0f * 255.0f);
+            unsigned char *p = px + ((size_t)(iy + y) * w + ix + x) * 4;
+            for (int k = 0; k < 3; ++k) p[k] = (unsigned char)(p[k] * (1 - a) + col[k] * a);
+        }
+    }
+}
+
+/* One finished pixel of a cell (w x h, card inside at glow g): rounded corners, opacity, the rim
+   (bright at the top) and outside the card the glow in the card colour. Premultiplied BGRA. */
+static void finish_pixel(const unsigned char *src, unsigned char *dst, int x, int y, int w, int h, int g,
+                         const Layout *l, float opacity, const unsigned char (*tone)[3]) {
+    if (l->style == NOTIFY_STYLE_OVERDRIVE) {
+        finish_pixel_over(src, dst, x, y, w, h, g, l, opacity, tone);
+        return;
+    }
+    int cw = w - 2 * g, ch = h - 2 * g;
+    int over = 0;
+    int r = l->radius;
+    float outer = card_coverage(x - g, y - g, cw, ch, r);
+    float inner = card_coverage(x - g - 1, y - g - 1, cw - 2, ch - 2, r > 1 ? r - 1 : 1);
+    const unsigned char accent[3] = {tone[0][2], tone[0][1], tone[0][0]};
+    const unsigned char light[3] = {tone[1][2], tone[1][1], tone[1][0]};
+    float fy = ch > 1 ? (float)(y - g) / (float)(ch - 1) : 0.0f;
+    fy = fy < 0.0f ? 0.0f : fy > 1.0f ? 1.0f : fy;
+    unsigned char c[3] = {src[0], src[1], src[2]};
+    float rim = outer - inner;
+    if (rim > 0.0f) {
+        float strength = rim * (over ? 1.0f - 0.35f * fy : 0.95f - 0.65f * fy);
+        const unsigned char rim_col[3] = {mix8(light[0], 255, 0.4f), mix8(light[1], 255, 0.4f), mix8(light[2], 255, 0.4f)};
+        for (int k = 0; k < 3; ++k) c[k] = mix8(c[k], rim_col[k], strength);
+    }
+    /* glow: distance outside the rounded rectangle */
+    float glow = 0.0f;
+    if (g > 0) {
+        float px_ = (float)(x - g) + 0.5f, py_ = (float)(y - g) + 0.5f;
+        float qx = px_ < cw * 0.5f ? cw * 0.5f - px_ : px_ - cw * 0.5f;
+        float qy = py_ < ch * 0.5f ? ch * 0.5f - py_ : py_ - ch * 0.5f;
+        qx -= cw * 0.5f - r, qy -= ch * 0.5f - r;
+        if (qx < 0.0f) qx = 0.0f;
+        if (qy < 0.0f) qy = 0.0f;
+        float e = root(qx * qx + qy * qy) - (float)r;
+        if (e < 0.0f) e = 0.0f;
+        if (e < (float)g) {
+            float t = 1.0f - e / (float)g;
+            float side = (float)x / (float)w; /* a little stronger at the left, where the bar is */
+            glow = (over ? 0.70f : 0.50f) * t * t * (1.15f - 0.4f * side);
+        }
+    }
+    float a = opacity * outer * see_through(src, rim);
+    if (see_base) glow *= 1.0f - outer; /* see-through: no glow or shadow behind the panel itself */
+    float ga = glow * (1.0f - a);
+    for (int k = 0; k < 3; ++k) {
+        float v = c[k] * a + accent[k] * ga;
+        dst[k] = (unsigned char)(v > 255.0f ? 255.0f : v + 0.5f);
+    }
+    float alpha = a + ga;
+    dst[3] = (unsigned char)(255.0f * (alpha > 1.0f ? 1.0f : alpha) + 0.5f);
+}
+
+/* text with a dark shadow below right, for depth */
+static void shadow_text(HDC dc, int x, int y, const RECT *clip, const wchar_t *text, COLORREF colour, int offset) {
+    UINT n = (UINT)text_width_chars(text);
+    RECT shifted = {clip->left + offset, clip->top + offset, clip->right + offset, clip->bottom + offset};
+    gdi.SetTextColor(dc, RGB(4, 6, 12));
+    gdi.ExtTextOutW(dc, x + offset, y + offset, ETO_CLIPPED, &shifted, text, n, NULL);
+    gdi.SetTextColor(dc, colour);
+    gdi.ExtTextOutW(dc, x, y, ETO_CLIPPED, clip, text, n, NULL);
+}
+
+static void clear_bitmap(unsigned char *px, int w, int h) {
+    for (size_t i = 0; i < (size_t)w * h * 4; ++i) px[i] = 0;
+}
+
+/* Draws every card into a top-down BGRA bitmap (premultiplied alpha), one cell per card. */
+static int draw_cards_v7(const Card *list, unsigned count, const Layout *l, unsigned char *pixels, int pitch) {
+    static BITMAPINFO info;
+    void *bits = NULL;
+    int w = l->width, h = l->height * MAX_CARDS, g = l->glow;
+    int cw = w - 2 * g, ch = l->height - 2 * g;
+    info.bmiHeader.biSize = sizeof(info.bmiHeader);
+    info.bmiHeader.biWidth = w;
+    info.bmiHeader.biHeight = -h;
+    info.bmiHeader.biPlanes = 1;
+    info.bmiHeader.biBitCount = 32;
+    info.bmiHeader.biCompression = BI_RGB;
+    HDC dc = gdi.CreateCompatibleDC(NULL);
+    if (!dc) return 0;
+    HBITMAP bitmap = gdi.CreateDIBSection(dc, &info, DIB_RGB_COLORS, &bits, NULL, 0);
+    if (!bitmap || !bits) {
+        gdi.DeleteDC(dc);
+        return 0;
+    }
+    HGDIOBJ old_bitmap = gdi.SelectObject(dc, bitmap);
+    unsigned char *px = (unsigned char *)bits;
+    float s = l->scale;
+    clear_bitmap(px, w, h);
+    for (unsigned c = 0; c < count; ++c) {
+        const unsigned char(*tone)[3] = palette[list[c].color >= 0 ? list[c].color : color];
+        const unsigned char logo[3] = {mix8(tone[1][2], 255, 0.15f), mix8(tone[1][1], 255, 0.15f),
+                                       mix8(tone[1][0], 255, 0.15f)};
+        int top = (int)c * l->height;
+        int ix = g + l->skew * 6 / 10 + l->bar + (int)(9 * s), iy = top + g + (ch - l->icon) / 2;
+        if (l->style == NOTIFY_STYLE_OVERDRIVE) { /* banner; logo in white (dark on light cards) with a shadow */
+            paint_overdrive_back(px, w, g, top + g, cw, ch, 0, l, tone);
+            const unsigned char ink[3] = {0, 0, 0}, white[3] = {255, 255, 255}, dark[3] = {40, 26, 18};
+            int off = (int)(2 * s) > 1 ? (int)(2 * s) : 1;
+            paint_logo(px, w, ix + off, iy + off, l->icon, ink, 0.45f);
+            paint_logo(px, w, ix, iy, l->icon, over_light_card(tone) ? dark : white, 1.0f);
+        } else {
+            paint_card_back(px, w, g, top + g, cw, ch, l, tone);
+            paint_halo(px, w, top + g, top + g + ch, ix + l->icon / 2, iy + l->icon / 2, l->icon * 7 / 10, 0.38f, tone);
+            paint_logo(px, w, ix, iy, l->icon, logo, 1.0f);
+        }
+    }
+    HFONT badge_font = gdi.CreateFontW(-(int)(12 * s), 0, 0, 0, FW_HEAVY, 0, 0, 0, DEFAULT_CHARSET, 0, 0,
+                                       ANTIALIASED_QUALITY, 0, L"Segoe UI");
+    int italic = l->style == NOTIFY_STYLE_OVERDRIVE;
+    HFONT main = gdi.CreateFontW(-(int)(20 * s), 0, 0, 0, italic ? FW_HEAVY : FW_BOLD, (DWORD)italic, 0, 0,
+                                 DEFAULT_CHARSET, 0, 0, ANTIALIASED_QUALITY, 0, L"Segoe UI");
+    HFONT small = gdi.CreateFontW(-(int)(14 * s), 0, 0, 0, FW_NORMAL, 0, 0, 0, DEFAULT_CHARSET, 0, 0,
+                                  ANTIALIASED_QUALITY, 0, L"Segoe UI");
+    gdi.SetBkMode(dc, TRANSPARENT);
+    HGDIOBJ old_font = gdi.SelectObject(dc, badge_font);
+    int asc_b, cap_b, asc_1, cap_1, asc_2, cap_2;
+    font_metrics(dc, 12.0f * s, &asc_b, &cap_b);
+    gdi.SelectObject(dc, main);
+    font_metrics(dc, 20.0f * s, &asc_1, &cap_1);
+    gdi.SelectObject(dc, small);
+    font_metrics(dc, 14.0f * s, &asc_2, &cap_2);
+    int tx = g + l->skew * 6 / 10 + l->bar + (int)(9 * s) + l->icon + (int)(12 * s);
+    int shade = s >= 1.5f ? 2 : 1;
+    int pill_h = (int)(18 * s), pill_pad = (int)(7 * s);
+    ULONGLONG now = GetTickCount64();
+    int line_y[MAX_CARDS][3], pill_w[MAX_CARDS];
+    /* V7 overhaul: the text block stands in the middle of the card (measured with the real font);
+       the badge sits on a pill; a carbon weave and a glowing colour line finish the card */
+    for (unsigned c = 0; c < count; ++c) {
+        int top = (int)c * l->height + g;
+        int has2 = list[c].line2[0] != 0, badge = list[c].badge[0] != 0;
+        const unsigned char(*tone)[3] = palette[list[c].color >= 0 ? list[c].color : color];
+        const unsigned char accent[3] = {tone[0][2], tone[0][1], tone[0][0]};
+        const unsigned char *second = second_colour(tone);
+        const unsigned char accent2[3] = {second[2], second[1], second[0]};
+        int gap1 = (int)(7 * s), gap2 = (int)(9 * s);
+        int total = (badge ? pill_h + gap1 : 0) + cap_1 + (has2 ? gap2 + cap_2 : 0);
+        int y = top + (ch - total) / 2;
+        line_y[c][0] = y;
+        if (badge) y += pill_h + gap1;
+        line_y[c][1] = y - (asc_1 - cap_1);
+        line_y[c][2] = y + cap_1 + gap2 - (asc_2 - cap_2);
+        int right = g + cw - l->pad - l->skew;
+        /* carbon weave right of the logo */
+        int step = (int)(6 * s) > 3 ? (int)(6 * s) : 3;
+        for (int yy = top; yy < top + ch; ++yy) {
+            unsigned char *row = px + (size_t)yy * w * 4;
+            for (int x = tx - (int)(6 * s); x < g + cw; ++x)
+                if (((x + yy) % step) == 0)
+                    for (int k = 0; k < 3; ++k) row[x * 4 + k] = mix8(row[x * 4 + k], 255, 0.03f);
+        }
+        /* light sweep: a bright diagonal band runs over a new card once */
+        ULONGLONG age = list[c].shown ? now - list[c].shown : 0;
+        if (age < 750) {
+            float t = (float)age / 750.0f;
+            float cx = (float)g - 0.25f * (float)cw + 1.5f * (float)cw * t, band = 46.0f * s;
+            for (int yy = top; yy < top + ch; ++yy) {
+                unsigned char *row = px + (size_t)yy * w * 4;
+                float shear = (float)(yy - top) * 0.45f;
+                for (int x = g; x < g + cw; ++x) {
+                    float d = ((float)x + shear - cx) / band;
+                    if (d < -1.0f || d > 1.0f) continue;
+                    float k = (1.0f - d * d) * 0.22f * (1.0f - t * 0.5f);
+                    for (int q = 0; q < 3; ++q) row[x * 4 + q] = mix8(row[x * 4 + q], 255, k);
+                }
+            }
+        }
+        /* time line along the bottom: card colour into the second colour, it runs out with the card */
+        float left = 1.0f;
+        if (list[c].shown && list[c].hold > FADE_IN_MS) {
+            left = 1.0f - (float)age / (float)list[c].hold;
+            left = left < 0.0f ? 0.0f : left > 1.0f ? 1.0f : left;
+        }
+        int ly = top + ch - (int)(5 * s), lh = s >= 1.5f ? 3 : 2;
+        int lit = tx + (int)((float)(right - tx) * left);
+        for (int yy = ly; yy < ly + lh; ++yy) {
+            unsigned char *row = px + (size_t)yy * w * 4;
+            for (int x = tx; x < right; ++x) {
+                float t = (float)(x - tx) / (float)(right - tx);
+                if (x < lit) {
+                    for (int k = 0; k < 3; ++k)
+                        row[x * 4 + k] = mix8(row[x * 4 + k], mix8(mix8(accent[k], accent2[k], t), 255, 0.3f), 0.95f);
+                } else {
+                    for (int k = 0; k < 3; ++k) row[x * 4 + k] = mix8(row[x * 4 + k], 255, 0.08f); /* the empty track */
+                }
+            }
+        }
+        if (lit - tx > (int)(4 * s)) {
+            paint_band_glow(px, w, h, tx, ly, lit - tx, lh, (int)(5 * s), accent, 0.22f);
+            paint_disc(px, w, h, (float)lit, (float)ly + lh * 0.5f, 2.6f * s, accent2, 0.9f); /* a bright head */
+            const unsigned char white[3] = {255, 255, 255};
+            paint_disc(px, w, h, (float)lit, (float)ly + lh * 0.5f, 1.3f * s, white, 0.9f);
+        }
+        pill_w[c] = 0;
+        if (badge) {
+            gdi.SelectObject(dc, badge_font);
+            int pw = text_px(dc, list[c].badge, 8.0f * s) + 2 * pill_pad;
+            if (tx + pw > right) pw = right - tx;
+            pill_w[c] = pw;
+            int light = italic && over_light_card(tone);
+            const unsigned char ink[3] = {18, 12, 8};
+            const unsigned char *fill = light || italic ? ink : accent;
+            paint_band_glow(px, w, h, tx, line_y[c][0], pw, pill_h, (int)(5 * s), accent, light ? 0.0f : 0.30f);
+            paint_pill(px, w, tx, line_y[c][0], pw, pill_h, fill, light ? 0.80f : italic ? 0.45f : 0.80f, 0.55f);
+        }
+    }
+    gdi.GdiFlush();
+    for (unsigned c = 0; c < count; ++c) {
+        int top = (int)c * l->height + g;
+        RECT clip = {tx, top, g + cw - l->pad - l->skew, top + ch};
+        int has2 = list[c].line2[0] != 0, badge = list[c].badge[0] != 0;
+        const unsigned char(*tone)[3] = palette[list[c].color >= 0 ? list[c].color : color];
+        int dark_text = italic && over_light_card(tone);
+        COLORREF text1 = dark_text ? RGB(18, 22, 32) : RGB(252, 253, 255);
+        COLORREF text2 = italic ? (dark_text ? RGB(40, 46, 60) : RGB(236, 240, 248)) : RGB(180, 190, 205);
+        if (badge) { /* WARNUNG / HINWEIS / NEW RECORD on its pill */
+            gdi.SelectObject(dc, badge_font);
+            RECT pc = {tx, line_y[c][0], tx + pill_w[c], line_y[c][0] + pill_h};
+            gdi.SetTextColor(dc, RGB(255, 255, 255));
+            int by = line_y[c][0] + pill_h / 2 - (asc_b - cap_b / 2);
+            int bw = text_px(dc, list[c].badge, 8.0f * s), bx = tx + (pill_w[c] - bw) / 2;
+            if (bx < tx + (int)(2 * s)) bx = tx + (int)(2 * s);
+            gdi.ExtTextOutW(dc, bx, by, ETO_CLIPPED, &pc, list[c].badge, (UINT)text_width_chars(list[c].badge), NULL);
+        }
+        gdi.SelectObject(dc, main);
+        if (dark_text) {
+            gdi.SetTextColor(dc, text1);
+            gdi.ExtTextOutW(dc, tx, line_y[c][1], ETO_CLIPPED, &clip, list[c].line1, (UINT)text_width_chars(list[c].line1), NULL);
+        } else {
+            shadow_text(dc, tx, line_y[c][1], &clip, list[c].line1, text1, shade);
+        }
+        if (has2) {
+            gdi.SelectObject(dc, small);
+            gdi.SetTextColor(dc, text2);
+            gdi.ExtTextOutW(dc, tx, line_y[c][2], ETO_CLIPPED, &clip, list[c].line2, (UINT)text_width_chars(list[c].line2),
+                            NULL);
+        }
+    }
+    gdi.SelectObject(dc, old_font);
+    gdi.GdiFlush();
+    for (int y = 0; y < h; ++y) {
+        unsigned char *src = px + (size_t)y * w * 4;
+        unsigned char *dst = pixels + (size_t)y * pitch;
+        int card = y / l->height, cy = y % l->height;
+        const unsigned char(*tone)[3] =
+            palette[(unsigned)card < count && list[card].color >= 0 ? list[card].color : color];
+        for (int x = 0; x < w; ++x) {
+            if ((unsigned)card >= count) {
+                dst[x * 4 + 0] = dst[x * 4 + 1] = dst[x * 4 + 2] = dst[x * 4 + 3] = 0;
+                continue;
+            }
+            finish_pixel(src + x * 4, dst + x * 4, x, cy, w, l->height, g, l, 0.95f, tone);
+        }
+    }
+    gdi.SelectObject(dc, old_bitmap);
+    gdi.DeleteObject(badge_font);
+    gdi.DeleteObject(main);
+    gdi.DeleteObject(small);
+    gdi.DeleteObject(bitmap);
+    gdi.DeleteDC(dc);
+    return 1;
+}
+
+/* key cap / badge behind a short value in the panel: a rounded pill in the card colour with a light rim */
+static int is_bar_text(const wchar_t *t) {
+    for (; *t; ++t)
+        if (*t == 0x25a0 || *t == 0x25a1) return 1;
+    return 0;
+}
+
+static void paint_pill(unsigned char *px, int w, int x0, int y0, int pw, int ph, const unsigned char accent[3], float fill,
+                       float rim) {
+    int r = ph / 2;
+    for (int y = 0; y < ph; ++y) {
+        unsigned char *row = px + (size_t)(y0 + y) * w * 4;
+        for (int x = 0; x < pw; ++x) {
+            float c = card_coverage(x, y, pw, ph, r);
+            if (c <= 0.0f) continue;
+            /* rim: the outer pixel ring, brighter at the top */
+            float inner = card_coverage(x - 1, y - 1, pw - 2, ph - 2, r - 1 > 1 ? r - 1 : 1);
+            float edge = (x == 0 || y == 0 || x == pw - 1 || y == ph - 1) ? 1.0f : 1.0f - inner;
+            float top = 1.0f - (float)y / (float)ph;
+            unsigned char *p = row + (size_t)(x0 + x) * 4;
+            for (int k = 0; k < 3; ++k) {
+                unsigned char body = mix8(p[k], mix8(accent[k], 255, 0.10f * top), fill * c);
+                p[k] = mix8(body, mix8(accent[k], 255, 0.55f), rim * edge * c * (0.55f + 0.45f * top));
+            }
+        }
+    }
+}
+
+/* V7 overhaul: the Gripline menu (panel at the top) gets a taller header and roomier rows while it is
+   short enough; the key list (F5) and the telemetry keep the compact rows */
+static int panel_roomy(const Layout *l, unsigned count) {
+    return l->style != NOTIFY_STYLE_CLASSIC && ((draw_kind == 1 && count <= 24) || draw_kind == 2);
+}
+static int panel_header_px(const Layout *l, unsigned count) {
+    return panel_roomy(l, count) && draw_kind == 1 ? (int)(76 * l->scale) : l->panel_header;
+}
+static int panel_row_px(const Layout *l, unsigned count) {
+    return panel_roomy(l, count) ? (int)(26 * l->scale) : l->panel_row;
+}
+
+/* height in pixels of the key list panel with `count` rows (with its glow margin) */
+static int panel_pixels(const Layout *l, unsigned count) {
+    return panel_header_px(l, count) + (int)count * panel_row_px(l, count) + l->pad + 2 * l->glow;
+}
+
+/* anti-aliased filled circle */
+static void paint_disc(unsigned char *px, int w, int h, float cx, float cy, float r, const unsigned char col[3], float alpha) {
+    int x0 = (int)(cx - r - 1), x1 = (int)(cx + r + 2), y0 = (int)(cy - r - 1), y1 = (int)(cy + r + 2);
+    for (int y = y0 < 0 ? 0 : y0; y < y1 && y < h; ++y) {
+        unsigned char *row = px + (size_t)y * w * 4;
+        for (int x = x0 < 0 ? 0 : x0; x < x1 && x < w; ++x) {
+            float dx = (float)x + 0.5f - cx, dy = (float)y + 0.5f - cy;
+            float c = clamp01(r + 0.5f - root(dx * dx + dy * dy));
+            if (c <= 0.0f) continue;
+            for (int k = 0; k < 3; ++k) row[x * 4 + k] = mix8(row[x * 4 + k], col[k], c * alpha);
+        }
+    }
+}
+
+/* soft glow around a rounded band (selection): strength falls off over `spread` pixels */
+static void paint_band_glow(unsigned char *px, int w, int h, int x0, int y0, int bw, int bh, int spread,
+                            const unsigned char col[3], float strength) {
+    float r = (float)bh * 0.5f;
+    for (int y = y0 - spread; y < y0 + bh + spread; ++y) {
+        if (y < 0 || y >= h) continue;
+        unsigned char *row = px + (size_t)y * w * 4;
+        for (int x = x0 - spread; x < x0 + bw + spread; ++x) {
+            if (x < 0 || x >= w) continue;
+            float cx = (float)x + 0.5f, cy = (float)y + 0.5f;
+            float nx = cx < x0 + r ? x0 + r : (cx > x0 + bw - r ? x0 + bw - r : cx);
+            float ny = (float)y0 + r;
+            float d = root((cx - nx) * (cx - nx) + (cy - ny) * (cy - ny)) - r;
+            if (d <= 0.0f) continue; /* inside: the band itself */
+            float t = 1.0f - d / (float)spread;
+            if (t <= 0.0f) continue;
+            for (int k = 0; k < 3; ++k) row[x * 4 + k] = mix8(row[x * 4 + k], col[k], strength * t * t);
+        }
+    }
+}
+
+/* the chosen row: a glowing capsule in the card colour, brighter at the left and at the top */
+static void paint_selection(unsigned char *px, int w, int h, int x0, int y0, int bw, int bh, const unsigned char accent[3], float s) {
+    int r = bh / 2;
+    paint_band_glow(px, w, h, x0, y0, bw, bh, (int)(7 * s), accent, 0.30f);
+    for (int y = 0; y < bh; ++y) {
+        if (y0 + y < 0 || y0 + y >= h) continue;
+        unsigned char *row = px + (size_t)(y0 + y) * w * 4;
+        float top = 1.0f - (float)y / (float)bh;
+        for (int x = 0; x < bw; ++x) {
+            float c = card_coverage(x, y, bw, bh, r);
+            if (c <= 0.0f) continue;
+            float t = (float)x / (float)bw;
+            unsigned char *p = row + (size_t)(x0 + x) * 4;
+            float inner = card_coverage(x - 1, y - 1, bw - 2, bh - 2, r - 1 > 1 ? r - 1 : 1);
+            float edge = (x == 0 || y == 0 || x == bw - 1 || y == bh - 1) ? 1.0f : 1.0f - inner;
+            for (int k = 0; k < 3; ++k) {
+                unsigned char body = mix8(p[k], accent[k], c * (0.92f - 0.62f * t));
+                body = mix8(body, 255, c * 0.16f * top * top); /* glass at the top */
+                p[k] = mix8(body, 255, c * edge * (0.55f - 0.35f * t));
+            }
+        }
+    }
+    /* light beam at the leading edge */
+    const unsigned char white[3] = {255, 255, 255};
+    for (int y = y0 + (int)(4 * s); y < y0 + bh - (int)(4 * s); ++y) {
+        if (y < 0 || y >= h) continue;
+        unsigned char *row = px + (size_t)y * w * 4;
+        for (int x = x0 + (int)(5 * s); x < x0 + (int)(5 * s) + (s >= 1.5f ? 4 : 3); ++x)
+            for (int k = 0; k < 3; ++k) row[x * 4 + k] = white[k];
+    }
+}
+
+/* on/off switch: a track in the card colour (on) or dark (off) with a white knob */
+static void paint_switch(unsigned char *px, int w, int h, int x0, int y0, int sw, int sh, int on, const unsigned char accent[3]) {
+    const unsigned char dark[3] = {40, 44, 58}, white[3] = {255, 255, 255}, knob_off[3] = {150, 156, 172};
+    int r = sh / 2;
+    for (int y = 0; y < sh; ++y) {
+        if (y0 + y < 0 || y0 + y >= h) continue;
+        unsigned char *row = px + (size_t)(y0 + y) * w * 4;
+        for (int x = 0; x < sw; ++x) {
+            float c = card_coverage(x, y, sw, sh, r);
+            if (c <= 0.0f) continue;
+            unsigned char *p = row + (size_t)(x0 + x) * 4;
+            for (int k = 0; k < 3; ++k) p[k] = mix8(p[k], on ? mix8(accent[k], 255, 0.12f) : dark[k], c);
+        }
+    }
+    if (on) paint_band_glow(px, w, h, x0, y0, sw, sh, sh / 2, accent, 0.35f);
+    float kr = (float)sh * 0.5f - 2.5f;
+    float kx = on ? (float)(x0 + sw) - (float)sh * 0.5f : (float)x0 + (float)sh * 0.5f;
+    paint_disc(px, w, h, kx, (float)y0 + (float)sh * 0.5f, kr, on ? white : knob_off, 1.0f);
+}
+
+static int value_is(const wchar_t *v, const wchar_t *const *list) {
+    for (; *list; ++list) {
+        const wchar_t *a = v, *b = *list;
+        while (*a && *a == *b) ++a, ++b;
+        if (!*a && !*b) return 1;
+    }
+    return 0;
+}
+static const wchar_t *const values_on[] = {L"On", L"An", L"\x2713 on", L"\x2713 an", L"\x25cf on", L"\x25cf l\x00e4uft", NULL};
+static const wchar_t *const values_off[] = {L"Off", L"Aus", L"off", L"aus", NULL};
+
+static int text_px(HDC dc, const wchar_t *t, float fallback_per_char) {
+    SIZE size = {0, 0};
+    int n = text_width_chars(t);
+    if (!n) return 0;
+    if (!gdi.GetTextExtentPoint32W || !gdi.GetTextExtentPoint32W(dc, t, n, &size) || size.cx <= 0)
+        size.cx = (LONG)((float)n * fallback_per_char);
+    return (int)size.cx;
+}
+
+/* ascent and capital height in pixels of the font selected in dc (estimates when it cannot be measured) */
+static void font_metrics(HDC dc, float em_px, int *ascent, int *cap) {
+    TEXTMETRICW m;
+    memset(&m, 0, sizeof(m));
+    int em = (int)(em_px + 0.5f);
+    *ascent = (int)(em_px * 1.077f + 0.5f);
+    if (gdi.GetTextMetricsW && gdi.GetTextMetricsW(dc, &m) && m.tmHeight > 0 && m.tmAscent > 0 && m.tmAscent <= m.tmHeight) {
+        *ascent = m.tmAscent;
+        if (m.tmHeight - m.tmInternalLeading > 0) em = m.tmHeight - m.tmInternalLeading;
+    }
+    *cap = (em * 70 + 50) / 100;
+}
+
+/* Where to put the top of a line of text (font selected in dc) so its capitals stand in the middle
+   of a row rh high; fallback when the font cannot be measured. (Marvin 02.11.: text sat too high.) */
+static int text_centre_dy(HDC dc, int rh, int fallback) {
+    TEXTMETRICW m;
+    memset(&m, 0, sizeof(m));
+    if (!gdi.GetTextMetricsW || !gdi.GetTextMetricsW(dc, &m) || m.tmHeight <= 0 || m.tmAscent <= 0 ||
+        m.tmAscent > m.tmHeight)
+        return fallback;
+    int em = m.tmHeight - m.tmInternalLeading;
+    if (em <= 0) em = m.tmHeight;
+    /* capital height is about 0.70 em: their middle lies 0.35 em above the baseline */
+    return rh / 2 - (m.tmAscent - (em * 35 + 50) / 100);
+}
+
+/* "Abc äöü" -> "ABC ÄÖÜ" (section heads) */
+static void upper_text(const wchar_t *in, wchar_t *out, int cap) {
+    int n = 0;
+    for (; in[n] && n < cap - 1; ++n) {
+        wchar_t c = in[n];
+        if ((c >= L'a' && c <= L'z') || c == 0xe4 || c == 0xf6 || c == 0xfc) c = (wchar_t)(c - 32);
+        out[n] = c;
+    }
+    out[n] = 0;
+}
+
+/* Draws the key list panel into l->panel_height rows (premultiplied BGRA, unused rows clear). */
+static int draw_panel_v7(const wchar_t *title, const NotifyPanelRow *rows, unsigned count, const Layout *l,
+                         unsigned char *pixels, int pitch) {
+    static BITMAPINFO info;
+    void *bits = NULL;
+    int w = l->width, h = panel_pixels(l, count), g = l->glow;
+    int cw = w - 2 * g, ch = h - 2 * g;
+    int header = panel_header_px(l, count), rh = panel_row_px(l, count), roomy = panel_roomy(l, count);
+    int menu = draw_kind == 1;
+    info.bmiHeader.biSize = sizeof(info.bmiHeader);
+    info.bmiHeader.biWidth = w;
+    info.bmiHeader.biHeight = -h;
+    info.bmiHeader.biPlanes = 1;
+    info.bmiHeader.biBitCount = 32;
+    info.bmiHeader.biCompression = BI_RGB;
+    HDC dc = gdi.CreateCompatibleDC(NULL);
+    if (!dc) return 0;
+    HBITMAP bitmap = gdi.CreateDIBSection(dc, &info, DIB_RGB_COLORS, &bits, NULL, 0);
+    if (!bitmap || !bits) {
+        gdi.DeleteDC(dc);
+        return 0;
+    }
+    HGDIOBJ old_bitmap = gdi.SelectObject(dc, bitmap);
+    unsigned char *px = (unsigned char *)bits;
+    const unsigned char(*tone)[3] = palette[color];
+    const unsigned char accent[3] = {tone[0][2], tone[0][1], tone[0][0]};
+    const unsigned char *second = second_colour(tone);
+    const unsigned char accent2[3] = {second[2], second[1], second[0]};
+    float s = l->scale;
+    clear_bitmap(px, w, h);
+    int over = l->style == NOTIFY_STYLE_OVERDRIVE;
+    if (over) paint_overdrive_back(px, w, g, g, cw, ch, header, l, tone);
+    else paint_card_back(px, w, g, g, cw, ch, l, tone);
+    int left = g + l->bar + l->skew, right = g + cw - l->skew; /* inside, right of the colour bar */
+    int first_row = g + header;
+    /* header: the logo on a soft light, the title next to it */
+    int logo_size = (roomy ? l->panel_header : header) - (int)(14 * s);
+    int lx = left + (int)(8 * s), ly = g + (header - logo_size) / 2;
+    const unsigned char logo[3] = {mix8(tone[1][2], 255, 0.15f), mix8(tone[1][1], 255, 0.15f), mix8(tone[1][0], 255, 0.15f)};
+    if (over) {
+        const unsigned char ink[3] = {0, 0, 0}, white[3] = {255, 255, 255}, dark[3] = {40, 26, 18};
+        paint_logo(px, w, lx + 1, ly + 1, logo_size, ink, 0.45f);
+        paint_logo(px, w, lx, ly, logo_size, over_light_card(tone) ? dark : white, 1.0f);
+    } else {
+        paint_halo(px, w, g, g + ch, lx + logo_size / 2, ly + logo_size / 2, logo_size * 7 / 10, 0.38f, tone);
+        paint_logo(px, w, lx, ly, logo_size, logo, 1.0f);
+    }
+    int inner_l = left + l->pad / 2, inner_r = right - l->pad / 2;
+    /* the body: a faint diagonal carbon weave, then every second row a touch lighter */
+    if (roomy) {
+        int step = (int)(6 * s) > 3 ? (int)(6 * s) : 3;
+        for (int y = first_row; y < g + ch; ++y) {
+            unsigned char *row = px + (size_t)y * w * 4;
+            for (int x = inner_l; x < inner_r; ++x)
+                if (((x + y) % step) == 0)
+                    for (int k = 0; k < 3; ++k) row[x * 4 + k] = mix8(row[x * 4 + k], 255, 0.025f);
+        }
+    }
+    for (unsigned i = 1; i < count; i += 2) {
+        if (rows[i].style == NOTIFY_ROW_SECTION || rows[i].style == NOTIFY_ROW_HINT || rows[i].style == NOTIFY_ROW_HERO ||
+            rows[i].style == NOTIFY_ROW_SPACER)
+            continue;
+        int y0 = first_row + (int)i * rh;
+        for (int y = y0; y < y0 + rh && y < g + ch; ++y) {
+            unsigned char *row = px + (size_t)y * w * 4;
+            for (int x = inner_l; x < inner_r; ++x)
+                for (int k = 0; k < 3; ++k) row[x * 4 + k] = mix8(row[x * 4 + k], 255, roomy ? 0.03f : 0.04f);
+        }
+    }
+    /* line under the header: card colour into the second colour, fading to the right */
+    int line_y = first_row - (int)(5 * s);
+    for (int y = line_y; y < line_y + (roomy || s >= 1.5f ? 2 : 1); ++y) {
+        unsigned char *row = px + (size_t)y * w * 4;
+        for (int x = inner_l; x < right - l->pad; ++x) {
+            float t = (float)(x - left) / (float)(right - left);
+            float fade = roomy ? 1.0f - t * 0.6f : 1.0f - t;
+            for (int k = 0; k < 3; ++k)
+                row[x * 4 + k] = mix8(row[x * 4 + k], mix8(mix8(accent[k], accent2[k], t), 255, 0.3f), 0.95f * fade);
+        }
+    }
+    if (roomy) paint_band_glow(px, w, h, inner_l, line_y, right - l->pad - inner_l, 2, (int)(5 * s), accent, 0.18f);
+
+    HFONT small_bold = gdi.CreateFontW(-(int)(13 * s), 0, 0, 0, FW_BOLD, 0, 0, 0, DEFAULT_CHARSET, 0, 0,
+                                       ANTIALIASED_QUALITY, 0, L"Segoe UI");
+    int italic = l->style == NOTIFY_STYLE_OVERDRIVE;
+    HFONT main = gdi.CreateFontW(-(int)((roomy ? 25 : 20) * s), 0, 0, 0, italic ? FW_HEAVY : FW_BOLD, (DWORD)italic, 0, 0,
+                                 DEFAULT_CHARSET, 0, 0, ANTIALIASED_QUALITY, 0, L"Segoe UI");
+    HFONT label = gdi.CreateFontW(-(int)((roomy ? 16 : 15) * s), 0, 0, 0, FW_NORMAL, 0, 0, 0, DEFAULT_CHARSET, 0, 0,
+                                  ANTIALIASED_QUALITY, 0, L"Segoe UI");
+    HFONT label_bold = gdi.CreateFontW(-(int)((roomy ? 16 : 15) * s), 0, 0, 0, FW_BOLD, 0, 0, 0, DEFAULT_CHARSET, 0, 0,
+                                       ANTIALIASED_QUALITY, 0, L"Segoe UI");
+    HFONT keys = gdi.CreateFontW(-(int)(15 * s), 0, 0, 0, FW_SEMIBOLD, 0, 0, 0, DEFAULT_CHARSET, 0, 0,
+                                 ANTIALIASED_QUALITY, 0, L"Segoe UI");
+    HFONT tiny = gdi.CreateFontW(-(int)(11 * s), 0, 0, 0, FW_BOLD, 0, 0, 0, DEFAULT_CHARSET, 0, 0,
+                                 ANTIALIASED_QUALITY, 0, L"Segoe UI");
+    gdi.SetBkMode(dc, TRANSPARENT);
+    int tx = left + l->pad, kx = g + cw * 58 / 100;
+    int text_dy = (rh - (int)((roomy ? 21 : 20) * s)) / 2; /* text sits in the middle of the taller rows */
+    if (text_dy < 0) text_dy = 0;
+    gdi.SelectObject(dc, label);
+    int label_dy = text_centre_dy(dc, rh, text_dy);
+    gdi.SelectObject(dc, label_bold);
+    int bold_dy = text_centre_dy(dc, rh, text_dy);
+    gdi.SelectObject(dc, keys);
+    int keys_dy = text_centre_dy(dc, rh, text_dy);
+
+    /* ---- pass 1: everything painted into the pixels (before any text is drawn over it) */
+    int value_kind[NOTIFY_PANEL_ROWS]; /* 0 text, 1 pill, 2 switch on, 3 switch off, 4 dot, 5 sub page (chevron) */
+    int value_x[NOTIFY_PANEL_ROWS];
+    int vr = right - l->pad - (int)(18 * s); /* roomy: values end here, the chevron stands right of it */
+    for (unsigned i = 0; i < count; ++i) {
+        int y = first_row + (int)i * rh, style = rows[i].style;
+        value_kind[i] = 0, value_x[i] = kx;
+        if (style == NOTIFY_ROW_SELECTED) {
+            int inset = roomy ? (int)(2 * s) : 0;
+            paint_selection(px, w, h, inner_l, y + inset, inner_r - inner_l, rh - 2 * inset, accent, s);
+            if (roomy && menu) { /* V7 overhaul 4: a soft light runs along the chosen row */
+                int bx = inner_l, bw = inner_r - inner_l, by = y + inset, bh = rh - 2 * inset;
+                float phase = (float)(GetTickCount64() % 1800u) / 1800.0f;
+                float cx = (float)bx - 0.3f * (float)bw + 1.6f * (float)bw * phase, band = 60.0f * s;
+                for (int yy = 0; yy < bh; ++yy) {
+                    unsigned char *row = px + (size_t)(by + yy) * w * 4;
+                    for (int x = 0; x < bw; ++x) {
+                        float d = ((float)(bx + x) + (float)yy * 0.6f - cx) / band;
+                        if (d < -1.0f || d > 1.0f) continue;
+                        float c = card_coverage(x, yy, bw, bh, bh / 2);
+                        if (c <= 0.0f) continue;
+                        for (int k = 0; k < 3; ++k) row[(bx + x) * 4 + k] = mix8(row[(bx + x) * 4 + k], 255, 0.20f * (1.0f - d * d) * c);
+                    }
+                }
+            }
+        } else if (style == NOTIFY_ROW_SECTION) {
+            /* section head: a thin rule from after the text to the right */
+            gdi.SelectObject(dc, tiny);
+            wchar_t up[32];
+            upper_text(rows[i].label, up, 32);
+            int tw = text_px(dc, up, 7.5f * s);
+            int ry = y + rh / 2 + (int)(2 * s);
+            for (int x = tx + tw + (int)(8 * s); x < inner_r; ++x) {
+                float t = (float)(x - tx - tw) / (float)(inner_r - tx - tw);
+                unsigned char *p = px + (size_t)ry * w * 4 + (size_t)x * 4;
+                for (int k = 0; k < 3; ++k) p[k] = mix8(p[k], mix8(accent[k], 255, 0.25f), 0.55f * (1.0f - t));
+            }
+        } else if (style == NOTIFY_ROW_HINT) {
+            int ry = y - (int)(2 * s);
+            for (int x = inner_l; x < inner_r; ++x) {
+                unsigned char *p = px + (size_t)ry * w * 4 + (size_t)x * 4;
+                for (int k = 0; k < 3; ++k) p[k] = mix8(p[k], 255, 0.10f);
+            }
+        }
+        if (style == NOTIFY_ROW_SPACER) {
+            value_kind[i] = 8;
+            continue;
+        }
+        if (style == NOTIFY_ROW_HERO) { /* big value: a soft light band behind it, a colour rule below */
+            value_kind[i] = 6;
+            int bh = 2 * rh - (int)(6 * s);
+            paint_band_glow(px, w, h, inner_l + (int)(4 * s), y + (int)(3 * s), inner_r - inner_l - (int)(8 * s), bh, (int)(6 * s),
+                            accent, 0.10f);
+            for (int yy = y + (int)(3 * s); yy < y + (int)(3 * s) + bh; ++yy) {
+                unsigned char *row = px + (size_t)yy * w * 4;
+                for (int x = inner_l; x < inner_r; ++x) {
+                    float t = (float)(x - inner_l) / (float)(inner_r - inner_l);
+                    for (int k = 0; k < 3; ++k) row[x * 4 + k] = mix8(row[x * 4 + k], mix8(accent[k], accent2[k], t), 0.16f * (1.0f - t));
+                }
+            }
+            continue;
+        }
+        if (style == NOTIFY_ROW_HINT || style == NOTIFY_ROW_SECTION || !rows[i].keys[0]) continue;
+        if (roomy && is_bar_text(rows[i].keys)) { /* ■■■□□ -> a real meter */
+            int cells = 0;
+            const wchar_t *t = rows[i].keys;
+            for (; *t == 0x25a0 || *t == 0x25a1; ++t) cells += *t == 0x25a0;
+            int bw = (int)(74 * s), bh = (int)(6 * s) > 3 ? (int)(6 * s) : 3, by = y + (rh - bh) / 2;
+            const unsigned char track[3] = {60, 48, 40};
+            paint_pill(px, w, kx, by, bw, bh, track, 0.55f, 0.0f);
+            int fw = bw * cells / 8;
+            if (fw >= bh) {
+                paint_band_glow(px, w, h, kx, by, fw, bh, (int)(5 * s), accent, 0.30f);
+                for (int yy = 0; yy < bh; ++yy) {
+                    unsigned char *row = px + (size_t)(by + yy) * w * 4;
+                    for (int x = 0; x < fw; ++x) {
+                        float c = card_coverage(x, yy, fw, bh, bh / 2);
+                        if (c <= 0.0f) continue;
+                        float tt = (float)x / (float)bw;
+                        for (int k = 0; k < 3; ++k)
+                            row[(kx + x) * 4 + k] = mix8(row[(kx + x) * 4 + k], mix8(mix8(accent[k], accent2[k], tt), 255, 0.25f * (1.0f - (float)yy / bh)), c);
+                    }
+                }
+            }
+            value_kind[i] = 7;
+            value_x[i] = kx + bw + (int)(10 * s);
+            continue;
+        }
+        if (roomy && (style == NOTIFY_ROW_GOOD || style == NOTIFY_ROW_WARN || style == NOTIFY_ROW_BAD)) {
+            static const unsigned char status[3][3] = {{80, 190, 40}, {20, 150, 245}, {60, 50, 230}}; /* B, G, R */
+            const unsigned char *sc = status[style - NOTIFY_ROW_GOOD];
+            gdi.SelectObject(dc, keys);
+            int pad = (int)(8 * s), ph = (int)(19 * s);
+            int pw = text_px(dc, rows[i].keys, 8.5f * s) + 2 * pad, px0 = vr - pw;
+            if (px0 < kx - pad / 2) px0 = kx - pad / 2;
+            paint_band_glow(px, w, h, px0, y + (rh - ph) / 2, pw, ph, (int)(5 * s), sc, 0.35f);
+            paint_pill(px, w, px0, y + (rh - ph) / 2, pw, ph, sc, 0.85f, 0.5f);
+            value_x[i] = px0 + (pw - (pw - 2 * pad)) / 2;
+            value_kind[i] = 9;
+            continue;
+        }
+        if (roomy && rows[i].keys[0] == 0x203a && !rows[i].keys[1]) {
+            value_kind[i] = 5;
+            continue;
+        }
+        if (roomy && value_is(rows[i].keys, values_on)) value_kind[i] = 2;
+        else if (roomy && value_is(rows[i].keys, values_off)) value_kind[i] = 3;
+        else if (roomy && rows[i].keys[0] == 0x2713) value_kind[i] = 4;
+        if (value_kind[i] == 2 || value_kind[i] == 3) {
+            int sh = (int)(16 * s), sw = (int)(30 * s);
+            paint_switch(px, w, h, roomy ? vr - sw : kx, y + (rh - sh) / 2, sw, sh, value_kind[i] == 2, accent);
+        } else if (value_kind[i] == 4) {
+            float r = 7.0f * s;
+            const unsigned char white[3] = {255, 255, 255};
+            paint_band_glow(px, w, h, kx, y + rh / 2 - (int)r, (int)(2 * r), (int)(2 * r), (int)(5 * s), accent, 0.35f);
+            paint_disc(px, w, h, (float)kx + r, (float)y + rh * 0.5f, r, accent, 1.0f);
+            paint_disc(px, w, h, (float)kx + r, (float)y + rh * 0.5f, r * 0.42f, white, 1.0f);
+            value_x[i] = kx + (int)(2 * r + 7 * s);
+        } else if (!is_bar_text(rows[i].keys) && text_width_chars(rows[i].keys) <= 16) {
+            /* short values (keys, choices) sit on a key cap */
+            gdi.SelectObject(dc, keys);
+            int pad = (int)(7 * s), ph = (roomy ? (int)(19 * s) : rh - (int)(3 * s));
+            int pw = text_px(dc, rows[i].keys, 8.5f * s) + 2 * pad, px0 = kx - pad / 2;
+            if (roomy) {
+                px0 = vr - pw;
+                if (px0 < kx - pad / 2) px0 = kx - pad / 2;
+            }
+            if (px0 + pw > right - l->pad) pw = right - l->pad - px0;
+            if (pw > ph) paint_pill(px, w, px0, y + (rh - ph) / 2, pw, ph, accent,
+                                    style == NOTIFY_ROW_SELECTED ? 0.10f : style == NOTIFY_ROW_INFO ? 0.14f : 0.26f,
+                                    style == NOTIFY_ROW_SELECTED ? 0.70f : 0.45f);
+            value_x[i] = px0 + pad;
+            value_kind[i] = 1;
+        }
+    }
+    /* footer of the menu: key caps (and the controller's A / B) instead of a plain line */
+    int footer = menu && count && rows[count - 1].style == NOTIFY_ROW_HINT;
+    int cap_x[6], cap_w[6], cap_n = 0, word_x[6];
+    const wchar_t *cap_text[6], *word_text[6];
+    wchar_t parts[6][32];
+    int pad_button[6]; /* 0 none, 'A', 'B' */
+    if (footer) {
+        /* "↑↓ choose · Enter OK" + "Esc back": cap = the first word of each part */
+        const wchar_t *src[2] = {rows[count - 1].label, rows[count - 1].keys};
+        int y = first_row + (int)(count - 1) * rh;
+        int x = tx;
+        for (int k = 0; k < 2 && cap_n < 6; ++k) {
+            const wchar_t *p = src[k];
+            while (*p && cap_n < 6) {
+                int n = 0;
+                while (p[n] && !(p[n] == L' ' && p[n + 1] == 0x00b7)) ++n;
+                int c = 0;
+                for (; c < n && c < 31; ++c) parts[cap_n][c] = p[c];
+                parts[cap_n][c] = 0;
+                wchar_t *space = parts[cap_n];
+                while (*space && *space != L' ') ++space;
+                const wchar_t *word = L"";
+                if (*space) *space = 0, word = space + 1;
+                cap_text[cap_n] = parts[cap_n];
+                word_text[cap_n] = word;
+                gdi.SelectObject(dc, tiny);
+                int cw_ = text_px(dc, parts[cap_n], 7.0f * s) + (int)(12 * s);
+                int ch_ = (int)(17 * s), cy = y + (rh - ch_) / 2;
+                const unsigned char cap_col[3] = {70, 76, 96};
+                paint_pill(px, w, x, cy, cw_ > ch_ ? cw_ : ch_ + 1, ch_, cap_col, 0.85f, 0.55f);
+                cap_x[cap_n] = x, cap_w[cap_n] = cw_ > ch_ ? cw_ : ch_ + 1;
+                x += cap_w[cap_n] + (int)(4 * s);
+                pad_button[cap_n] = 0;
+                if (parts[cap_n][0] == L'E' && parts[cap_n][1] == L'n') pad_button[cap_n] = 'A';
+                if (parts[cap_n][0] == L'E' && parts[cap_n][1] == L's') pad_button[cap_n] = 'B';
+                if (pad_button[cap_n]) {
+                    const unsigned char a_col[3] = {70, 190, 90}, b_col[3] = {60, 70, 220};
+                    float r = 8.5f * s;
+                    paint_disc(px, w, h, (float)x + r, (float)cy + ch_ * 0.5f, r, pad_button[cap_n] == 'A' ? a_col : b_col, 1.0f);
+                    x += (int)(2 * r + 5 * s);
+                }
+                gdi.SelectObject(dc, small_bold);
+                word_x[cap_n] = x;
+                x += text_px(dc, word, 7.0f * s) + (int)(14 * s);
+                ++cap_n;
+                p += n;
+                while (*p == L' ' || *p == 0x00b7) ++p;
+            }
+        }
+    }
+    gdi.GdiFlush();
+
+    /* ---- pass 2: the text. V7 telemetry with a see-through background: what pass 1 painted is kept,
+       so the finish can tell text (changed by pass 2) from background */
+    unsigned char *base = NULL;
+    if (draw_kind == 2 && tele_opacity < 100) {
+        gdi.GdiFlush();
+        base = (unsigned char *)HeapAlloc(GetProcessHeap(), 0, (SIZE_T)w * h * 4);
+        if (base) memory_copy(base, px, (size_t)w * h * 4);
+    }
+    int title_x = lx + logo_size + (int)(12 * s);
+    RECT clip = {title_x, g, right - l->pad, g + ch};
+    HGDIOBJ old_font = gdi.SelectObject(dc, main);
+    COLORREF title_col = over && over_light_card(tone) ? RGB(18, 22, 32) : RGB(252, 253, 255);
+    if (roomy && header >= (int)(70 * s)) {
+        gdi.SelectObject(dc, tiny);
+        RECT kclip = {title_x, g, right - l->pad, g + header};
+        gdi.SetTextColor(dc, over && over_light_card(tone) ? RGB(40, 30, 20) : RGB(mix8(tone[1][0], 255, 0.55f), mix8(tone[1][1], 255, 0.55f), mix8(tone[1][2], 255, 0.55f)));
+        gdi.ExtTextOutW(dc, title_x + (int)(2 * s), g + header / 2 - (int)(25 * s), ETO_CLIPPED, &kclip, L"GRIPLINE  V7", 12, NULL);
+        gdi.SelectObject(dc, main);
+        HFONT fit = NULL; /* long titles step down a size instead of being cut */
+        if (text_px(dc, title, 15.0f * s) > clip.right - clip.left) {
+            fit = gdi.CreateFontW(-(int)(19 * s), 0, 0, 0, italic ? FW_HEAVY : FW_BOLD, (DWORD)italic, 0, 0, DEFAULT_CHARSET, 0, 0,
+                                  ANTIALIASED_QUALITY, 0, L"Segoe UI");
+            if (fit) gdi.SelectObject(dc, fit);
+        }
+        shadow_text(dc, title_x, g + header / 2 - (int)((fit ? 9 : 12) * s), &clip, title, title_col, s >= 1.5f ? 2 : 1);
+        if (fit) {
+            gdi.SelectObject(dc, main);
+            gdi.DeleteObject(fit);
+        }
+    } else {
+        shadow_text(dc, title_x, g + (header - (int)(26 * s)) / 2 - (int)(2 * s), &clip, title, title_col, s >= 1.5f ? 2 : 1);
+    }
+    for (unsigned i = 0; i < count; ++i) {
+        int y = first_row + (int)i * rh;
+        int style = rows[i].style;
+        if (footer && i == count - 1) {
+            for (int c = 0; c < cap_n; ++c) {
+                RECT cc = {cap_x[c], y, cap_x[c] + cap_w[c], y + rh};
+                gdi.SelectObject(dc, tiny);
+                gdi.SetTextColor(dc, RGB(236, 240, 248));
+                int tw = text_px(dc, cap_text[c], 7.0f * s);
+                gdi.ExtTextOutW(dc, cap_x[c] + (cap_w[c] - tw) / 2, y + (rh - (int)(15 * s)) / 2, ETO_CLIPPED, &cc, cap_text[c],
+                                (UINT)text_width_chars(cap_text[c]), NULL);
+                if (pad_button[c]) {
+                    float r = 8.5f * s;
+                    int bx = cap_x[c] + cap_w[c] + (int)(4 * s);
+                    wchar_t letter[2] = {(wchar_t)pad_button[c], 0};
+                    RECT bc = {bx, y, bx + (int)(2 * r), y + rh};
+                    gdi.SetTextColor(dc, RGB(255, 255, 255));
+                    int lw = text_px(dc, letter, 7.0f * s);
+                    gdi.ExtTextOutW(dc, bx + ((int)(2 * r) - lw) / 2, y + (rh - (int)(15 * s)) / 2, ETO_CLIPPED, &bc, letter, 1, NULL);
+                }
+                gdi.SelectObject(dc, small_bold);
+                gdi.SetTextColor(dc, RGB(150, 158, 175));
+                RECT wc = {word_x[c], y, right - l->pad, y + rh};
+                gdi.ExtTextOutW(dc, word_x[c], y + (rh - (int)(17 * s)) / 2, ETO_CLIPPED, &wc, word_text[c],
+                                (UINT)text_width_chars(word_text[c]), NULL);
+            }
+            continue;
+        }
+        if (value_kind[i] == 8) continue; /* spacer */
+        if (value_kind[i] == 6) { /* hero: label in small capitals, the value big and bold */
+            wchar_t up[32];
+            upper_text(rows[i].label, up, 32);
+            RECT hc = {tx, y, right - l->pad, y + 2 * rh};
+            gdi.SelectObject(dc, tiny);
+            gdi.SetTextColor(dc, RGB(mix8(tone[1][0], 255, 0.35f), mix8(tone[1][1], 255, 0.35f), mix8(tone[1][2], 255, 0.35f)));
+            gdi.ExtTextOutW(dc, tx, y + (int)(7 * s), ETO_CLIPPED, &hc, up, (UINT)text_width_chars(up), NULL);
+            HFONT big = gdi.CreateFontW(-(int)(30 * s), 0, 0, 0, FW_HEAVY, (DWORD)italic, 0, 0, DEFAULT_CHARSET, 0, 0,
+                                        ANTIALIASED_QUALITY, 0, L"Segoe UI");
+            if (big) {
+                gdi.SelectObject(dc, big);
+                int asc, cap;
+                font_metrics(dc, 30.0f * s, &asc, &cap);
+                int vw = text_px(dc, rows[i].keys, 17.0f * s);
+                int vx = right - l->pad - (int)(10 * s) - vw;
+                if (vx < tx) vx = tx;
+                shadow_text(dc, vx, y + rh - cap / 2 + (int)(3 * s) - (asc - cap), &hc, rows[i].keys, RGB(252, 253, 255),
+                            s >= 1.5f ? 2 : 1);
+                gdi.SelectObject(dc, label);
+                gdi.DeleteObject(big);
+            }
+            continue;
+        }
+        int lab_x = tx + (style == NOTIFY_ROW_SELECTED && roomy ? (int)(8 * s) : 0);
+        RECT left_clip = {lab_x, y, rows[i].keys[0] && value_kind[i] != 5 ? kx - l->pad / 2 : right - l->pad - (int)(14 * s), y + rh};
+        if (roomy && (value_kind[i] == 2 || value_kind[i] == 3)) left_clip.right = vr - (int)(38 * s);
+        COLORREF label_color = RGB(205, 212, 224), keys_color = RGB(tone[1][0], tone[1][1], tone[1][2]);
+        HFONT lf = label;
+        if (style == NOTIFY_ROW_SELECTED) {
+            label_color = keys_color = RGB(255, 255, 255);
+            if (roomy) lf = label_bold;
+        } else if (style == NOTIFY_ROW_INFO) {
+            label_color = RGB(150, 158, 170);
+        } else if (style == NOTIFY_ROW_HINT) {
+            label_color = keys_color = RGB(135, 143, 156);
+            lf = small_bold;
+        } else if (style == NOTIFY_ROW_SECTION) {
+            wchar_t up[32];
+            upper_text(rows[i].label, up, 32);
+            gdi.SelectObject(dc, tiny);
+            gdi.SetTextColor(dc, RGB(mix8(tone[1][0], 255, 0.35f), mix8(tone[1][1], 255, 0.35f), mix8(tone[1][2], 255, 0.35f)));
+            gdi.ExtTextOutW(dc, tx, y + rh / 2 - (int)(6 * s), ETO_CLIPPED, &left_clip, up, (UINT)text_width_chars(up), NULL);
+            continue;
+        }
+        if (value_kind[i] == 1 && style != NOTIFY_ROW_SELECTED && style != NOTIFY_ROW_INFO) keys_color = RGB(240, 244, 250);
+        gdi.SelectObject(dc, lf);
+        gdi.SetTextColor(dc, label_color);
+        gdi.ExtTextOutW(dc, lab_x, y + (lf == label ? label_dy : lf == label_bold ? bold_dy : text_dy), ETO_CLIPPED, &left_clip, rows[i].label, (UINT)text_width_chars(rows[i].label), NULL);
+        if (value_kind[i] == 5 && style != NOTIFY_ROW_SELECTED) { /* sub page: a quiet chevron */
+            RECT end_clip = {right - l->pad - (int)(12 * s), y, right - l->pad / 2, y + rh};
+            gdi.SelectObject(dc, label_bold);
+            gdi.SetTextColor(dc, RGB(mix8(tone[1][0], 255, 0.3f), mix8(tone[1][1], 255, 0.3f), mix8(tone[1][2], 255, 0.3f)));
+            gdi.ExtTextOutW(dc, end_clip.left, y + bold_dy, ETO_CLIPPED, &end_clip, L"\x203a", 1, NULL);
+        }
+        if (value_kind[i] != 2 && value_kind[i] != 3 && value_kind[i] != 5) {
+            const wchar_t *v = rows[i].keys;
+            if (value_kind[i] == 4) { /* "✓ active": the dot says the tick, the word stays */
+                v += 1;
+                while (*v == L' ') ++v;
+            }
+            if (value_kind[i] == 7) { /* meter painted: only the number after it */
+                while (*v == 0x25a0 || *v == 0x25a1 || *v == L' ') ++v;
+            }
+            gdi.SelectObject(dc, style == NOTIFY_ROW_HINT ? small_bold : keys);
+            gdi.SetTextColor(dc, value_kind[i] == 4 ? RGB(mix8(tone[1][0], 255, 0.5f), mix8(tone[1][1], 255, 0.5f), mix8(tone[1][2], 255, 0.5f)) : keys_color);
+            if (value_kind[i] == 4 && style == NOTIFY_ROW_SELECTED) gdi.SetTextColor(dc, RGB(255, 255, 255));
+            if (value_kind[i] == 9 || value_kind[i] == 7) gdi.SetTextColor(dc, RGB(250, 252, 255));
+            RECT key_clip = {value_x[i], y, right - l->pad, y + rh};
+            gdi.ExtTextOutW(dc, value_x[i], y + (style == NOTIFY_ROW_HINT ? text_dy : keys_dy), ETO_CLIPPED, &key_clip, v, (UINT)text_width_chars(v), NULL);
+        }
+        if (style == NOTIFY_ROW_SELECTED) { /* chevron at the end of the chosen row */
+            RECT end_clip = {right - l->pad - (int)(12 * s), y, right - l->pad / 2, y + rh};
+            gdi.SelectObject(dc, roomy ? label_bold : keys);
+            gdi.SetTextColor(dc, RGB(255, 255, 255));
+            gdi.ExtTextOutW(dc, end_clip.left, y + (roomy ? bold_dy : keys_dy), ETO_CLIPPED, &end_clip, L"\x203a", 1, NULL);
+        }
+    }
+    gdi.SelectObject(dc, old_font);
+    gdi.GdiFlush();
+    if (base) see_through_begin(base, px, (float)tele_opacity / 100.0f);
+    for (int y = 0; y < h; ++y) { /* rows below h are never shown */
+        unsigned char *src = px + (size_t)y * w * 4;
+        unsigned char *dst = pixels + (size_t)y * pitch;
+        for (int x = 0; x < w; ++x) finish_pixel(src + x * 4, dst + x * 4, x, y, w, h, g, l, 0.94f, tone);
+    }
+    see_through_end();
+    if (base) HeapFree(GetProcessHeap(), 0, base);
+    gdi.SelectObject(dc, old_bitmap);
+    gdi.DeleteObject(small_bold);
+    gdi.DeleteObject(main);
+    gdi.DeleteObject(label);
+    gdi.DeleteObject(label_bold);
+    gdi.DeleteObject(keys);
+    gdi.DeleteObject(tiny);
+    gdi.DeleteObject(bitmap);
+    gdi.DeleteDC(dc);
+    return 1;
+}
+
+/* ------------------------------------------------------------------ classic card look (V6, "Classic") */
+
+/* Draws every card into a top-down BGRA bitmap (premultiplied alpha), one row per card. */
+static int draw_cards_classic(const Card *list, unsigned count, const Layout *l, unsigned char *pixels, int pitch) {
     static BITMAPINFO info;
     void *bits = NULL;
     int w = l->width, h = l->height * MAX_CARDS;
@@ -372,18 +1729,18 @@ static int draw_cards(const Card *list, unsigned count, const Layout *l, unsigne
         int ix = l->bar + l->pad, iy = top + (l->height - l->icon) / 2;
         for (int y = 0; y < l->icon; ++y) {
             for (int x = 0; x < l->icon; ++x) {
-                float fx = (x + 0.5f) * GRIPLINE_LOGO_SIZE / l->icon - 0.5f;
-                float fy = (y + 0.5f) * GRIPLINE_LOGO_SIZE / l->icon - 0.5f;
+                float fx = (x + 0.5f) * GRIPLINE_SYMBOL_SIZE / l->icon - 0.5f;
+                float fy = (y + 0.5f) * GRIPLINE_SYMBOL_SIZE / l->icon - 0.5f;
                 int x0 = (int)fx, y0 = (int)fy;
                 if (fx < 0) { fx = 0; x0 = 0; }
                 if (fy < 0) { fy = 0; y0 = 0; }
-                int x1 = x0 + 1 < GRIPLINE_LOGO_SIZE ? x0 + 1 : x0;
-                int y1 = y0 + 1 < GRIPLINE_LOGO_SIZE ? y0 + 1 : y0;
+                int x1 = x0 + 1 < GRIPLINE_SYMBOL_SIZE ? x0 + 1 : x0;
+                int y1 = y0 + 1 < GRIPLINE_SYMBOL_SIZE ? y0 + 1 : y0;
                 float ax = fx - x0, ay = fy - y0;
-                float a = (gripline_logo_alpha[y0 * GRIPLINE_LOGO_SIZE + x0] * (1 - ax) +
-                           gripline_logo_alpha[y0 * GRIPLINE_LOGO_SIZE + x1] * ax) * (1 - ay) +
-                          (gripline_logo_alpha[y1 * GRIPLINE_LOGO_SIZE + x0] * (1 - ax) +
-                           gripline_logo_alpha[y1 * GRIPLINE_LOGO_SIZE + x1] * ax) * ay;
+                float a = (gripline_symbol_alpha[y0 * GRIPLINE_SYMBOL_SIZE + x0] * (1 - ax) +
+                           gripline_symbol_alpha[y0 * GRIPLINE_SYMBOL_SIZE + x1] * ax) * (1 - ay) +
+                          (gripline_symbol_alpha[y1 * GRIPLINE_SYMBOL_SIZE + x0] * (1 - ax) +
+                           gripline_symbol_alpha[y1 * GRIPLINE_SYMBOL_SIZE + x1] * ax) * ay;
                 a /= 255.0f;
                 unsigned char *p = px + ((size_t)(iy + y) * w + ix + x) * 4;
                 for (int k = 0; k < 3; ++k) p[k] = (unsigned char)(p[k] * (1 - a) + logo[k] * a);
@@ -406,7 +1763,13 @@ static int draw_cards(const Card *list, unsigned count, const Layout *l, unsigne
         int has2 = list[c].line2[0] != 0;
         int y = top + (int)((has2 ? 12 : 20) * s);
         const unsigned char(*tone)[3] = palette[list[c].color >= 0 ? list[c].color : color];
-        const wchar_t *heading = list[c].badge[0] ? list[c].badge : L"GRIPLINE";
+        wchar_t heading[40] = L"GRIPLINE";
+        if (list[c].badge[0]) { /* classic title line: GRIPLINE · WARNUNG */
+            unsigned n = 8;
+            for (const wchar_t *g = L" \x00b7 "; *g; ++g) heading[n++] = *g;
+            for (const wchar_t *b = list[c].badge; *b && n + 1 < 40; ++b) heading[n++] = *b;
+            heading[n] = 0;
+        }
         HGDIOBJ old_font = gdi.SelectObject(dc, title);
         gdi.SetTextColor(dc, RGB(tone[1][0], tone[1][1], tone[1][2]));
         gdi.ExtTextOutW(dc, tx, y, ETO_CLIPPED, &clip, heading, (UINT)text_width_chars(heading), NULL);
@@ -446,13 +1809,8 @@ static int draw_cards(const Card *list, unsigned count, const Layout *l, unsigne
     return 1;
 }
 
-/* height in pixels of the key list panel with `count` rows */
-static int panel_pixels(const Layout *l, unsigned count) {
-    return l->panel_header + (int)count * l->panel_row + l->pad;
-}
-
 /* Draws the key list panel into l->panel_height rows (premultiplied BGRA, unused rows clear). */
-static int draw_panel(const wchar_t *title, const NotifyPanelRow *rows, unsigned count, const Layout *l,
+static int draw_panel_classic(const wchar_t *title, const NotifyPanelRow *rows, unsigned count, const Layout *l,
                       unsigned char *pixels, int pitch) {
     static BITMAPINFO info;
     void *bits = NULL;
@@ -506,13 +1864,33 @@ static int draw_panel(const wchar_t *title, const NotifyPanelRow *rows, unsigned
     gdi.ExtTextOutW(dc, tx, (int)(28 * s), ETO_CLIPPED, &clip, title, (UINT)text_width_chars(title), NULL);
     for (unsigned i = 0; i < count; ++i) {
         int y = l->panel_header + (int)i * l->panel_row;
-        RECT left = {tx, y, kx - l->pad / 2, y + l->panel_row};
+        RECT left = {tx, y, rows[i].keys[0] ? kx - l->pad / 2 : w - l->pad, y + l->panel_row};
         RECT right = {kx, y, w - l->pad, y + l->panel_row};
-        gdi.SelectObject(dc, label);
-        gdi.SetTextColor(dc, RGB(200, 207, 218));
+        int style = rows[i].style;
+        COLORREF label_color = RGB(200, 207, 218), keys_color = RGB(tone[1][0], tone[1][1], tone[1][2]);
+        if (style == NOTIFY_ROW_SELECTED) {
+            /* key menu: the chosen row on a band in the card colour */
+            gdi.GdiFlush(); /* text of the rows above is in the bitmap before it is touched directly */
+            for (int by = y; by < y + l->panel_row && by < h; ++by) {
+                unsigned char *row = px + (size_t)by * w * 4;
+                for (int x = l->bar + l->pad / 2; x < w - l->pad / 2; ++x) {
+                    row[x * 4 + 0] = (unsigned char)((bg[0] + accent[0]) / 2);
+                    row[x * 4 + 1] = (unsigned char)((bg[1] + accent[1]) / 2);
+                    row[x * 4 + 2] = (unsigned char)((bg[2] + accent[2]) / 2);
+                }
+            }
+            gdi.GdiFlush();
+            label_color = keys_color = RGB(255, 255, 255);
+        } else if (style == NOTIFY_ROW_INFO) {
+            label_color = RGB(150, 158, 170);
+        } else if (style == NOTIFY_ROW_HINT) {
+            label_color = keys_color = RGB(130, 138, 150);
+        }
+        gdi.SelectObject(dc, style == NOTIFY_ROW_HINT ? small_bold : label);
+        gdi.SetTextColor(dc, label_color);
         gdi.ExtTextOutW(dc, tx, y, ETO_CLIPPED, &left, rows[i].label, (UINT)text_width_chars(rows[i].label), NULL);
-        gdi.SelectObject(dc, keys);
-        gdi.SetTextColor(dc, RGB(tone[1][0], tone[1][1], tone[1][2]));
+        gdi.SelectObject(dc, style == NOTIFY_ROW_HINT ? small_bold : keys);
+        gdi.SetTextColor(dc, keys_color);
         gdi.ExtTextOutW(dc, kx, y, ETO_CLIPPED, &right, rows[i].keys, (UINT)text_width_chars(rows[i].keys), NULL);
     }
     gdi.SelectObject(dc, old_font);
@@ -536,6 +1914,20 @@ static int draw_panel(const wchar_t *title, const NotifyPanelRow *rows, unsigned
     gdi.DeleteObject(bitmap);
     gdi.DeleteDC(dc);
     return 1;
+}
+
+
+static int draw_cards(const Card *list, unsigned count, const Layout *l, unsigned char *pixels, int pitch) {
+    rainbow_tick();
+    return l->style == NOTIFY_STYLE_CLASSIC ? draw_cards_classic(list, count, l, pixels, pitch)
+                                            : draw_cards_v7(list, count, l, pixels, pitch);
+}
+
+static int draw_panel(const wchar_t *title, const NotifyPanelRow *rows, unsigned count, const Layout *l,
+                      unsigned char *pixels, int pitch, int kind) {
+    draw_kind = kind;
+    return l->style == NOTIFY_STYLE_CLASSIC ? draw_panel_classic(title, rows, count, l, pixels, pitch)
+                                            : draw_panel_v7(title, rows, count, l, pixels, pitch);
 }
 
 /* ------------------------------------------------------------------ D3D12 */
@@ -566,8 +1958,9 @@ static struct {
     UINT upload_pitch;
     Layout layout;
     UINT screen_height;
-    unsigned drawn_ids[MAX_CARDS], drawn_count, drawn_panel_id;
+    unsigned drawn_ids[MAX_CARDS], drawn_count, drawn_panel_id, drawn_tele_id, drawn_tele_n;
     int texture_ready;
+    ULONGLONG drawn_at;
 } gpu;
 
 static const char shader_source[] =
@@ -801,6 +2194,30 @@ static void barrier(ID3D12Resource *resource, D3D12_RESOURCE_STATES before, D3D1
 }
 
 /* fade/slide of one card: alpha 0..1 and slide offset 0..1, 0 when gone */
+/* V7 overhaul: the menu panel fades in and glides in from the right over 220 ms */
+static float panel_open_alpha(ULONGLONG now, float *slide) {
+    ULONGLONG age = now - panel_opened;
+    if (panel_at_top == 2) {
+        *slide = 0.0f;
+        return 1.0f;
+    }
+    if (age >= 220) {
+        ULONGLONG page = now - panel_paged;
+        if (page >= 160) {
+            *slide = 0.0f;
+            return 1.0f;
+        }
+        float t = (float)page / 160.0f;
+        float e = 1.0f - (1.0f - t) * (1.0f - t);
+        *slide = 0.45f * (1.0f - e); /* a new page glides in a little */
+        return 0.55f + 0.45f * e;
+    }
+    float t = (float)age / 220.0f;
+    float e = 1.0f - (1.0f - t) * (1.0f - t) * (1.0f - t); /* ease out */
+    *slide = 1.0f - e;
+    return 0.15f + 0.85f * e;
+}
+
 static float card_alpha(ULONGLONG age, ULONGLONG hold, float *slide) {
     *slide = 0.0f;
     if (age < FADE_IN_MS) {
@@ -812,6 +2229,14 @@ static float card_alpha(ULONGLONG age, ULONGLONG hold, float *slide) {
     if (age < hold) return 1.0f;
     if (age < hold + FADE_OUT_MS) return 1.0f - (float)(age - hold) / FADE_OUT_MS;
     return 0.0f;
+}
+
+/* V7 overhaul 4: the cards' time line, their light sweep and the menu's shimmer move, so the
+   picture is drawn again about 30 times a second while one of them is up (not for Classic) */
+#define ANIM_MS 33
+static int animating(unsigned count) {
+    if (card_style == NOTIFY_STYLE_CLASSIC && color != NOTIFY_COLOR_RAINBOW) return 0;
+    return count != 0 || (panel_count != 0 && panel_at_top == 1);
 }
 
 static void render(IDXGISwapChain *swapchain) {
@@ -830,8 +2255,9 @@ static void render(IDXGISwapChain *swapchain) {
     count = card_count;
     for (unsigned i = 0; i < count; ++i) list[i] = cards[i];
     unsigned panel = (unsigned)panel_count, shown_panel_id = panel_id;
+    unsigned tele_n = tele_visible(), shown_tele_id = tele_id;
     ReleaseSRWLockExclusive(&lock);
-    if ((!count && !panel) || !queue) return;
+    if ((!count && !panel && !tele_n) || !queue) return;
     if (!gpu_init()) {
         fail("D3D12 setup failed");
         return;
@@ -853,19 +2279,35 @@ static void render(IDXGISwapChain *swapchain) {
         fail("could not build the overlay shader");
         return;
     }
-    if (height != gpu.screen_height) {
+    if (height != gpu.screen_height || gpu.layout.style != (int)card_style) {
         gpu.screen_height = height;
         gpu.layout = layout_for(height);
         gpu.drawn_count = (unsigned)-1;
     }
     const Layout *l = &gpu.layout;
     int card_rows = l->height * MAX_CARDS;
-    if (!create_texture(l->width, card_rows + l->panel_height)) {
+    /* V7: the telemetry panel is drawn at its own size (sharp text, not stretched) */
+    int tele = tele_n != 0;
+    static Layout tele_layout;
+    static UINT tele_for_height;
+    static int tele_for_size = -1, tele_for_style = -1;
+    if (tele_for_height != height || tele_for_size != (int)tele_size || tele_for_style != l->style) {
+        tele_for_height = height, tele_for_size = (int)tele_size, tele_for_style = l->style;
+        tele_layout = layout_for((UINT)((unsigned long long)height * (unsigned)tele_size / 100u));
+    }
+    const Layout *pl = tele_size != 100 ? &tele_layout : l;
+    int tex_w = pl->width > l->width ? pl->width : l->width;
+    int tele_rows_at = card_rows + l->panel_height; /* texture: cards, then the menu panel, then telemetry */
+    int tex_h = tele_rows_at + pl->panel_height;
+    if (!create_texture(tex_w, tex_h)) {
         fail("could not create the card texture");
         return;
     }
-    int redraw = !gpu.texture_ready || gpu.drawn_count != count || gpu.drawn_panel_id != shown_panel_id;
+    int redraw = !gpu.texture_ready || gpu.drawn_count != count || gpu.drawn_panel_id != shown_panel_id ||
+                 gpu.drawn_tele_id != shown_tele_id || gpu.drawn_tele_n != tele_n;
     for (unsigned i = 0; !redraw && i < count; ++i) redraw = gpu.drawn_ids[i] != list[i].id;
+    if (!redraw && animating(count) && now - gpu.drawn_at >= ANIM_MS) redraw = 1;
+    if (redraw) gpu.drawn_at = now;
     wait_fence(gpu.allocator_fence[index]);
     if (redraw) {
         void *mapped = NULL;
@@ -881,10 +2323,23 @@ static void render(IDXGISwapChain *swapchain) {
             memory_copy(rows, panel_rows, sizeof(rows[0]) * panel);
             ReleaseSRWLockExclusive(&lock);
         }
+        static wchar_t ttitle[TEXT_CAPACITY];
+        static NotifyPanelRow trows[NOTIFY_PANEL_ROWS];
+        if (tele_n) {
+            AcquireSRWLockExclusive(&lock);
+            tele_n = tele_visible();
+            shown_tele_id = tele_id;
+            memory_copy(ttitle, tele_title, sizeof(ttitle));
+            memory_copy(trows, tele_rows, sizeof(trows[0]) * tele_n);
+            ReleaseSRWLockExclusive(&lock);
+            tele = tele_n != 0;
+        }
         if (!gdi_ready() || FAILED(ID3D12Resource_Map(gpu.upload, 0, &none, &mapped)) ||
             !draw_cards(list, count, l, (unsigned char *)mapped, (int)gpu.upload_pitch) ||
             (panel && !draw_panel(title, rows, panel, l, (unsigned char *)mapped + (size_t)card_rows * gpu.upload_pitch,
-                                  (int)gpu.upload_pitch))) {
+                                  (int)gpu.upload_pitch, (int)panel_at_top)) ||
+            (tele && !draw_panel(ttitle, trows, tele_n, pl, (unsigned char *)mapped + (size_t)tele_rows_at * gpu.upload_pitch,
+                                 (int)gpu.upload_pitch, 2))) {
             if (mapped) ID3D12Resource_Unmap(gpu.upload, 0, NULL);
             fail("could not draw the cards");
             return;
@@ -913,6 +2368,8 @@ static void render(IDXGISwapChain *swapchain) {
         gpu.texture_ready = 1;
         gpu.drawn_count = count;
         gpu.drawn_panel_id = shown_panel_id;
+        gpu.drawn_tele_id = shown_tele_id;
+        gpu.drawn_tele_n = tele_n;
         for (unsigned i = 0; i < count; ++i) gpu.drawn_ids[i] = list[i].id;
     }
     ID3D12Resource *back = NULL;
@@ -936,10 +2393,29 @@ static void render(IDXGISwapChain *swapchain) {
         gpu.list, 0, ID3D12DescriptorHeap_GetGPUDescriptorHandleForHeapStart(gpu.srv_heap));
     ID3D12GraphicsCommandList_IASetPrimitiveTopology(gpu.list, D3D_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP);
     float shift = 0.0f; /* cards stand left of the key list panel while it is shown */
+    if (tele) {
+        float ph = (float)panel_pixels(pl, tele_n), a = 1.0f;
+        int tx, ty;
+        tele_place((int)tele_pos, l, count, (int)width, (int)height, pl->width, (int)ph, &tx, &ty);
+        if (l->style == NOTIFY_STYLE_CLASSIC) a = (float)tele_opacity / 100.0f; /* V7 looks: background only */
+        float x0 = (float)tx, y0 = (float)ty;
+        float c[12] = {x0 / width * 2.0f - 1.0f,
+                       1.0f - y0 / height * 2.0f,
+                       (x0 + pl->width) / width * 2.0f - 1.0f,
+                       1.0f - (y0 + ph) / height * 2.0f,
+                       0.0f,
+                       (float)tele_rows_at / gpu.tex_height,
+                       (float)pl->width / gpu.tex_width,
+                       ((float)tele_rows_at + ph) / gpu.tex_height,
+                       a, 0.0f, 0.0f, 0.0f};
+        ID3D12GraphicsCommandList_SetGraphicsRoot32BitConstants(gpu.list, 1, 12, c, 0);
+        ID3D12GraphicsCommandList_DrawInstanced(gpu.list, 4, 1, 0, 0);
+    }
     if (panel) {
         float ph = (float)panel_pixels(l, panel);
-        float x0 = (float)width - l->margin - l->width;
-        float y0 = ((float)height - ph) * 0.5f;
+        float open_slide, open_a = panel_open_alpha(now, &open_slide);
+        float x0 = (float)width - l->margin - l->width + open_slide * 36.0f * l->scale;
+        float y0 = panel_at_top == 1 ? (float)l->margin : ((float)height - ph) * 0.5f;
         if (y0 < (float)l->margin) y0 = (float)l->margin;
         float c[12] = {x0 / width * 2.0f - 1.0f,
                        1.0f - y0 / height * 2.0f,
@@ -947,25 +2423,25 @@ static void render(IDXGISwapChain *swapchain) {
                        1.0f - (y0 + ph) / height * 2.0f,
                        0.0f,
                        (float)card_rows / gpu.tex_height,
-                       1.0f,
+                       (float)l->width / gpu.tex_width,
                        ((float)card_rows + ph) / gpu.tex_height,
-                       1.0f, 0.0f, 0.0f, 0.0f};
+                       open_a, 0.0f, 0.0f, 0.0f};
         ID3D12GraphicsCommandList_SetGraphicsRoot32BitConstants(gpu.list, 1, 12, c, 0);
         ID3D12GraphicsCommandList_DrawInstanced(gpu.list, 4, 1, 0, 0);
-        shift = (float)(l->width + l->gap);
+        if (panel_at_top != 2) shift = (float)(l->width + l->gap);
     }
     float y = (float)l->margin;
     for (unsigned i = 0; i < count; ++i) {
         float slide;
         float a = card_alpha(now - list[i].shown, list[i].hold, &slide);
-        float x0 = (float)width - l->margin - l->width - shift + slide * 40.0f * l->height / 88.0f;
+        float x0 = (float)width - l->margin - l->width - shift + slide * 40.0f * l->scale;
         float c[12] = {x0 / width * 2.0f - 1.0f,
                        1.0f - y / height * 2.0f,
                        (x0 + l->width) / width * 2.0f - 1.0f,
                        1.0f - (y + l->height) / height * 2.0f,
                        0.0f,
                        (float)(i * l->height) / gpu.tex_height,
-                       1.0f,
+                       (float)l->width / gpu.tex_width,
                        (float)((i + 1) * l->height) / gpu.tex_height,
                        a, 0.0f, 0.0f, 0.0f};
         if (a > 0.0f) {
@@ -1065,7 +2541,13 @@ static void blend_block(unsigned char *frame, int frame_w, int frame_h, int x, i
         for (int col = 0; col < w; ++col) {
             int fx = x + col;
             if (fx < 0 || fx >= frame_w) continue;
-            for (int c = 0; c < 4; ++c) d[fx * 4 + c] = (unsigned char)((s[col * 4 + c] * scale) >> 8);
+            /* premultiplied "over": a card's transparent glow margin must not wipe out what is already
+               there (the glow of the card below lay over the bottom of the card above) */
+            unsigned sa = (s[col * 4 + 3] * scale) >> 8, keep = 255 - sa;
+            for (int c = 0; c < 4; ++c) {
+                unsigned v = ((s[col * 4 + c] * scale) >> 8) + (d[fx * 4 + c] * keep + 127) / 255;
+                d[fx * 4 + c] = (unsigned char)(v > 255 ? 255 : v);
+            }
         }
     }
 }
@@ -1088,8 +2570,9 @@ static DWORD WINAPI overlay_thread(void *unused) {
         return 0;
     }
     log_append("NOTIFY: in-game cards ready (window over the game picture).\r\n");
-    static unsigned char scratch_cards[1200 * 88 * 3 * 4 * 3]; /* up to 2.5x scale, see layout_for */
+    static unsigned char scratch_cards[1200 * 110 * 3 * 4 * 3]; /* up to 2.5x scale (with the glow), see layout_for */
     static unsigned char scratch_panel[1200 * 1200 * 4];
+    static unsigned char scratch_tele[1200 * 1200 * 4]; /* V7: telemetry has its own panel */
     unsigned char *frame = NULL;
     size_t frame_bytes = 0;
     HDC dc = gdi.CreateCompatibleDC(NULL);
@@ -1118,10 +2601,19 @@ static DWORD WINAPI overlay_thread(void *unused) {
             memory_copy(title, panel_title, sizeof(title));
             memory_copy(rows, panel_rows, sizeof(rows[0]) * panel);
         }
+        static wchar_t ttitle[TEXT_CAPACITY];
+        static NotifyPanelRow trows[NOTIFY_PANEL_ROWS];
+        unsigned tele_n = tele_visible(), shown_tele = tele_id;
+        if (tele_n) {
+            memory_copy(ttitle, tele_title, sizeof(ttitle));
+            memory_copy(trows, tele_rows, sizeof(trows[0]) * tele_n);
+        }
+        int dark = black_at(now);
         ReleaseSRWLockExclusive(&lock);
         HWND top = win.GetForegroundWindow();
         int focused = top && (top == game_window || win.GetAncestor(game_window, GA_ROOT) == top);
-        if ((!count && !panel) || !enabled || !focused || win.IsIconic(game_window)) {
+        if (!enabled) count = 0, panel = 0, tele_n = 0;
+        if ((!count && !panel && !tele_n && !dark) || !focused /* black shows even with cards off */ || win.IsIconic(game_window)) {
             if (visible) win.ShowWindow(window, SW_HIDE);
             visible = 0;
             continue;
@@ -1135,8 +2627,16 @@ static DWORD WINAPI overlay_thread(void *unused) {
         if ((size_t)l.width * l.height * MAX_CARDS * 4 > sizeof(scratch_cards) ||
             (size_t)l.width * l.panel_height * 4 > sizeof(scratch_panel))
             continue;
-        int want_w = l.margin + 2 * l.width + l.gap + (int)(40.0f * l.height / 88.0f) + 4;
-        if (want_w > screen_w) want_w = screen_w;
+        /* V7: the telemetry panel at its own size and place (left: the window spans the whole width) */
+        int tele = tele_n != 0;
+        Layout pl = l;
+        if (tele && tele_size != 100) {
+            pl = layout_for((UINT)((unsigned long long)screen_h * (unsigned)tele_size / 100u));
+            if ((size_t)pl.width * panel_pixels(&pl, tele_n) * 4 > sizeof(scratch_tele)) pl = l;
+        }
+        int want_w = l.margin + 2 * l.width + l.gap + (int)(40.0f * l.scale) + 4;
+        if (tele && (tele_pos >= NOTIFY_TELE_LEFT_TOP || pl.width + l.margin + 4 > want_w)) want_w = screen_w;
+        if (dark || want_w > screen_w) want_w = screen_w;
         if (want_w != frame_w || screen_h != frame_h) {
             if (bitmap) gdi.DeleteObject(bitmap);
             BITMAPINFO info;
@@ -1161,34 +2661,54 @@ static DWORD WINAPI overlay_thread(void *unused) {
             frame_bytes = (size_t)frame_w * frame_h * 4;
             drawn_count = (unsigned)-1;
         }
-        int redraw = drawn_screen != screen_h || drawn_count != count || drawn_panel != shown_panel;
+        static unsigned drawn_tele = (unsigned)-1, drawn_tele_n = (unsigned)-1;
+        int redraw = drawn_screen != screen_h || drawn_count != count || drawn_panel != shown_panel ||
+                     drawn_tele != shown_tele || drawn_tele_n != tele_n;
         for (unsigned i = 0; !redraw && i < count; ++i) redraw = drawn_ids[i] != list[i].id;
+        static ULONGLONG window_drawn_at;
+        if (!redraw && animating(count) && now - window_drawn_at >= ANIM_MS) redraw = 1;
+        if (redraw) window_drawn_at = now;
         if (redraw) {
             if (!draw_cards(list, count, &l, scratch_cards, l.width * 4) ||
-                (panel && !draw_panel(title, rows, panel, &l, scratch_panel, l.width * 4))) {
+                (panel && !draw_panel(title, rows, panel, &l, scratch_panel, l.width * 4, (int)panel_at_top)) ||
+                (tele && !draw_panel(ttitle, trows, tele_n, &pl, scratch_tele, pl.width * 4, 2))) {
                 fail("could not draw the cards");
                 break;
             }
             drawn_screen = screen_h;
             drawn_count = count;
             drawn_panel = shown_panel;
+            drawn_tele = shown_tele, drawn_tele_n = tele_n;
             for (unsigned i = 0; i < count; ++i) drawn_ids[i] = list[i].id;
         }
         memset(frame, 0, frame_bytes);
+        if (dark) { /* premultiplied black over the whole picture */
+            unsigned a = (unsigned)dark * 255u / 1000u;
+            if (a > 255u) a = 255u;
+            unsigned pixel = a << 24, *p = (unsigned *)frame;
+            for (size_t i = 0, n = (size_t)frame_w * frame_h; i < n; ++i) p[i] = pixel;
+        }
         int shift = 0;
+        if (tele) {
+            int ph = panel_pixels(&pl, tele_n), tx, ty;
+            tele_place((int)tele_pos, &l, count, frame_w, screen_h, pl.width, ph, &tx, &ty);
+            float a = l.style == NOTIFY_STYLE_CLASSIC ? (float)tele_opacity / 100.0f : 1.0f; /* V7 looks: background only */
+            blend_block(frame, frame_w, frame_h, tx, ty, scratch_tele, pl.width * 4, pl.width, ph, a);
+        }
         if (panel) {
             int ph = panel_pixels(&l, panel);
-            int y0 = (screen_h - ph) / 2;
+            int y0 = panel_at_top == 1 ? l.margin : (screen_h - ph) / 2;
             if (y0 < l.margin) y0 = l.margin;
-            blend_block(frame, frame_w, frame_h, frame_w - l.margin - l.width, y0, scratch_panel, l.width * 4, l.width,
-                        ph, 1.0f);
-            shift = l.width + l.gap;
+            float open_slide, open_a = panel_open_alpha(now, &open_slide);
+            int x0 = frame_w - l.margin - l.width + (int)(open_slide * 36.0f * l.scale);
+            blend_block(frame, frame_w, frame_h, x0, y0, scratch_panel, l.width * 4, l.width, ph, open_a);
+            if (panel_at_top != 2) shift = l.width + l.gap;
         }
         int y = l.margin;
         for (unsigned i = 0; i < count; ++i) {
             float slide;
             float a = card_alpha(now - list[i].shown, list[i].hold, &slide);
-            int x0 = frame_w - l.margin - l.width - shift + (int)(slide * 40.0f * l.height / 88.0f);
+            int x0 = frame_w - l.margin - l.width - shift + (int)(slide * 40.0f * l.scale);
             if (a > 0.0f)
                 blend_block(frame, frame_w, frame_h, x0, y, scratch_cards + (size_t)i * l.height * l.width * 4,
                             l.width * 4, l.width, l.height, a);
@@ -1320,7 +2840,7 @@ static void before_present(IDXGISwapChain *swapchain) {
         if (!first_present) first_present = now;
         if (now - first_present >= DEFER_MS) flush_pending();
     }
-    if (!enabled || broken || (!card_count && !panel_count) || swapchain != swapchain_seen) return;
+    if (!enabled || broken || (!card_count && !panel_count && !tele_count) || swapchain != swapchain_seen) return;
     __try {
         render(swapchain);
     } __except (EXCEPTION_EXECUTE_HANDLER) {
@@ -1565,6 +3085,19 @@ int notify_install_late(void) {
 }
 
 #ifdef FH2_TWEAKS_TEST
+__declspec(dllexport) int Fh2TestNotifyColorGet(void) {
+    return (int)color;
+}
+__declspec(dllexport) int Fh2TestNotifyStyleGet(void) {
+    return notify_style();
+}
+__declspec(dllexport) void Fh2TestNotifySetStyle(int style) {
+    notify_set_style(style);
+}
+__declspec(dllexport) void Fh2TestNotifyShow(const char *text, int tint, const char *badge) {
+    if (tint < 0) notify_show(text);
+    else notify_show_tinted(text, tint, badge, 0);
+}
 __declspec(dllexport) unsigned Fh2TestNotifyCount(void) {
     return card_count;
 }
@@ -1579,7 +3112,7 @@ __declspec(dllexport) int Fh2TestNotifyText(unsigned index, wchar_t *line1, wcha
 /* the card's fixed colour (-1 = from the settings) and its title line */
 __declspec(dllexport) int Fh2TestNotifyStyle(unsigned index, wchar_t *title) {
     if (index >= card_count) return -2;
-    memory_copy(title, cards[index].badge[0] ? cards[index].badge : L"GRIPLINE", sizeof(cards[index].badge));
+    memory_copy(title, cards[index].badge, sizeof(cards[index].badge));
     return cards[index].color;
 }
 
@@ -1599,6 +3132,17 @@ __declspec(dllexport) int Fh2TestNotifyDraw(unsigned height, unsigned char *pixe
     if (!pixels) return 1;
     if (!gdi_ready()) return 0;
     return draw_cards(cards, card_count, &l, pixels, pitch);
+}
+
+/* preview renders: every card as if it was shown `ms` ago */
+__declspec(dllexport) void Fh2TestNotifyAge(unsigned ms) {
+    ULONGLONG now = GetTickCount64();
+    for (unsigned i = 0; i < card_count; ++i) cards[i].shown = now > ms ? now - ms : 1;
+}
+
+/* preview renders: shows a panel from given rows (at_top 2 = telemetry) */
+__declspec(dllexport) void Fh2TestNotifyPanelShow(const wchar_t *title, const NotifyPanelRow *rows, unsigned count, int at_top) {
+    notify_panel_show(title, rows, count, at_top);
 }
 
 __declspec(dllexport) int Fh2TestNotifyPanelRow(unsigned index, wchar_t *label, wchar_t *keys) {
@@ -1622,6 +3166,6 @@ __declspec(dllexport) int Fh2TestNotifyPanelDraw(unsigned height, unsigned char 
     }
     if (!pixels) return 1;
     if (!gdi_ready()) return 0;
-    return draw_panel(panel_title, panel_rows, (unsigned)panel_count, &l, pixels, pitch);
+    return draw_panel(panel_title, panel_rows, (unsigned)panel_count, &l, pixels, pitch, (int)panel_at_top);
 }
 #endif

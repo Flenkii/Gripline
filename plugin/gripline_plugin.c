@@ -23,15 +23,25 @@
 #include "features/cockpit.h"
 #include "features/cockpit_view.h"
 #include "features/keyboard_pad.h"
+#include "features/key_menu.h"
 #include "features/mod_scan.h"
 #include "features/nitro_link.h"
 #include "features/notify.h"
 #include "features/report.h"
 #include "features/rig_settings.h"
 #include "features/traffic_files.h"
+#include "features/world_files.h"
+#include "features/telemetry.h"
+#include "features/logbook.h"
+#include "features/records.h"
 #include "features/game_language.h"
 #include "features/noclip.h"
+#include "features/walking.h"
+#include "features/no_damage.h"
 #include "features/version_check.h"
+#include "features/update_check.h"
+#include "features/ini_migrate.h"
+#include "features/cruise.h"
 
 void keyboard_pad_game_start(unsigned char *game_image, const wchar_t *settings_directory);
 void report_init(const wchar_t *settings_directory);
@@ -196,7 +206,8 @@ static void describe(unsigned row) {
 
 static int needs_restart(unsigned id) {
     return id == RIG_KEY_ENABLED || id == RIG_GRIP_STEERING || id == RIG_TRAFFIC_LEVEL ||
-           id == RIG_TRAFFIC_ALL_DAY || id == RIG_TRAFFIC_PRESET;
+           id == RIG_TRAFFIC_ALL_DAY || id == RIG_TRAFFIC_PRESET || id == RIG_GRIP_SPEED_CAMERAS ||
+           id == RIG_GRIP_CAR_LABELS || id == RIG_GRIP_EVENT_ICONS;
 }
 
 static int row_of(const char *key) {
@@ -438,6 +449,19 @@ static void noclip_install(void) {
     log_append("NOCLIP: car update hook ready - key Noclip (F6) offline, trip card in the pause menu.\r\n");
 }
 
+/* "Gripline V7 active" + "F5 keys, F6 noclip, F7 freecam, F8 menu" (short: the card is narrow) */
+static int start_card(char *out, unsigned size) {
+    static const char head[] = "Gripline " GRIPLINE_VERSION " active\n";
+    unsigned n = 0;
+    while (head[n] && n + 1 < size) {
+        out[n] = head[n];
+        ++n;
+    }
+    out[n] = 0;
+    if (n + 1 < size) keyboard_start_keys(out + n, size - n);
+    return 1;
+}
+
 /* the load guard put the traffic back to Original (traffic_files.c) */
 static int load_guard_card(char *out, unsigned size) {
     (void)out;
@@ -445,6 +469,17 @@ static int load_guard_card(char *out, unsigned size) {
     int de = game && game_language_is_german(game);
     notify_show_tinted(de ? "Verkehr auf Original gesetzt\nLetzter Start hing beim Laden"
                           : "Traffic set to Original\nLast start hung while loading",
+                       NOTIFY_COLOR_ORANGE, de ? "HINWEIS" : "NOTE", 1);
+    return 0;
+}
+
+/* Gripline.ini had lines that were skipped (settings.c) */
+static int ini_lines_card(char *out, unsigned size) {
+    (void)out;
+    (void)size;
+    int de = game && game_language_is_german(game);
+    notify_show_tinted(de ? "Gripline.ini: Zeile übersprungen\nRest geladen, Details in Gripline.log"
+                          : "Gripline.ini: line skipped\nRest loaded, details in Gripline.log",
                        NOTIFY_COLOR_ORANGE, de ? "HINWEIS" : "NOTE", 1);
     return 0;
 }
@@ -457,7 +492,12 @@ static void start_features(void) {
     log_start(directory, &options);
     log_set_directory(directory);
     log_append("GRIPLINE: plugin build - FH2 Mod Platform mod next to the official Extra Options.\r\n");
-    if (!read) {
+    if (!read && settings_ignored_lines()) {
+        log_append("GRIPLINE: Gripline.ini has lines that were not understood; they were skipped, all other "
+                   "settings are used (see the IGNORED line at the top).\r\n");
+        platform_log("Gripline.ini: some lines skipped, the rest loaded (see Gripline.log)");
+        notify_show_deferred_call(ini_lines_card);
+    } else if (!read) {
         log_append("GRIPLINE: Gripline.ini could not be read; defaults are used.\r\n");
         platform_log("Gripline.ini could not be read - defaults used (see Gripline.log)");
     }
@@ -468,24 +508,44 @@ static void start_features(void) {
     }
     traffic_tunables_start(game, &options);
     keyboard_pad_game_start(game, directory);
+    ini_migrate_log(); /* notes of the fork1-fork3 file migration (were never written to the log) */
     nitro_link_start(game);
     cockpit_view_start(game);
+    walking_start(game);
+    no_damage_bind(game);
+    no_damage_set_mode(options.no_damage);
     noclip_install();
     gripline_set_output_root(media_dir);
     traffic_files_start(mount_dir, options.traffic_level);
+    world_files_start(mount_dir, options.speed_cameras, options.car_labels, options.event_icons);
     cockpit_start(game, mount_dir, options.steering_animation, azimuth_rotation(), 10 /* linear */);
     notify_set_enabled(options.notifications);
+    notify_set_style(options.card_style);
+    notify_set_hidden_kinds(options.cards_hidden);
+    cruise_set_options(options.cruise_crash_off, options.cruise_min_speed);
+    cruise_set_slow_off(options.cruise_slow_off);
+    notify_set_telemetry_look(options.telemetry_pos, options.telemetry_opacity, options.telemetry_size);
     mod_scan_start(directory);
     version_check_start(game, directory);
+    update_check_start(game, options.update_check);
     report_init(directory);
     rig_settings_set_game(game);
     rig_settings_gripline(options.notifications, options.steering_animation, options.cockpit_view_forward,
                           options.cockpit_view_up, options.card_color);
+    telemetry_set_show(options.telemetry_show);
+    logbook_start(game, directory, mount_dir, options.news_seen);
+    records_start(game, directory);
+    rig_settings_world(options.speed_cameras, options.car_labels, options.telemetry, options.event_icons);
     rig_settings_start(directory);
     /* the platform may have loaded Gripline after Azimuth set up gamepads and swap chain */
     if (!keyboard_pad_late()) platform_log("keyboard: not active (off in FH2_Keyboard.ini, Mapper running, or no hook)");
     if (!notify_install_late()) platform_log("cards: could not hook the game picture");
-    notify_show_deferred("Gripline " GRIPLINE_VERSION " active\nKeyboard, cockpit 2 (V), keys (F5), noclip (F6)");
+    if (notify_kind_on(NOTIFY_KIND_START)) {
+        notify_show_deferred_call(start_card); /* the keys as bound now (the key menu can change them) */
+        /* own card "Press F8 to change your keys": only until this version's what's-new cards were seen,
+           later starts show just one card (the start card names F8 too) */
+        if (options.news_seen < GRIPLINE_NEWS_VERSION) notify_show_deferred_call(key_menu_start_card);
+    }
     InterlockedExchange(&started, 1);
     if (row_count) sync_rows();
     /* Extra Options mounts mods\Gripline\media; the game's steering angle follows once the files are there */
@@ -516,8 +576,9 @@ FH2MOD_EXPORT int fh2mod_init(const FH2ModApi *platform) {
     info.github_repo = "Flenkii/Gripline";
     info.platform_version = "2.7.4";
     info.check_updates = 0;
-    info.description = "Keyboard driving, 1:1 cockpit wheel, cockpit view 2, more traffic, nitro keys and noclip for "
-                       "Forza Horizon 2. Runs next to Extra Options and Azimuth's wheel. Settings: Pause > Settings > MODS.";
+    info.description = "Keyboard driving, 1:1 cockpit wheel, cockpit view 2, noclip, freecam, live telemetry and no damage "
+                       "for Forza Horizon 2. Gripline menu: F8. Runs next to Extra Options and Azimuth's wheel. "
+                       "Settings: Pause > Settings > MODS.";
     mod = api->register_mod(&info);
     if (!mod) return 1;
     if (!find_folders()) {
