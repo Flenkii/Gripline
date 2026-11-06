@@ -105,7 +105,8 @@ static int parse_value(const SettingDefinition *definition, const char *text, in
         return 1;
     }
     if (definition->type == SETTING_TRAFFIC_LEVEL || definition->type == SETTING_CARD_COLOR) {
-        if (text[0] >= '0' && text[0] <= '7' && !text[1]) {
+        char top = definition->type == SETTING_CARD_COLOR ? '8' : '7'; /* card colour 8 = rainbow (V7) */
+        if (text[0] >= '0' && text[0] <= top && !text[1]) {
             *value = text[0] - '0';
             return 1;
         }

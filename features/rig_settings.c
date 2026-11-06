@@ -246,9 +246,9 @@ const wchar_t *rig_density_choice(unsigned char *game_image, unsigned index) {
 }
 
 static const wchar_t *const color_german[NOTIFY_COLOR_COUNT] = {
-    L"Blau (Original)", L"Rot", L"Grün", L"Lila", L"Orange", L"Gelb", L"Pink", L"Weiß"};
+    L"Blau (Original)", L"Rot", L"Grün", L"Lila", L"Orange", L"Gelb", L"Pink", L"Weiß", L"Regenbogen"};
 static const wchar_t *const color_english[NOTIFY_COLOR_COUNT] = {
-    L"Blue (original)", L"Red", L"Green", L"Purple", L"Orange", L"Yellow", L"Pink", L"White"};
+    L"Blue (original)", L"Red", L"Green", L"Purple", L"Orange", L"Yellow", L"Pink", L"White", L"Rainbow"};
 
 const wchar_t *rig_color_choice(unsigned char *game_image, unsigned index) {
     if (index >= NOTIFY_COLOR_COUNT) return L"";

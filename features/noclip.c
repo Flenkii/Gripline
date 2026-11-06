@@ -380,7 +380,9 @@ static void card(const char *german, const char *english) {
 }
 
 static void tinted(const char *german, const char *english, int color) {
-    notify_show_tinted(game_language_is_german(game) ? german : english, color, NULL, 0);
+    int de = game_language_is_german(game);
+    /* locked online: always the red warning, whatever card colour is set (rainbow too) */
+    notify_show_tinted(de ? german : english, color, color == NOTIFY_COLOR_RED ? (de ? "GESPERRT" : "LOCKED") : NULL, 0);
 }
 
 static NoclipHookFn switch_hook;
@@ -420,7 +422,7 @@ static void handle_toggle(void) {
                 if (on) set_on(0);
                 log_append("NOCLIP: online session - noclip and freecam locked.\r\n");
                 tinted("Noclip/Freecam gesperrt\nOnline-Sitzung (FH2MP)", "Noclip/freecam locked\nOnline session (FH2MP)",
-                       NOTIFY_COLOR_ORANGE);
+                       NOTIFY_COLOR_RED);
             } else {
                 log_append("NOCLIP: offline again - noclip and freecam available.\r\n");
                 tinted("Noclip/Freecam wieder verf\xc3\xbcgbar\nOffline - Taste F6 / F7",
@@ -433,7 +435,7 @@ static void handle_toggle(void) {
         set_on(0);
         log_append("NOCLIP: online session - noclip / freecam off.\r\n");
         tinted("Noclip/Freecam gesperrt\nOnline-Sitzung (FH2MP)", "Noclip/freecam locked\nOnline session (FH2MP)",
-               NOTIFY_COLOR_ORANGE);
+               NOTIFY_COLOR_RED);
     }
     if (on == MODE_FREECAM && driver_wait && now >= driver_wait) {
         driver_wait = 0;
@@ -467,10 +469,10 @@ static void handle_toggle(void) {
         log_append("NOCLIP: refused - online session.\r\n");
         if (mode == MODE_FREECAM)
             tinted("Freecam gesperrt\nNur offline (nicht in FH2MP)", "Freecam locked\nOffline only (not in FH2MP)",
-                   NOTIFY_COLOR_ORANGE);
+                   NOTIFY_COLOR_RED);
         else
             tinted("Noclip gesperrt\nNur offline (nicht in FH2MP)", "Noclip locked\nOffline only (not in FH2MP)",
-                   NOTIFY_COLOR_ORANGE);
+                   NOTIFY_COLOR_RED);
         return;
     }
     set_on(mode);

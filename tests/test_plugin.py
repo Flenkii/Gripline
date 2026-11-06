@@ -139,8 +139,8 @@ check(seen['pages'] == [('Traffic', 'Gripline Traffic')], 'Traffic page with the
 check(any(r['kind'] == 0 for r in rows), 'on/off rows')
 check(any(r['restart'] for r in rows), 'restart rows marked')
 color = [r for r in rows if r['label'] == 'Gripline: Card Colour']
-check(len(color) == 1 and color[0]['min'] == 0 and color[0]['max'] == 7 and not color[0]['restart'] and
-      'Blue (original)' in color[0].get('description', 'Blue (original)'), 'card colour row 0..7, live: %r' % (color,))
+check(len(color) == 1 and color[0]['min'] == 0 and color[0]['max'] == 8 and not color[0]['restart'] and
+      'Blue (original)' in color[0].get('description', 'Blue (original)'), 'card colour row 0..8 (rainbow), live: %r' % (color,))
 for r in rows[:6]:
     print('     ', r['key'], r['label'], r['kind'], r['min'], r['max'])
 

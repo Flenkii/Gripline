@@ -20,7 +20,7 @@ enum {
     RIG_GRIP_STEERING,                   /* SteeringAnimation  0/1, next game start */
     RIG_GRIP_VIEW_FORWARD,               /* CockpitViewForward cm, second cockpit view */
     RIG_GRIP_VIEW_UP,                    /* CockpitViewUp      cm */
-    RIG_GRIP_CARD_COLOR,                 /* CardColor          0..7, notify.h NOTIFY_COLOR_* */
+    RIG_GRIP_CARD_COLOR,                 /* CardColor          0..8 (8 = rainbow), notify.h NOTIFY_COLOR_* */
     RIG_GRIP_SPEED_CAMERAS,              /* SpeedCameras       0/1, next game start (V7) */
     RIG_GRIP_CAR_LABELS,                 /* CarLabels          0/1, next game start (V7) */
     RIG_GRIP_EVENT_ICONS,                /* EventIcons         0/1, next game start (V7) */

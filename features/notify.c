@@ -45,7 +45,7 @@ static volatile LONG cards_changed;
 static volatile LONG enabled = 1, broken;
 
 /* card colours (NOTIFY_COLOR_*): bar, and the light tone of the logo and the GRIPLINE title; R, G, B */
-static const unsigned char palette[NOTIFY_COLOR_COUNT][2][3] = {
+static unsigned char palette[NOTIFY_COLOR_COUNT][2][3] = { /* [RAINBOW] is filled by rainbow_tick */
     {{38, 120, 225}, {110, 185, 255}},  /* blue (original) */
     {{215, 45, 45}, {255, 135, 130}},   /* red */
     {{40, 165, 70}, {125, 230, 145}},   /* green */
@@ -54,10 +54,11 @@ static const unsigned char palette[NOTIFY_COLOR_COUNT][2][3] = {
     {{225, 185, 20}, {255, 230, 110}},  /* yellow */
     {{225, 60, 150}, {255, 150, 205}},  /* pink */
     {{215, 220, 228}, {255, 255, 255}}, /* white */
+    {{38, 120, 225}, {110, 185, 255}},  /* rainbow (changes every frame) */
 };
 static volatile LONG color;
 /* Overdrive: second colour of the two-colour fade, per card colour (R, G, B) */
-static const unsigned char palette_second[NOTIFY_COLOR_COUNT][3] = {
+static unsigned char palette_second[NOTIFY_COLOR_COUNT][3] = {
     {150, 60, 235},  /* blue -> violet */
     {255, 120, 30},  /* red -> orange */
     {20, 190, 170},  /* green -> teal */
@@ -66,7 +67,36 @@ static const unsigned char palette_second[NOTIFY_COLOR_COUNT][3] = {
     {255, 135, 20},  /* yellow -> orange */
     {140, 70, 230},  /* pink -> purple */
     {140, 165, 205}, /* white -> steel blue */
+    {150, 60, 235},  /* rainbow: the next hue (rainbow_tick) */
 };
+
+/* V7 rainbow: hue runs once round in RAINBOW_MS, like an RGB keyboard; redrawn with every card frame */
+#define RAINBOW_MS 6000u
+static void hue_rgb(float hue, float sat, float val, unsigned char out[3]) {
+    hue -= (float)(int)hue; /* 0..1 */
+    float h6 = hue * 6.0f;
+    int sector = (int)h6;
+    float f = h6 - (float)sector, p = val * (1.0f - sat), q = val * (1.0f - sat * f), t = val * (1.0f - sat * (1.0f - f));
+    float r, g, b;
+    switch (sector % 6) {
+        case 0: r = val, g = t, b = p; break;
+        case 1: r = q, g = val, b = p; break;
+        case 2: r = p, g = val, b = t; break;
+        case 3: r = p, g = q, b = val; break;
+        case 4: r = t, g = p, b = val; break;
+        default: r = val, g = p, b = q; break;
+    }
+    out[0] = (unsigned char)(r * 255.0f + 0.5f), out[1] = (unsigned char)(g * 255.0f + 0.5f), out[2] = (unsigned char)(b * 255.0f + 0.5f);
+}
+static void rainbow_at(ULONGLONG now) {
+    float hue = (float)(now % RAINBOW_MS) / (float)RAINBOW_MS;
+    hue_rgb(hue, 0.85f, 0.88f, palette[NOTIFY_COLOR_RAINBOW][0]);
+    hue_rgb(hue, 0.45f, 1.0f, palette[NOTIFY_COLOR_RAINBOW][1]);
+    hue_rgb(hue + 0.12f, 0.85f, 0.92f, palette_second[NOTIFY_COLOR_RAINBOW]);
+}
+static void rainbow_tick(void) {
+    if (color == NOTIFY_COLOR_RAINBOW) rainbow_at(GetTickCount64());
+}
 static volatile LONG card_style = NOTIFY_STYLE_OVERDRIVE;
 
 static wchar_t panel_title[TEXT_CAPACITY];
@@ -466,6 +496,7 @@ static float lean_left(const Layout *l, int ch, float y) {
 
 /* 1 when white text would be hard to read on this card colour (yellow, white) */
 static int over_light_card(const unsigned char (*tone)[3]) {
+    if (tone == palette[NOTIFY_COLOR_RAINBOW]) return 0; /* white text the whole way round */
     const unsigned char *b = second_colour(tone);
     float lum = 0.299f * (tone[0][0] + b[0]) * 0.5f + 0.587f * (tone[0][1] + b[1]) * 0.5f +
                 0.114f * (tone[0][2] + b[2]) * 0.5f;
@@ -1791,6 +1822,7 @@ static int draw_panel_classic(const wchar_t *title, const NotifyPanelRow *rows, 
 
 
 static int draw_cards(const Card *list, unsigned count, const Layout *l, unsigned char *pixels, int pitch) {
+    rainbow_tick();
     return l->style == NOTIFY_STYLE_CLASSIC ? draw_cards_classic(list, count, l, pixels, pitch)
                                             : draw_cards_v7(list, count, l, pixels, pitch);
 }
@@ -2106,7 +2138,7 @@ static float card_alpha(ULONGLONG age, ULONGLONG hold, float *slide) {
    picture is drawn again about 30 times a second while one of them is up (not for Classic) */
 #define ANIM_MS 33
 static int animating(unsigned count) {
-    if (card_style == NOTIFY_STYLE_CLASSIC) return 0;
+    if (card_style == NOTIFY_STYLE_CLASSIC && color != NOTIFY_COLOR_RAINBOW) return 0;
     return count != 0 || (panel_count != 0 && panel_at_top == 1);
 }
 
