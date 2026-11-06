@@ -68,6 +68,7 @@ static int stepped;
 static volatile LONG distance_cm = -100, speed_x10, collision_ok;
 static float smooth_speed;
 static float eye[3];
+static float head[3]; /* the head sphere's centre (WALK_HEAD above the body, lower or aside under branches) */
 
 static _Alignas(16) unsigned char params_free[0x40], params_floor[0x40];
 static void *world;
@@ -75,6 +76,8 @@ static int world_tried; /* tests: no lookup */
 
 #define WALK_RADIUS 0.5f     /* the parameters' sphere; eye above its centre: */
 #define WALK_EYE 1.12f       /* about 1.62 m above the ground */
+#define WALK_HEAD 1.0f       /* a second sphere for the head this far above the body: the eye stays
+                                inside it, so it never goes into slanted trunks, branches or walls */
 #define WALK_SPEED 2.0f      /* m/s (7 km/h) */
 #define WALK_RUN 6.0f        /* m/s (22 km/h) */
 #define WALK_JUMP 4.2f       /* m/s up: about 0.9 m high */
@@ -317,6 +320,18 @@ static void step(float dt) {
                 slide(centre, up, 0, raised);
                 lifted = raised[1] - centre[1];
             }
+            if (world) {
+                /* the head first: where it is stopped (a slanted trunk, a branch, a roof edge) the body
+                   stops too. Under something low the head ducks. */
+                float body_top[3] = {raised[0], raised[1] + WALK_HEAD, raised[2]}, hf[3];
+                slide(raised, body_top, 0, hf);
+                if (hf[1] - raised[1] > 0.3f) {
+                    float ht[3] = {hf[0] + mx, hf[1], hf[2] + mz}, hd[3];
+                    slide(hf, ht, 0, hd);
+                    float hx = hd[0] - hf[0], hz = hd[2] - hf[2];
+                    if (hx * hx + hz * hz < mx * mx + mz * mz) mx = hx, mz = hz;
+                }
+            }
             float to[3] = {raised[0] + mx, raised[1], raised[2] + mz};
             slide(raised, to, 0, centre);
         }
@@ -401,7 +416,13 @@ static void step(float dt) {
         sin_cos(t > 1.5707963f ? 3.14159265f - t : t < -1.5707963f ? -3.14159265f - t : t, &s, &c);
         bob = s * (in.run ? 0.05f : 0.03f);
     }
-    eye[0] = centre[0], eye[1] = centre[1] + WALK_EYE + bob, eye[2] = centre[2];
+    if (world) { /* the eye inside the head sphere, under whatever is above */
+        float top[3] = {centre[0], centre[1] + WALK_HEAD, centre[2]};
+        slide(centre, top, 0, head);
+    } else {
+        head[0] = centre[0], head[1] = centre[1] + WALK_HEAD, head[2] = centre[2];
+    }
+    eye[0] = head[0], eye[1] = head[1] + (WALK_EYE - WALK_HEAD) + bob, eye[2] = head[2];
     hide_at[0] = centre[0], hide_at[1] = centre[1] - WALK_HIDE_BELOW, hide_at[2] = centre[2];
     float cx = centre[0] - car_place[0], cz = centre[2] - car_place[2];
     InterlockedExchange(&distance_cm, (LONG)(root(cx * cx + cz * cz) * 100.0f));
