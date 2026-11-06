@@ -534,7 +534,8 @@ static void tele_look_step(int action, int dir) {
         n = wcopy(line, n, 96, action == TELE_LOOK_OPACITY ? tr(L"Hintergrund ", L"background ") : tr(L"Größe ", L"size "));
         n = wcopy(line, n, 96, v);
     }
-    wcopy(line, n, 96, tr(L"\nZu sehen, wenn das Menü zu ist", L"\nShown once the menu is closed"));
+    if (pos < NOTIFY_TELE_LEFT_TOP) /* left: stays up next to the menu, so the change is seen at once */
+        wcopy(line, n, 96, tr(L"\nRechts: zu sehen, wenn das Menü zu ist", L"\nRight: shown once the menu is closed"));
     char text[192];
     unsigned t = 0;
     utf8(line, text, sizeof(text), &t);

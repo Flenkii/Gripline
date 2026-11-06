@@ -108,6 +108,16 @@ static volatile ULONGLONG panel_opened; /* V7 overhaul: when the menu panel came
 static volatile ULONGLONG panel_paged;  /* V7 overhaul: when the menu went to another page (short glide) */
 static volatile LONG panel_at_top; /* 1 key menu: top right instead of centred; 2 telemetry: centred, cards stay */
 static volatile LONG tele_pos = NOTIFY_TELE_RIGHT_MIDDLE, tele_opacity = 100, tele_size = 100; /* V7: telemetry look */
+/* V7: the telemetry panel has its own rows, so it can stay up next to the Gripline menu when it sits
+   on the left (Marvin: see what one changes live); on the right the menu covers it */
+static wchar_t tele_title[TEXT_CAPACITY];
+static NotifyPanelRow tele_rows[NOTIFY_PANEL_ROWS];
+static volatile LONG tele_count;
+static unsigned tele_id;
+static int draw_kind; /* panel_at_top of the panel being drawn (2 = telemetry) */
+static unsigned tele_visible(void) {
+    return tele_count && (panel_count == 0 || tele_pos >= NOTIFY_TELE_LEFT_TOP) ? (unsigned)tele_count : 0;
+}
 static unsigned panel_id; /* changes with every notify_panel_set: the panel is drawn again */
 
 /* ------------------------------------------------------------------ public */
@@ -316,26 +326,31 @@ void notify_panel_show(const wchar_t *title, const NotifyPanelRow *rows, unsigne
 /* A panel that gives way to the others (live telemetry): shown only while no other panel is up.
    owner = the id this function returned last time (0 at first). Returns the new id, 0 = not shown. */
 unsigned notify_panel_show_owned(const wchar_t *title, const NotifyPanelRow *rows, unsigned count, unsigned owner) {
-    AcquireSRWLockShared(&lock);
-    int free = panel_count == 0 || (owner && panel_id == owner);
-    ReleaseSRWLockShared(&lock);
-    if (!free) return 0;
-    notify_panel_show(title, rows, count, 2); /* centred right, the cards keep their place above it */
-    AcquireSRWLockShared(&lock);
-    unsigned id = (unsigned)panel_id;
-    ReleaseSRWLockShared(&lock);
+    (void)owner;
+    if (count > NOTIFY_PANEL_ROWS) count = NOTIFY_PANEL_ROWS;
+    if (!rows) count = 0;
+    AcquireSRWLockExclusive(&lock);
+    unsigned n = 0;
+    while (title && title[n] && n < TEXT_CAPACITY - 1) tele_title[n] = title[n], ++n;
+    tele_title[n] = 0;
+    for (unsigned i = 0; i < count; ++i) tele_rows[i] = rows[i];
+    if (!++tele_id) ++tele_id;
+    InterlockedExchange(&tele_count, (LONG)count);
+    InterlockedExchange(&cards_changed, 1);
+    unsigned id = tele_id;
+    ReleaseSRWLockExclusive(&lock);
     return id;
 }
 
 void notify_set_telemetry_look(int position, int opacity, int size) {
     if (position < 0 || position >= NOTIFY_TELE_POS_COUNT) position = NOTIFY_TELE_RIGHT_MIDDLE;
-    opacity = opacity < 20 ? 20 : opacity > 100 ? 100 : opacity;
+    opacity = opacity < 10 ? 10 : opacity > 100 ? 100 : opacity;
     size = size < 50 ? 50 : size > 200 ? 200 : size;
     InterlockedExchange(&tele_pos, position);
     InterlockedExchange(&tele_opacity, opacity);
     InterlockedExchange(&tele_size, size);
     AcquireSRWLockExclusive(&lock);
-    ++panel_id; /* drawn again */
+    ++panel_id, ++tele_id; /* drawn again */
     InterlockedExchange(&cards_changed, 1);
     ReleaseSRWLockExclusive(&lock);
 }
@@ -344,10 +359,12 @@ int notify_telemetry_opacity(void) { return (int)tele_opacity; }
 int notify_telemetry_size(void) { return (int)tele_size; }
 
 void notify_panel_clear_owned(unsigned owner) {
-    AcquireSRWLockShared(&lock);
-    int mine = owner && panel_id == owner && panel_count != 0;
-    ReleaseSRWLockShared(&lock);
-    if (mine) notify_panel_show(NULL, NULL, 0, 0);
+    (void)owner;
+    AcquireSRWLockExclusive(&lock);
+    InterlockedExchange(&tele_count, 0);
+    ++tele_id;
+    InterlockedExchange(&cards_changed, 1);
+    ReleaseSRWLockExclusive(&lock);
 }
 
 /* ------------------------------------------------------------------ GDI card bitmap */
@@ -1037,10 +1054,10 @@ static void paint_pill(unsigned char *px, int w, int x0, int y0, int pw, int ph,
 /* V7 overhaul: the Gripline menu (panel at the top) gets a taller header and roomier rows while it is
    short enough; the key list (F5) and the telemetry keep the compact rows */
 static int panel_roomy(const Layout *l, unsigned count) {
-    return l->style != NOTIFY_STYLE_CLASSIC && ((panel_at_top == 1 && count <= 24) || panel_at_top == 2);
+    return l->style != NOTIFY_STYLE_CLASSIC && ((draw_kind == 1 && count <= 24) || draw_kind == 2);
 }
 static int panel_header_px(const Layout *l, unsigned count) {
-    return panel_roomy(l, count) && panel_at_top == 1 ? (int)(76 * l->scale) : l->panel_header;
+    return panel_roomy(l, count) && draw_kind == 1 ? (int)(76 * l->scale) : l->panel_header;
 }
 static int panel_row_px(const Layout *l, unsigned count) {
     return panel_roomy(l, count) ? (int)(26 * l->scale) : l->panel_row;
@@ -1204,7 +1221,7 @@ static int draw_panel_v7(const wchar_t *title, const NotifyPanelRow *rows, unsig
     int w = l->width, h = panel_pixels(l, count), g = l->glow;
     int cw = w - 2 * g, ch = h - 2 * g;
     int header = panel_header_px(l, count), rh = panel_row_px(l, count), roomy = panel_roomy(l, count);
-    int menu = panel_at_top == 1;
+    int menu = draw_kind == 1;
     info.bmiHeader.biSize = sizeof(info.bmiHeader);
     info.bmiHeader.biWidth = w;
     info.bmiHeader.biHeight = -h;
@@ -1492,7 +1509,7 @@ static int draw_panel_v7(const wchar_t *title, const NotifyPanelRow *rows, unsig
     /* ---- pass 2: the text. V7 telemetry with a see-through background: what pass 1 painted is kept,
        so the finish can tell text (changed by pass 2) from background */
     unsigned char *base = NULL;
-    if (panel_at_top == 2 && tele_opacity < 100) {
+    if (draw_kind == 2 && tele_opacity < 100) {
         gdi.GdiFlush();
         base = (unsigned char *)HeapAlloc(GetProcessHeap(), 0, (SIZE_T)w * h * 4);
         if (base) memory_copy(base, px, (size_t)w * h * 4);
@@ -1886,7 +1903,8 @@ static int draw_cards(const Card *list, unsigned count, const Layout *l, unsigne
 }
 
 static int draw_panel(const wchar_t *title, const NotifyPanelRow *rows, unsigned count, const Layout *l,
-                      unsigned char *pixels, int pitch) {
+                      unsigned char *pixels, int pitch, int kind) {
+    draw_kind = kind;
     return l->style == NOTIFY_STYLE_CLASSIC ? draw_panel_classic(title, rows, count, l, pixels, pitch)
                                             : draw_panel_v7(title, rows, count, l, pixels, pitch);
 }
@@ -1919,7 +1937,7 @@ static struct {
     UINT upload_pitch;
     Layout layout;
     UINT screen_height;
-    unsigned drawn_ids[MAX_CARDS], drawn_count, drawn_panel_id;
+    unsigned drawn_ids[MAX_CARDS], drawn_count, drawn_panel_id, drawn_tele_id, drawn_tele_n;
     int texture_ready;
     ULONGLONG drawn_at;
 } gpu;
@@ -2216,8 +2234,9 @@ static void render(IDXGISwapChain *swapchain) {
     count = card_count;
     for (unsigned i = 0; i < count; ++i) list[i] = cards[i];
     unsigned panel = (unsigned)panel_count, shown_panel_id = panel_id;
+    unsigned tele_n = tele_visible(), shown_tele_id = tele_id;
     ReleaseSRWLockExclusive(&lock);
-    if ((!count && !panel) || !queue) return;
+    if ((!count && !panel && !tele_n) || !queue) return;
     if (!gpu_init()) {
         fail("D3D12 setup failed");
         return;
@@ -2247,7 +2266,7 @@ static void render(IDXGISwapChain *swapchain) {
     const Layout *l = &gpu.layout;
     int card_rows = l->height * MAX_CARDS;
     /* V7: the telemetry panel is drawn at its own size (sharp text, not stretched) */
-    int tele = panel && panel_at_top == 2;
+    int tele = tele_n != 0;
     static Layout tele_layout;
     static UINT tele_for_height;
     static int tele_for_size = -1, tele_for_style = -1;
@@ -2255,14 +2274,16 @@ static void render(IDXGISwapChain *swapchain) {
         tele_for_height = height, tele_for_size = (int)tele_size, tele_for_style = l->style;
         tele_layout = layout_for((UINT)((unsigned long long)height * (unsigned)tele_size / 100u));
     }
-    const Layout *pl = tele && tele_size != 100 ? &tele_layout : l;
+    const Layout *pl = tele_size != 100 ? &tele_layout : l;
     int tex_w = pl->width > l->width ? pl->width : l->width;
-    int tex_h = card_rows + (pl->panel_height > l->panel_height ? pl->panel_height : l->panel_height);
+    int tele_rows_at = card_rows + l->panel_height; /* texture: cards, then the menu panel, then telemetry */
+    int tex_h = tele_rows_at + pl->panel_height;
     if (!create_texture(tex_w, tex_h)) {
         fail("could not create the card texture");
         return;
     }
-    int redraw = !gpu.texture_ready || gpu.drawn_count != count || gpu.drawn_panel_id != shown_panel_id;
+    int redraw = !gpu.texture_ready || gpu.drawn_count != count || gpu.drawn_panel_id != shown_panel_id ||
+                 gpu.drawn_tele_id != shown_tele_id || gpu.drawn_tele_n != tele_n;
     for (unsigned i = 0; !redraw && i < count; ++i) redraw = gpu.drawn_ids[i] != list[i].id;
     if (!redraw && animating(count) && now - gpu.drawn_at >= ANIM_MS) redraw = 1;
     if (redraw) gpu.drawn_at = now;
@@ -2281,10 +2302,23 @@ static void render(IDXGISwapChain *swapchain) {
             memory_copy(rows, panel_rows, sizeof(rows[0]) * panel);
             ReleaseSRWLockExclusive(&lock);
         }
+        static wchar_t ttitle[TEXT_CAPACITY];
+        static NotifyPanelRow trows[NOTIFY_PANEL_ROWS];
+        if (tele_n) {
+            AcquireSRWLockExclusive(&lock);
+            tele_n = tele_visible();
+            shown_tele_id = tele_id;
+            memory_copy(ttitle, tele_title, sizeof(ttitle));
+            memory_copy(trows, tele_rows, sizeof(trows[0]) * tele_n);
+            ReleaseSRWLockExclusive(&lock);
+            tele = tele_n != 0;
+        }
         if (!gdi_ready() || FAILED(ID3D12Resource_Map(gpu.upload, 0, &none, &mapped)) ||
             !draw_cards(list, count, l, (unsigned char *)mapped, (int)gpu.upload_pitch) ||
-            (panel && !draw_panel(title, rows, panel, pl, (unsigned char *)mapped + (size_t)card_rows * gpu.upload_pitch,
-                                  (int)gpu.upload_pitch))) {
+            (panel && !draw_panel(title, rows, panel, l, (unsigned char *)mapped + (size_t)card_rows * gpu.upload_pitch,
+                                  (int)gpu.upload_pitch, (int)panel_at_top)) ||
+            (tele && !draw_panel(ttitle, trows, tele_n, pl, (unsigned char *)mapped + (size_t)tele_rows_at * gpu.upload_pitch,
+                                 (int)gpu.upload_pitch, 2))) {
             if (mapped) ID3D12Resource_Unmap(gpu.upload, 0, NULL);
             fail("could not draw the cards");
             return;
@@ -2313,6 +2347,8 @@ static void render(IDXGISwapChain *swapchain) {
         gpu.texture_ready = 1;
         gpu.drawn_count = count;
         gpu.drawn_panel_id = shown_panel_id;
+        gpu.drawn_tele_id = shown_tele_id;
+        gpu.drawn_tele_n = tele_n;
         for (unsigned i = 0; i < count; ++i) gpu.drawn_ids[i] = list[i].id;
     }
     ID3D12Resource *back = NULL;
@@ -2336,25 +2372,37 @@ static void render(IDXGISwapChain *swapchain) {
         gpu.list, 0, ID3D12DescriptorHeap_GetGPUDescriptorHandleForHeapStart(gpu.srv_heap));
     ID3D12GraphicsCommandList_IASetPrimitiveTopology(gpu.list, D3D_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP);
     float shift = 0.0f; /* cards stand left of the key list panel while it is shown */
-    if (panel) {
-        float ph = (float)panel_pixels(pl, panel);
-        float open_slide, open_a = panel_open_alpha(now, &open_slide);
-        float x0 = (float)width - l->margin - l->width + open_slide * 36.0f * l->scale;
-        float y0 = panel_at_top == 1 ? (float)l->margin : ((float)height - ph) * 0.5f;
-        if (y0 < (float)l->margin) y0 = (float)l->margin;
-        if (tele) {
-            int tx, ty;
-            tele_place((int)tele_pos, l, count, (int)width, (int)height, pl->width, (int)ph, &tx, &ty);
-            x0 = (float)tx, y0 = (float)ty;
-            if (l->style == NOTIFY_STYLE_CLASSIC) open_a *= (float)tele_opacity / 100.0f; /* V7 looks: background only */
-        }
+    if (tele) {
+        float ph = (float)panel_pixels(pl, tele_n), a = 1.0f;
+        int tx, ty;
+        tele_place((int)tele_pos, l, count, (int)width, (int)height, pl->width, (int)ph, &tx, &ty);
+        if (l->style == NOTIFY_STYLE_CLASSIC) a = (float)tele_opacity / 100.0f; /* V7 looks: background only */
+        float x0 = (float)tx, y0 = (float)ty;
         float c[12] = {x0 / width * 2.0f - 1.0f,
                        1.0f - y0 / height * 2.0f,
                        (x0 + pl->width) / width * 2.0f - 1.0f,
                        1.0f - (y0 + ph) / height * 2.0f,
                        0.0f,
-                       (float)card_rows / gpu.tex_height,
+                       (float)tele_rows_at / gpu.tex_height,
                        (float)pl->width / gpu.tex_width,
+                       ((float)tele_rows_at + ph) / gpu.tex_height,
+                       a, 0.0f, 0.0f, 0.0f};
+        ID3D12GraphicsCommandList_SetGraphicsRoot32BitConstants(gpu.list, 1, 12, c, 0);
+        ID3D12GraphicsCommandList_DrawInstanced(gpu.list, 4, 1, 0, 0);
+    }
+    if (panel) {
+        float ph = (float)panel_pixels(l, panel);
+        float open_slide, open_a = panel_open_alpha(now, &open_slide);
+        float x0 = (float)width - l->margin - l->width + open_slide * 36.0f * l->scale;
+        float y0 = panel_at_top == 1 ? (float)l->margin : ((float)height - ph) * 0.5f;
+        if (y0 < (float)l->margin) y0 = (float)l->margin;
+        float c[12] = {x0 / width * 2.0f - 1.0f,
+                       1.0f - y0 / height * 2.0f,
+                       (x0 + l->width) / width * 2.0f - 1.0f,
+                       1.0f - (y0 + ph) / height * 2.0f,
+                       0.0f,
+                       (float)card_rows / gpu.tex_height,
+                       (float)l->width / gpu.tex_width,
                        ((float)card_rows + ph) / gpu.tex_height,
                        open_a, 0.0f, 0.0f, 0.0f};
         ID3D12GraphicsCommandList_SetGraphicsRoot32BitConstants(gpu.list, 1, 12, c, 0);
@@ -2503,6 +2551,7 @@ static DWORD WINAPI overlay_thread(void *unused) {
     log_append("NOTIFY: in-game cards ready (window over the game picture).\r\n");
     static unsigned char scratch_cards[1200 * 110 * 3 * 4 * 3]; /* up to 2.5x scale (with the glow), see layout_for */
     static unsigned char scratch_panel[1200 * 1200 * 4];
+    static unsigned char scratch_tele[1200 * 1200 * 4]; /* V7: telemetry has its own panel */
     unsigned char *frame = NULL;
     size_t frame_bytes = 0;
     HDC dc = gdi.CreateCompatibleDC(NULL);
@@ -2531,10 +2580,17 @@ static DWORD WINAPI overlay_thread(void *unused) {
             memory_copy(title, panel_title, sizeof(title));
             memory_copy(rows, panel_rows, sizeof(rows[0]) * panel);
         }
+        static wchar_t ttitle[TEXT_CAPACITY];
+        static NotifyPanelRow trows[NOTIFY_PANEL_ROWS];
+        unsigned tele_n = tele_visible(), shown_tele = tele_id;
+        if (tele_n) {
+            memory_copy(ttitle, tele_title, sizeof(ttitle));
+            memory_copy(trows, tele_rows, sizeof(trows[0]) * tele_n);
+        }
         ReleaseSRWLockExclusive(&lock);
         HWND top = win.GetForegroundWindow();
         int focused = top && (top == game_window || win.GetAncestor(game_window, GA_ROOT) == top);
-        if ((!count && !panel) || !enabled || !focused || win.IsIconic(game_window)) {
+        if ((!count && !panel && !tele_n) || !enabled || !focused || win.IsIconic(game_window)) {
             if (visible) win.ShowWindow(window, SW_HIDE);
             visible = 0;
             continue;
@@ -2549,11 +2605,11 @@ static DWORD WINAPI overlay_thread(void *unused) {
             (size_t)l.width * l.panel_height * 4 > sizeof(scratch_panel))
             continue;
         /* V7: the telemetry panel at its own size and place (left: the window spans the whole width) */
-        int tele = panel && panel_at_top == 2;
+        int tele = tele_n != 0;
         Layout pl = l;
         if (tele && tele_size != 100) {
             pl = layout_for((UINT)((unsigned long long)screen_h * (unsigned)tele_size / 100u));
-            if ((size_t)pl.width * panel_pixels(&pl, panel) * 4 > sizeof(scratch_panel)) pl = l;
+            if ((size_t)pl.width * panel_pixels(&pl, tele_n) * 4 > sizeof(scratch_tele)) pl = l;
         }
         int want_w = l.margin + 2 * l.width + l.gap + (int)(40.0f * l.scale) + 4;
         if (tele && (tele_pos >= NOTIFY_TELE_LEFT_TOP || pl.width + l.margin + 4 > want_w)) want_w = screen_w;
@@ -2582,36 +2638,41 @@ static DWORD WINAPI overlay_thread(void *unused) {
             frame_bytes = (size_t)frame_w * frame_h * 4;
             drawn_count = (unsigned)-1;
         }
-        int redraw = drawn_screen != screen_h || drawn_count != count || drawn_panel != shown_panel;
+        static unsigned drawn_tele = (unsigned)-1, drawn_tele_n = (unsigned)-1;
+        int redraw = drawn_screen != screen_h || drawn_count != count || drawn_panel != shown_panel ||
+                     drawn_tele != shown_tele || drawn_tele_n != tele_n;
         for (unsigned i = 0; !redraw && i < count; ++i) redraw = drawn_ids[i] != list[i].id;
         static ULONGLONG window_drawn_at;
         if (!redraw && animating(count) && now - window_drawn_at >= ANIM_MS) redraw = 1;
         if (redraw) window_drawn_at = now;
         if (redraw) {
             if (!draw_cards(list, count, &l, scratch_cards, l.width * 4) ||
-                (panel && !draw_panel(title, rows, panel, tele ? &pl : &l, scratch_panel, (tele ? pl.width : l.width) * 4))) {
+                (panel && !draw_panel(title, rows, panel, &l, scratch_panel, l.width * 4, (int)panel_at_top)) ||
+                (tele && !draw_panel(ttitle, trows, tele_n, &pl, scratch_tele, pl.width * 4, 2))) {
                 fail("could not draw the cards");
                 break;
             }
             drawn_screen = screen_h;
             drawn_count = count;
             drawn_panel = shown_panel;
+            drawn_tele = shown_tele, drawn_tele_n = tele_n;
             for (unsigned i = 0; i < count; ++i) drawn_ids[i] = list[i].id;
         }
         memset(frame, 0, frame_bytes);
         int shift = 0;
+        if (tele) {
+            int ph = panel_pixels(&pl, tele_n), tx, ty;
+            tele_place((int)tele_pos, &l, count, frame_w, screen_h, pl.width, ph, &tx, &ty);
+            float a = l.style == NOTIFY_STYLE_CLASSIC ? (float)tele_opacity / 100.0f : 1.0f; /* V7 looks: background only */
+            blend_block(frame, frame_w, frame_h, tx, ty, scratch_tele, pl.width * 4, pl.width, ph, a);
+        }
         if (panel) {
-            const Layout *use = tele ? &pl : &l;
-            int ph = panel_pixels(use, panel);
+            int ph = panel_pixels(&l, panel);
             int y0 = panel_at_top == 1 ? l.margin : (screen_h - ph) / 2;
             if (y0 < l.margin) y0 = l.margin;
             float open_slide, open_a = panel_open_alpha(now, &open_slide);
             int x0 = frame_w - l.margin - l.width + (int)(open_slide * 36.0f * l.scale);
-            if (tele) {
-                tele_place((int)tele_pos, &l, count, frame_w, screen_h, pl.width, ph, &x0, &y0);
-                if (l.style == NOTIFY_STYLE_CLASSIC) open_a *= (float)tele_opacity / 100.0f; /* V7 looks: background only */
-            }
-            blend_block(frame, frame_w, frame_h, x0, y0, scratch_panel, use->width * 4, use->width, ph, open_a);
+            blend_block(frame, frame_w, frame_h, x0, y0, scratch_panel, l.width * 4, l.width, ph, open_a);
             if (panel_at_top != 2) shift = l.width + l.gap;
         }
         int y = l.margin;
@@ -2750,7 +2811,7 @@ static void before_present(IDXGISwapChain *swapchain) {
         if (!first_present) first_present = now;
         if (now - first_present >= DEFER_MS) flush_pending();
     }
-    if (!enabled || broken || (!card_count && !panel_count) || swapchain != swapchain_seen) return;
+    if (!enabled || broken || (!card_count && !panel_count && !tele_count) || swapchain != swapchain_seen) return;
     __try {
         render(swapchain);
     } __except (EXCEPTION_EXECUTE_HANDLER) {
@@ -3076,6 +3137,6 @@ __declspec(dllexport) int Fh2TestNotifyPanelDraw(unsigned height, unsigned char 
     }
     if (!pixels) return 1;
     if (!gdi_ready()) return 0;
-    return draw_panel(panel_title, panel_rows, (unsigned)panel_count, &l, pixels, pitch);
+    return draw_panel(panel_title, panel_rows, (unsigned)panel_count, &l, pixels, pitch, (int)panel_at_top);
 }
 #endif
