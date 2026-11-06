@@ -3,9 +3,9 @@
 **Keyboard driving, cockpit and traffic for Forza Horizon 2 on PC** (Xbox One version on the **Azimuth** wrapper).
 Works offline and online with [FH2MP](https://github.com/Charelene/FH2MP).
 
-**[⬇ Download the latest version](../../releases/latest)** · current version: **V6.5**
+**[⬇ Download the latest version](../../releases/latest)** · current version: **V7 – The Big Update**
 
-**[Join the Gripline Discord](https://discord.gg/g83eBcrq)** · problems, questions, ideas for V7 and showcase. Join to always stay up to date with every new version.
+**[Join the Gripline Discord](https://discord.gg/g83eBcrq)** · problems, questions, ideas for V8 and showcase. Join to always stay up to date with every new version.
 
 Gripline is an add-on next to Azimuth, the official [Extra Options](https://github.com/RokkuDayo/ForzaHorizon2_ExtraOptions)
 by RokkuDayo and FH2MP. It is one file, `fh2-mods\Gripline.dll`, a [FH2 Mod Platform](https://github.com/Trinculo54/fh2-mod-platform)
@@ -21,6 +21,17 @@ mod. Since V6 Gripline only does what the others don't:
 | **Key list** | **F5** shows all your key bindings at the right of the picture; F5 again hides it. |
 | **Noclip** *(V6.4)* | **F6** lets your car fly through the map: through walls, the ground and buildings. W/S fly forward/back, A/D turn, Space/Left Ctrl up/down, Left Shift held = 4x faster; the arrow keys still move the camera. A card says on/off and shows speed and height while flying (mph/ft or km/h/m, like the game's speedometer). Offline only: a card says when it is locked in an online session and available again offline (like nitro). |
 | **Cards** | Small Gripline cards at the top right of the picture (also in fullscreen). Can be switched off; colour selectable (*Gripline: Card Colour*: blue, red, green, purple, orange, yellow, pink, white). V6.4 cards: every setting changed in the menu ("Traffic: Preset – Much More Traffic"), a trip summary in the pause menu (distance, top speed, driving time of the session; miles/mph when the game is set to mph), wheel connected (green) / disconnected (red, WARNING), and a start check when Azimuth, Extra Options and FH2MP do not fit together (e.g. FH2MP needs an update for a new Azimuth; red, WARNING). Warning cards are always red with WARNING in the title (also "Nitro off" online, with the reason), noclip locked is orange, "Nitro on again" and noclip available again are green; all other cards use the chosen colour. |
+| **Gripline menu** *(V7)* | **F8** (controller: hold **LS + D-pad right**) opens the Gripline menu in the game: change, add or reset keys, traffic, cards, card design, steering animation, cockpit view 2, live telemetry, cruise control, world options, no damage, problem report. Arrows/Enter/Esc or D-pad/A/B. |
+| **Walking** *(V7)* | **F** (controller: hold **LS + Y**) gets you out of the car: walk on foot, invisible, with collision (trees, walls, buildings). WASD walk, arrows look, Shift run, Space jump (controller: sticks, RT run, A jump). The car stays parked; **F** / **Y** near the car gets you back in. Fade to black with car door sounds. Offline only. |
+| **Freecam** *(V7)* | **F7** (controller: hold **LS + D-pad down**) flies a free camera through the world, keys like noclip. Offline only. Noclip is now also on the controller (**LS + D-pad up**). |
+| **Cruise control** *(V7)* | **K** (controller: hold **LS + D-pad left**) holds your speed. Off with K, braking or a crash; options in F8. |
+| **Live telemetry** *(V7)* | Panel with speed, grip/drift angle, g-forces, 0-100 km/h (0-60 mph), quarter mile, 0-200, braking distance, top speed; position, size and opacity selectable; optional CSV recording (`Gripline_Telemetry`). |
+| **Logbook & records** *(V7)* | Distance per car, driving time, top 5 cars, milestone cards (`Gripline_Logbook.txt`); best times kept for ever with a NEW RECORD card (`Gripline_Records.txt`). |
+| **No damage on cars** *(V7)* | Visible damage off for other cars (Drivatars, traffic) or all cars. Physics unchanged. |
+| **World** *(V7)* | Speed cameras off, names over cars off, event icons on the road off (F8, after a restart). |
+| **Card designs** *(V7)* | Classic, Enhanced and Overdrive; colours incl. black and rainbow; each card group can be hidden (presets All / Few / Warnings only). |
+| **Update notice** *(V7)* | At start Gripline asks GitHub once for the latest release and shows an orange card when a newer version is out. Nothing else is sent; switch it off in F8 › Settings. |
+| **Mouse steering** *(V7, experimental)* | Steer with the mouse (off by default, F8). |
 | **Azimuth Mapper check** | While Azimuth Mapper (by bigdamnhero6) runs, Gripline's keyboard stays off and a card says so. |
 | **Problem report** | *Gripline: Create Problem Report* packs logs and settings into `Gripline_Report.zip` next to `azimuth.exe`. Nothing is sent anywhere. |
 
@@ -104,6 +115,10 @@ itself when it cannot hook the game, and makes them new when the game's car file
 | V | Cockpit view 2 | F5 | Key list |
 | F6 | Noclip on/off (offline) | Space / Left Ctrl | Noclip: up / down |
 | Left Shift (held) | Noclip: faster | W / S, A / D | Noclip: fly, turn |
+| F7 | Freecam on/off (offline) | F8 | Gripline menu |
+| F | Get out / walk, back in near the car (offline) | K | Cruise control |
+
+Controller (hold the left stick, LS): LS + D-pad right = Gripline menu, up = noclip, down = freecam, left = cruise control, LS + Y = get out (Y near the car = back in).
 
 ## Reporting problems
 GitHub: [**Issues → New issue**](../../issues/new/choose). Pause › Settings › MODS › *Gripline: Create Problem Report*,
@@ -117,6 +132,9 @@ Wheel problems belong to Azimuth (report them there without mods).
 - Online, traffic comes from the session and nitro and noclip are off.
 - Noclip only flies the car (its physics is held still); while it is on, the car can still make collision sounds or take visual damage inside walls. Switching it off drops the car where it is.
 - The steering animation turns as far as the rotation in the Azimuth launcher (900° when none is set).
+- Walking: about 45 m away from the car, Gripline hides the car under you so the ground keeps its collision; the camera can then sit a little higher. Max. 2 km from the car. Door sounds use the Windows volume, not the game's.
+- Walking and the fade to black are tested in windowed mode; exclusive fullscreen is not tested yet.
+- Mouse steering is experimental.
 
 ## Credits
 - **[RokkuDayo](https://github.com/RokkuDayo)** – [Extra Options](https://github.com/RokkuDayo/ForzaHorizon2_ExtraOptions) (GPL-3.0); Gripline's code started as a fork of it
@@ -126,6 +144,8 @@ Wheel problems belong to Azimuth (report them there without mods).
 - **Claude (Anthropic)** – wrote most of the code together with Flenkii
 - **Lancaster** (Discord) – testing and ideas
 - A YouTube viewer – idea for cockpit view 2
+- **MRAlexis99**, Midnight and the Discord community – ideas for V7 (no damage, telemetry, world options, mouse steering)
+- seveN and a YouTube viewer – bug reports (V6.4.1, V6.5)
 - **[Sounds From The Lab](https://soundsfromthelab.com)** – car door sounds for walking (royalty-free, "Car Door Opening And Closing Slamming Shut")
 - Works well with: **[NitroSystem](https://github.com/qiangqiang101/NitroSystem)** by qiangqiang101, **Azimuth Mapper** by bigdamnhero6
 
