@@ -3,7 +3,7 @@
 **Keyboard driving, cockpit and traffic for Forza Horizon 2 on PC** (Xbox One version on the **Azimuth** wrapper).
 Works offline and online with [FH2MP](https://github.com/Charelene/FH2MP).
 
-**[⬇ Download the latest version](../../releases/latest)** · current version: **V6.4.1**
+**[⬇ Download the latest version](../../releases/latest)** · current version: **V6.5**
 
 **[Join the Gripline Discord](https://discord.gg/g83eBcrq)** · problems, questions, ideas for V7 and showcase. Join to always stay up to date with every new version.
 
@@ -83,7 +83,7 @@ Gripline never changes the game's own files. It only writes its own copies into 
 (cockpit animations, traffic data), and Extra Options loads that folder over the game's files. If you remove or
 switch off only `Gripline.dll`, those copies are still loaded without Gripline - the cockpit then looks wrong
 (hands missing, wheel or driver gone at full lock). Delete the folder `mods\Gripline` as well and everything is
-original again; Gripline makes the files new at its next start. From V7 Gripline also removes its cockpit files by
+original again; Gripline makes the files new at its next start. From V6.5 Gripline also removes its cockpit files by
 itself when it cannot hook the game, and makes them new when the game's car files change.
 
 ## Keyboard bindings (default, editable in `FH2_Keyboard.ini`)

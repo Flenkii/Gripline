@@ -1,5 +1,5 @@
-GRIPLINE V6.4.1 – keyboard, cockpit & traffic for Forza Horizon 2 (Azimuth)
-=========================================================================
+GRIPLINE V6.5 – keyboard, cockpit & traffic for Forza Horizon 2 (Azimuth)
+=======================================================================
 An add-on next to Azimuth, the official Extra Options and FH2MP.
 
 Source code: https://github.com/Flenkii/Gripline
@@ -47,8 +47,18 @@ Azimuth (its launcher): wheel, pedals, buttons, rotation and force feedback.
 Extra Options: weather, time of day, hiding the HUD (F1), autodrive (F2).
 
 
-3. NEW IN V6.4.1
-----------------
+3. NEW IN V6.5 (bug fix)
+------------------------
+  - Fix: hands missing / glitching or the cockpit gone in some cars. Gripline now removes
+    its own cockpit files by itself when it cannot hook the game or could not make them,
+    and makes them new after a game update, a car mod or new cars.
+  - Fix: on slow PCs (first start) the cockpit files could be ready only after the game
+    had started without Gripline's cockpit hook.
+  - Gripline never changes the game files. Uninstall = delete fh2-mods\Gripline.dll AND
+    the folder mods\Gripline (see section 1).
+
+NEW IN V6.4.1
+-------------
   - Fix: a start with more traffic could hang on the loading screen. If that happens,
     Gripline sets the traffic back to Original at the next start and shows a card.
   - Fix: "Original" traffic now really is original (old traffic files are removed).
