@@ -521,6 +521,7 @@ static void start_features(void) {
     notify_set_style(options.card_style);
     notify_set_hidden_kinds(options.cards_hidden);
     cruise_set_options(options.cruise_crash_off, options.cruise_min_speed);
+    cruise_set_slow_off(options.cruise_slow_off);
     notify_set_telemetry_look(options.telemetry_pos, options.telemetry_opacity, options.telemetry_size);
     mod_scan_start(directory);
     version_check_start(game, directory);

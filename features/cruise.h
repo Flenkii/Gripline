@@ -24,6 +24,9 @@ int cruise_active(void);
 #define CRUISE_MIN_DEFAULT 20
 void cruise_set_options(int switch_off_on_crash, int min_speed_kmh);
 int cruise_crash_off(void);
+/* CruiseSlowOff 0/1: off when almost stopped (default 1); 0 keeps pushing, whatever happens (braking still ends it) */
+void cruise_set_slow_off(int on);
+int cruise_slow_off(void);
 int cruise_min_speed(void);
 void cruise_off(void);
 

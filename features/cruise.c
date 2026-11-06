@@ -24,6 +24,14 @@ static volatile LONG active, want_card; /* want_card: 1 on, 2 off, 3 off by brak
 static float target, integral, last_speed, speed_now, smooth_accel, since_on;
 /* settings (F8 > Tempomat, Gripline.ini CruiseCrashOff / CruiseMinSpeed) */
 static volatile LONG crash_off = 1, min_kmh = CRUISE_MIN_DEFAULT;
+static volatile LONG slow_off = 1; /* CruiseSlowOff 0: never switches off for being slow, keeps giving throttle (Marvin 06.11.) */
+
+void cruise_set_slow_off(int on) {
+    InterlockedExchange(&slow_off, on ? 1 : 0);
+}
+int cruise_slow_off(void) {
+    return (int)slow_off;
+}
 
 void cruise_set_options(int switch_off_on_crash, int min_speed_kmh) {
     InterlockedExchange(&crash_off, switch_off_on_crash ? 1 : 0);
@@ -98,7 +106,7 @@ void cruise_sample(float dt, const float v[3], const float f[3]) {
         return;
     }
     since_on += dt;
-    if (along < STOP_SPEED) {
+    if (slow_off && along < STOP_SPEED) {
         stop(6);
         return;
     }
@@ -265,6 +273,9 @@ __declspec(dllexport) int Fh2TestCruiseStep(void) {
 /* the controller state: RT (gas) and LT (brake) in, RT out */
 __declspec(dllexport) void Fh2TestCruiseOptions(int crash, int min_speed_kmh) {
     cruise_set_options(crash, min_speed_kmh);
+}
+__declspec(dllexport) void Fh2TestCruiseSlowOff(int on) {
+    cruise_set_slow_off(on);
 }
 __declspec(dllexport) int Fh2TestCruisePad(int rt, int lt) {
     unsigned char pad[12] = {0};

@@ -72,5 +72,18 @@ sample(30.0, frames=30)
 step(); e.call('Fh2TestCruiseToggle')
 check(step() == 0, 'Taste nochmal: aus')
 
+# CruiseSlowOff=0: almost stopped (stuck at a wall) keeps it on, full throttle
+e.call('Fh2TestCruiseSlowOff', 0)
+sample(30.0, frames=30)
+e.call('Fh2TestCruiseToggle'); step()
+v = 30.0
+for _ in range(240):
+    v = max(1.0, v - 0.2)
+    sample(v)
+check(step() == 1 and pad(0) == 255, f'Langsam-Abschaltung aus: bleibt an bei 4 km/h, Vollgas ({pad(0)})')
+pad(0, 200)
+check(step() == 0, 'Bremse schaltet trotzdem aus')
+e.call('Fh2TestCruiseSlowOff', 1)
+
 print(f'\n{checks[0]} checks, {len(fails)} failed')
 sys.exit(1 if fails else 0)

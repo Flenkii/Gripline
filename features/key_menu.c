@@ -696,6 +696,7 @@ static void build_page(wchar_t *title) {
         case LEVEL_CRUISE: {
             wcopy(title, 0, 64, tr(L"Tempomat", L"Cruise control"));
             row_add(tr(L"Bei Aufprall ausschalten", L"Switch off on a crash"), cruise_crash_off() ? tr(L"An", L"On") : tr(L"Aus", L"Off"), 0, 0);
+            row_add(tr(L"Aus, wenn fast stehen geblieben", L"Switch off when almost stopped"), cruise_slow_off() ? tr(L"An", L"On") : tr(L"Aus", L"Off"), 0, 1);
             row_add(tr(L"Einschalten ab", L"Switch on from"), L"", NOTIFY_ROW_SECTION, -1);
             int now = cruise_min_speed();
             for (int i = 0; i < CRUISE_CHOICES; ++i) {
@@ -1236,6 +1237,22 @@ static void choose(void) {
             }
             break;
         case LEVEL_CRUISE: {
+            if (action == 1) {
+                int on = !cruise_slow_off();
+                cruise_set_slow_off(on);
+                int ok = save_gripline_digit("CruiseSlowOff", on);
+                const char *de = on ? "Tempomat: aus, wenn fast stehen geblieben" : "Tempomat: gibt immer Gas, auch langsam";
+                const char *en = on ? "Cruise control: off when almost stopped" : "Cruise control: keeps the throttle, even slow";
+                char text[192];
+                unsigned t = 0;
+                const char *a = m.german ? de : en, *b = ok ? (m.german ? "\nGespeichert" : "\nSaved") : (m.german ? "\nNicht gespeichert" : "\nNot saved");
+                while (*a && t < sizeof(text) - 1) text[t++] = *a++;
+                while (*b && t < sizeof(text) - 1) text[t++] = *b++;
+                text[t] = 0;
+                notify_show(text);
+                log_append_value("KEYMENU: cruise control off when almost stopped ", on);
+                break;
+            }
             int crash = cruise_crash_off(), speed = cruise_min_speed();
             if (action == 0) crash = !crash;
             else if (action >= CRUISE_FIRST && action < CRUISE_FIRST + CRUISE_CHOICES) speed = cruise_speeds[action - CRUISE_FIRST];
