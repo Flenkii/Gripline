@@ -6,7 +6,7 @@
 #include <windows.h>
 
 /* Gripline: an FH2 Mod Platform mod (fh2-mods\Gripline.dll) next to the official Extra Options. */
-#define GRIPLINE_VERSION "V7 Test"
+#define GRIPLINE_VERSION "V7"
 /* this build as a release number: the update notice compares it with the newest GitHub release */
 #define GRIPLINE_RELEASE_MAJOR 7
 #define GRIPLINE_RELEASE_MINOR 0
