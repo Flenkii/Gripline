@@ -90,6 +90,8 @@ static int world_tried; /* tests: no lookup */
 #define WALK_SNAP 0.3f     /* stays on the ground going down up to this per step */
 #define WALK_HOVER 0.01f   /* the sphere rests this far above the floor */
 #define WALK_RECOVER 1.5f  /* sunk into the floor: looked for again from this far above */
+#define WALK_RECOVER_MAX 0.6f /* the floor found again lifts the walker at most this much */
+#define WALK_PROBE 25.0f   /* looks this far down for a floor (less than WALK_HIDE_BELOW: not the car) */
 #define WALK_NO_FLOOR 4.0f /* metres of falling without any floor: no collision loaded there */
 
 int walking_ready(void) {
@@ -331,7 +333,11 @@ static void step(float dt) {
         if (!hit && dy < 0.0f) {
             /* nothing below: maybe the sphere sank into the floor - look again from above the head */
             float top[3] = {centre[0], centre[1] + WALK_RECOVER, centre[2]}, again[3];
-            if (slide(top, to, 1, again) && again[1] > to[1]) {
+            /* only a floor just above the sphere counts: next to a tree trunk or a wall the sphere
+               from above stops at once (on the trunk), which lifted the walker up into the air
+               (Marvin 06.11.2026) */
+            if (slide(top, to, 1, again) && again[1] > to[1] && again[1] < top[1] - 0.05f &&
+                again[1] <= centre[1] + WALK_RECOVER_MAX) {
                 hit = 1;
                 end[0] = again[0], end[1] = again[1], end[2] = again[2];
                 if (!recovered_logged) {
@@ -347,13 +353,22 @@ static void step(float dt) {
             last_ground = end[1];
             no_floor = 0;
         } else if (no_floor && end[1] < last_ground) {
-            end[1] = last_ground, fall = 0.0f, grounded = 1; /* still no floor here: stay level */
+            float below[3] = {end[0], end[1] - WALK_PROBE, end[2]}, ground[3];
+            if (slide(end, below, 1, ground) && ground[1] < end[1]) {
+                end[0] = ground[0], end[1] = ground[1] + WALK_HOVER, end[2] = ground[2]; /* a floor below again */
+                fall = 0.0f, grounded = 1, no_floor = 0, last_ground = end[1];
+            } else {
+                end[1] = last_ground, fall = 0.0f, grounded = 1; /* still no floor here: stay level */
+            }
         } else {
             grounded = 0;
             if (hit) fall = 0.0f; /* the head hit a ceiling */
         }
         centre[0] = end[0], centre[1] = end[1], centre[2] = end[2];
-        if (!grounded && fall < 0.0f && centre[1] < last_ground - WALK_NO_FLOOR) {
+        float probe_to[3] = {centre[0], centre[1] - WALK_PROBE, centre[2]}, probe[3];
+        if (!grounded && fall < 0.0f && centre[1] < last_ground - WALK_NO_FLOOR &&
+            !(slide(centre, probe_to, 1, probe) && probe[1] < centre[1])) {
+            /* (a floor farther down, e.g. after a jump from high up: just fall on) */
             /* fell several metres without any floor: the game has no collision loaded here. Walk on at
                the last floor height instead of falling through the world. */
             centre[1] = last_ground, fall = 0.0f, grounded = 1;
