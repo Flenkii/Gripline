@@ -89,7 +89,7 @@ static const wchar_t *const group_driving[] = {L"Throttle", L"Brake", L"SteerLef
 static const wchar_t *const group_camera[] = {L"Camera", L"LookBack", L"LookLeft", L"LookRight", L"CockpitView",
                                               L"ArrowUp", L"ArrowDown", L"ArrowLeft", L"ArrowRight", NULL};
 static const wchar_t *const group_gripline[] = {L"Nitro", L"Noclip", L"NoclipUp", L"NoclipDown", L"NoclipFast",
-                                                L"Freecam", L"Keybinds", L"KeyMenu", L"CruiseControl", NULL};
+                                                L"Freecam", L"Keybinds", L"KeyMenu", L"CruiseControl", L"Walk", NULL};
 static const wchar_t *const group_menu[] = {L"Pause", L"Confirm", L"Back", L"ButtonX", L"ButtonY", L"TabLeft",
                                             L"TabRight", L"DpadUp", L"DpadDown", L"DpadLeft", L"DpadRight", NULL};
 static const struct {

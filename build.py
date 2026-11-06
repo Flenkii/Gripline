@@ -38,6 +38,7 @@ PLUGIN_SOURCES = [
     "features/cockpit_view.c",
     "features/nitro_link.c",
     "features/noclip.c",
+    "features/walking.c",
     "features/no_damage.c",
     "features/trip.c",
     "features/wheel_watch.c",

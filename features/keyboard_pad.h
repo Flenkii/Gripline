@@ -51,6 +51,7 @@ enum {
     KEYBOARD_HOLD_LOOK_LEFT,
     KEYBOARD_HOLD_LOOK_RIGHT,
     KEYBOARD_HOLD_CRUISE, /* CruiseControl (on/off), cruise.c */
+    KEYBOARD_HOLD_WALK,   /* Walk (out of / into the car), walking.h */
     KEYBOARD_HOLD_COUNT
 };
 int keyboard_held(unsigned which);

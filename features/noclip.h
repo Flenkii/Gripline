@@ -32,7 +32,7 @@ void noclip_start(unsigned char *game_image, void *original_update, NoclipHookFn
 /* Detour for the car update (self, dt, frame dt, frame). */
 void noclip_car_update(void *car, float dt, float frame_dt, unsigned frame);
 
-enum { MODE_NOCLIP = 1, MODE_FREECAM = 2 };
+enum { MODE_NOCLIP = 1, MODE_FREECAM = 2, MODE_WALK = 3 /* walking.h */ };
 #define FREECAM_AHEAD 3.5f /* metres in front of the steering wheel: past the bumper of a long car */
 
 /* Controller (cockpit_view.c's controller hook, every reading of a gamepad, not of a wheel;
@@ -45,5 +45,7 @@ void noclip_pad_input(unsigned user, unsigned char *gamepad);
 int noclip_active(void);
 /* 1 while freecam is on (cockpit_view.c moves the camera, keyboard_pad.c keeps the arrows). */
 int noclip_freecam_active(void);
+/* 1 while freecam or walking is on: they look with the arrows / right stick themselves. */
+int noclip_own_look(void);
 
 #endif

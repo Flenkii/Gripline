@@ -36,6 +36,7 @@
 #include "features/records.h"
 #include "features/game_language.h"
 #include "features/noclip.h"
+#include "features/walking.h"
 #include "features/no_damage.h"
 #include "features/version_check.h"
 #include "features/update_check.h"
@@ -510,6 +511,7 @@ static void start_features(void) {
     ini_migrate_log(); /* notes of the fork1-fork3 file migration (were never written to the log) */
     nitro_link_start(game);
     cockpit_view_start(game);
+    walking_start(game);
     no_damage_bind(game);
     no_damage_set_mode(options.no_damage);
     noclip_install();

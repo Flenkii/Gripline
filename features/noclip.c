@@ -28,6 +28,7 @@
 #include "no_damage.h"
 #include "traffic_files.h"
 #include "wheel_buttons.h"
+#include "walking.h"
 
 #define RVA_DYNAMICS_VTABLE 0x2eb4bb8u
 #define RVA_DYNAMICS_REF_VTABLE 0x2eb5e18u
@@ -68,8 +69,8 @@ typedef void (*SetStateFn)(void *, const BodyState *);
 
 static unsigned char *game;
 static CarUpdateFn original;
-static volatile LONG on; /* 0, MODE_NOCLIP or MODE_FREECAM */
-static int key_held, free_key_held, warned;
+static volatile LONG on; /* 0, MODE_NOCLIP, MODE_FREECAM or MODE_WALK */
+static int key_held, free_key_held, walk_key_held, warned;
 static ULONGLONG next_online_check;
 static int online, online_known;
 
@@ -101,14 +102,21 @@ int noclip_freecam_active(void) {
     return on == MODE_FREECAM;
 }
 
+int noclip_own_look(void) {
+    return on == MODE_FREECAM || on == MODE_WALK;
+}
+
 /* ------------------------------------------------------------------ controller */
 
 /* XINPUT_GAMEPAD bits */
 #define XI_DPAD_UP 0x0001u
 #define XI_DPAD_DOWN 0x0002u
 #define XI_DPAD_LEFT 0x0004u
+#define XI_START 0x0010u
+#define XI_BACK 0x0020u
 #define XI_LS 0x0040u
 #define XI_A 0x1000u
+#define XI_Y 0x8000u
 #define PAD_FRESH_MS 250u
 #define STICK_DEAD 0.24f
 #define TRIGGER_DEAD 0.12f
@@ -116,7 +124,7 @@ int noclip_freecam_active(void) {
 /* the last reading of each controller (game input thread), used in the car update */
 static volatile struct {
     float lx, ly, rx, ry, lt, rt;
-    LONG fast;
+    LONG fast, jump;
     LONG64 tick;
 } pads[4];
 static unsigned short pad_buttons[4];
@@ -148,12 +156,13 @@ void noclip_pad_input(unsigned user, unsigned char *gamepad) {
     unsigned short pressed = (unsigned short)(buttons & ~pad_buttons[user]);
     pad_buttons[user] = buttons;
     if (buttons & XI_LS) {
-        /* LS held + D-pad up = noclip, + D-pad down = freecam, + D-pad left = cruise control (V7);
+        /* LS held + D-pad up = noclip, + D-pad down = freecam, + D-pad left = cruise control (V7), + Y = walking;
            the D-pad press stays away from the game */
         if (pressed & XI_DPAD_UP) InterlockedExchange(&pad_request, MODE_NOCLIP);
         if (pressed & XI_DPAD_DOWN) InterlockedExchange(&pad_request, MODE_FREECAM);
         if (pressed & XI_DPAD_LEFT) cruise_request_toggle();
-        buttons &= (unsigned short)~(XI_DPAD_UP | XI_DPAD_DOWN | XI_DPAD_LEFT);
+        if (pressed & XI_Y) InterlockedExchange(&pad_request, MODE_WALK); /* LS + Y: get out (V7 test) */
+        buttons &= (unsigned short)~(XI_DPAD_UP | XI_DPAD_DOWN | XI_DPAD_LEFT | XI_Y);
         memory_copy(gamepad, &buttons, sizeof(buttons));
     }
     { /* cruise control: its throttle on the layout's throttle trigger (LT = byte 2, RT = byte 3) */
@@ -164,17 +173,25 @@ void noclip_pad_input(unsigned user, unsigned char *gamepad) {
     pads[user].rx = stick(axes[2]), pads[user].ry = stick(axes[3]);
     pads[user].lt = trigger(gamepad[2]), pads[user].rt = trigger(gamepad[3]);
     pads[user].fast = (buttons & XI_A) != 0;
+    pads[user].jump = (buttons & XI_A) != 0;
     pads[user].tick = (LONG64)GetTickCount64();
     if (on == MODE_FREECAM) { /* the right stick looks for the freecam, not for the game's camera */
         short zero[2] = {0, 0};
         memory_copy(gamepad + 8, zero, sizeof(zero));
+    }
+    if (on == MODE_WALK) {
+        /* on foot: Y gets back in; the game only keeps Start and Back (pause, map), the car stands */
+        if (pressed & XI_Y) InterlockedExchange(&pad_request, MODE_WALK);
+        unsigned short keep = (unsigned short)(buttons & (XI_START | XI_BACK));
+        memory_copy(gamepad, &keep, sizeof(keep));
+        for (unsigned i = 2; i < 12; ++i) gamepad[i] = 0; /* triggers and sticks */
     }
 }
 
 /* all controllers read lately: the strongest of each axis */
 typedef struct {
     float lx, ly, rx, ry, lt, rt;
-    int fast;
+    int fast, jump;
 } PadAxes;
 
 static float stronger(float a, float b) {
@@ -191,6 +208,7 @@ static PadAxes pad_axes(void) {
         p.rx = stronger(p.rx, pads[i].rx), p.ry = stronger(p.ry, pads[i].ry);
         p.lt = stronger(p.lt, pads[i].lt), p.rt = stronger(p.rt, pads[i].rt);
         p.fast |= pads[i].fast != 0;
+        p.jump |= pads[i].jump != 0;
     }
     return p;
 }
@@ -283,7 +301,7 @@ static int begin(void *dynamics) {
     if (!heading_from(f, r)) return 0;
     pos[0] = p[0], pos[1] = p[1] + 0.5f, pos[2] = p[2]; /* a little off the road */
     pitch = 0.0f, pitch_sin = 0.0f, pitch_cos = 1.0f;
-    if (on == MODE_FREECAM) {
+    if (on == MODE_FREECAM || on == MODE_WALK) {
         parked = state;
         parked.velocity = _mm_setzero_ps();
         parked.spin = _mm_setzero_ps();
@@ -292,6 +310,7 @@ static int begin(void *dynamics) {
         float ahead = FREE_WHEEL_AHEAD + FREECAM_AHEAD;
         cam[0] = pos[0] + dir[0] * ahead, cam[1] = pos[1] + FREE_WHEEL_UP, cam[2] = pos[2] + dir[1] * ahead;
     }
+    if (on == MODE_WALK) walking_enter(p, r, f); /* the walker gets out next to the parked car */
     body = dynamics;
     return 1;
 }
@@ -375,6 +394,19 @@ static void fly_free(float dt) {
     for (unsigned i = 0; i < 3; ++i) pos[i] = cam[i] - f[i] * behind - u[i] * FREE_WHEEL_UP;
 }
 
+/* walking.c: one step's input. Keys: Throttle/Brake forward/back, SteerLeft/SteerRight sideways,
+   arrows look, NoclipFast (LShift) runs, NoclipUp (Space) jumps. Controller: left stick walks, right
+   stick looks, RT runs, A jumps. */
+void noclip_walk_input(WalkInput *in) {
+    PadAxes pad = pad_axes();
+    in->yaw = limit1((float)(keyboard_held(KEYBOARD_HOLD_LOOK_LEFT) - keyboard_held(KEYBOARD_HOLD_LOOK_RIGHT)) - pad.rx);
+    in->pitch = limit1((float)(keyboard_held(KEYBOARD_HOLD_LOOK_UP) - keyboard_held(KEYBOARD_HOLD_LOOK_DOWN)) + pad.ry);
+    in->ahead = limit1((float)(keyboard_held(KEYBOARD_HOLD_FORWARD) - keyboard_held(KEYBOARD_HOLD_BACK)) + pad.ly);
+    in->side = limit1((float)(keyboard_held(KEYBOARD_HOLD_RIGHT) - keyboard_held(KEYBOARD_HOLD_LEFT)) + pad.lx);
+    in->run = keyboard_held(KEYBOARD_HOLD_FAST) || pad.rt > 0.5f;
+    in->jump = keyboard_held(KEYBOARD_HOLD_UP) || pad.jump;
+}
+
 static void card(const char *german, const char *english) {
     notify_show(game_language_is_german(game) ? german : english);
 }
@@ -386,6 +418,20 @@ static void tinted(const char *german, const char *english, int color) {
 }
 
 static NoclipHookFn switch_hook;
+
+static void put_int_card(char *out, size_t *n, int value) {
+    char digits[12];
+    unsigned d = 0, v = value < 0 ? (unsigned)-value : (unsigned)value;
+    do digits[d++] = (char)('0' + v % 10); while ((v /= 10) && d < sizeof(digits));
+    if (value < 0) out[(*n)++] = '-';
+    while (d) out[(*n)++] = digits[--d];
+    out[*n] = 0;
+}
+
+static void put_text_card(char *out, size_t *n, const char *text) {
+    while (*text) out[(*n)++] = *text++;
+    out[*n] = 0;
+}
 
 static int hooked;
 
@@ -406,8 +452,35 @@ static void set_on(LONG value) {
         driver_wait = GetTickCount64() + FREE_DRIVER_WAIT_MS;
         cockpit_view_want_driver(1); /* the freecam is the driver camera, moved out of the car */
     }
+    if (value == MODE_WALK) {
+        parked_body = NULL;
+        InterlockedExchange64(&park_until, 0);
+    }
     body = NULL;
     InterlockedExchange(&on, value);
+    walking_set_active(value == MODE_WALK);
+}
+
+/* walking: the walk key / controller Y near the car gets back in */
+static void walk_key(void) {
+    float distance = walking_car_distance();
+    if (distance >= 0.0f && distance <= WALK_ENTER_DISTANCE) {
+        set_on(0);
+        log_append("NOCLIP: walking off - back in the car.\r\n");
+        card("Eingestiegen", "Back in the car");
+        return;
+    }
+    char de[96], en[96];
+    size_t n = 0, m = 0;
+    int metres = distance < 0.0f ? 0 : (int)(distance + 0.5f);
+    de[0] = en[0] = 0;
+    put_text_card(de, &n, "Zu weit vom Auto weg (");
+    put_int_card(de, &n, metres);
+    put_text_card(de, &n, " m)\nGeh n\xc3\xa4her ran zum Einsteigen (F6/F7 = sofort zur\xc3\xbc""ck)");
+    put_text_card(en, &m, "Too far from the car (");
+    put_int_card(en, &m, metres);
+    put_text_card(en, &m, " m)\nWalk closer to get in (F6/F7 = back at once)");
+    card(de, en);
 }
 
 static void handle_toggle(void) {
@@ -421,8 +494,8 @@ static void handle_toggle(void) {
             if (online) {
                 if (on) set_on(0);
                 log_append("NOCLIP: online session - noclip and freecam locked.\r\n");
-                tinted("Noclip/Freecam gesperrt\nOnline-Sitzung (FH2MP)", "Noclip/freecam locked\nOnline session (FH2MP)",
-                       NOTIFY_COLOR_RED);
+                tinted("Noclip/Freecam/Walking gesperrt\nOnline-Sitzung (FH2MP)",
+                       "Noclip/freecam/walking locked\nOnline session (FH2MP)", NOTIFY_COLOR_RED);
             } else {
                 log_append("NOCLIP: offline again - noclip and freecam available.\r\n");
                 tinted("Noclip/Freecam wieder verf\xc3\xbcgbar\nOffline - Taste F6 / F7",
@@ -446,13 +519,25 @@ static void handle_toggle(void) {
         }
     }
     int held = keyboard_held(KEYBOARD_HOLD_NOCLIP), free_held = keyboard_held(KEYBOARD_HOLD_FREECAM);
-    int pressed = held && !key_held, free_pressed = free_held && !free_key_held;
-    key_held = held, free_key_held = free_held;
-    LONG request = InterlockedExchange(&pad_request, 0); /* controller: LS + D-pad up / down */
+    int walk_held = keyboard_held(KEYBOARD_HOLD_WALK);
+    int pressed = held && !key_held, free_pressed = free_held && !free_key_held, walk_pressed = walk_held && !walk_key_held;
+    key_held = held, free_key_held = free_held, walk_key_held = walk_held;
+    LONG request = InterlockedExchange(&pad_request, 0); /* controller: LS + D-pad up / down / right, Y */
     if (request == MODE_NOCLIP) pressed = 1;
     if (request == MODE_FREECAM) free_pressed = 1;
-    if (!pressed && !free_pressed) return;
-    LONG mode = pressed ? MODE_NOCLIP : MODE_FREECAM;
+    if (request == MODE_WALK) walk_pressed = 1;
+    if (!pressed && !free_pressed && !walk_pressed) return;
+    LONG mode = pressed ? MODE_NOCLIP : free_pressed ? MODE_FREECAM : MODE_WALK;
+    if (on == MODE_WALK && mode == MODE_WALK) {
+        walk_key();
+        return;
+    }
+    if (on == MODE_WALK) { /* F6 / F7 while walking: back in the car at once */
+        set_on(0);
+        log_append("NOCLIP: walking off (noclip/freecam key) - back in the car.\r\n");
+        card("Walking aus\nZur\xc3\xbc""ck im Auto", "Walking off\nBack in the car");
+        return;
+    }
     if (on) { /* either key ends what is on */
         LONG was = on;
         set_on(0);
@@ -465,9 +550,17 @@ static void handle_toggle(void) {
         log_append("NOCLIP: not now - the game is in a menu or loading.\r\n");
         return;
     }
+    if (mode == MODE_WALK && !walking_ready()) {
+        log_append("NOCLIP: walking not ready (see WALKING above).\r\n");
+        card("Walking geht nicht\nSpiel-Code anders (Gripline.log)", "Walking not working\nGame code differs (Gripline.log)");
+        return;
+    }
     if (online) {
         log_append("NOCLIP: refused - online session.\r\n");
-        if (mode == MODE_FREECAM)
+        if (mode == MODE_WALK)
+            tinted("Walking gesperrt\nNur offline (nicht in FH2MP)", "Walking locked\nOffline only (not in FH2MP)",
+                   NOTIFY_COLOR_RED);
+        else if (mode == MODE_FREECAM)
             tinted("Freecam gesperrt\nNur offline (nicht in FH2MP)", "Freecam locked\nOffline only (not in FH2MP)",
                    NOTIFY_COLOR_RED);
         else
@@ -478,7 +571,13 @@ static void handle_toggle(void) {
     set_on(mode);
     if (!on) return;
     info_from = GetTickCount64() + INFO_DELAY_MS;
-    if (mode == MODE_FREECAM) {
+    if (mode == MODE_WALK) {
+        log_append("NOCLIP: walking on (out of the car)\r\n");
+        card("Ausgestiegen - Walking an\nWASD/linker Stick laufen, Pfeile/rechter Stick schauen, Shift/RT rennen, "
+             "Leertaste/A springen, F/Y einsteigen",
+             "Out of the car - walking on\nWASD/left stick walk, arrows/right stick look, Shift/RT run, Space/A jump, "
+             "F/Y get in");
+    } else if (mode == MODE_FREECAM) {
         log_append("NOCLIP: freecam on\r\n");
         card("Freecam an\nPfeile/rechter Stick schauen, WASD/linker Stick fliegen, Leertaste/Strg/RT/LT hoch/runter",
              "Freecam on\nArrows/right stick look, WASD/left stick fly, Space/Ctrl/RT/LT up/down");
@@ -521,7 +620,13 @@ void noclip_car_update(void *car, float dt, float frame_dt, unsigned frame) {
     void *dynamics = NULL;
     int local = game && car && is_local_car(car);
     if (local) traffic_load_reached(dt); /* the start reached the road (load guard, traffic_files.c) */
-    if (on && local) {
+    void *park = NULL;
+    if (on == MODE_WALK && local) {
+        /* on foot: the car stands where it was; the walker is moved in the camera (walking.c) */
+        void *walk_body = car_body(car);
+        if (walk_body && walk_body != body && !begin(walk_body)) walk_body = NULL;
+        if (walk_body && walk_body == parked_body) park = walk_body, put_back(park);
+    } else if (on && local) {
         dynamics = car_body(car);
         if (dynamics && dynamics != body && !begin(dynamics)) dynamics = NULL;
         if (!dynamics && !warned) {
@@ -535,7 +640,6 @@ void noclip_car_update(void *car, float dt, float frame_dt, unsigned frame) {
             place(dynamics); /* the update starts from the flown place ... */
         }
     }
-    void *park = NULL;
     if (!on && local && park_until) {
         if (GetTickCount64() < (ULONGLONG)park_until && parked_body && parked_body == car_body(car)) {
             park = parked_body;
@@ -574,6 +678,31 @@ static void put_text(char *out, size_t *n, const char *text) {
 static ULONGLONG units_next;
 static int imperial;
 
+static void walk_info(ULONGLONG now) {
+    int de = game_language_is_german(game);
+    if (now >= units_next) {
+        units_next = now + 3000;
+        imperial = game_units_imperial(game);
+    }
+    int kmh = walking_speed_kmh();
+    float distance = walking_car_distance();
+    char text[128];
+    size_t n = 0;
+    text[0] = 0;
+    put_text(text, &n, de ? "Zu Fu\xc3\x9f - " : "On foot - ");
+    put_int(text, &n, imperial ? (int)(kmh / 1.609344f + 0.5f) : kmh);
+    put_text(text, &n, imperial ? " mph\n" : " km/h\n");
+    if (distance >= 0.0f && distance <= WALK_ENTER_DISTANCE) {
+        put_text(text, &n, de ? "Einsteigen: F / Y" : "Get in: F / Y");
+    } else if (distance >= 0.0f) {
+        put_text(text, &n, de ? "Auto: " : "Car: ");
+        put_int(text, &n, (int)(imperial ? distance * 3.28084f + 0.5f : distance + 0.5f));
+        put_text(text, &n, imperial ? " ft" : " m");
+    }
+    if (!walking_has_collision()) put_text(text, &n, de ? " (ohne Kollision)" : " (no collision)");
+    if (notify_kind_on(NOTIFY_KIND_LIVE)) notify_show_live(text, INFO_TAG, 1000);
+}
+
 static void info_step(ULONGLONG now) {
     if (!on || !body) {
         info_have = 0;
@@ -581,6 +710,10 @@ static void info_step(ULONGLONG now) {
     }
     if (now < info_from || now < info_next) return;
     info_next = now + INFO_EVERY_MS;
+    if (on == MODE_WALK) {
+        walk_info(now);
+        return;
+    }
     int free = on == MODE_FREECAM;
     float p[3] = {free ? cam[0] : pos[0], free ? cam[1] : pos[1], free ? cam[2] : pos[2]};
     int kmh = 0;
@@ -649,6 +782,11 @@ __declspec(dllexport) int Fh2TestNoclipFly(unsigned char *game_image, void *dyna
     fly((float)dt_ms / 1000.0f);
     place(dynamics);
     return 1;
+}
+/* sets the mode directly (tests/test_walking.py) */
+__declspec(dllexport) void Fh2TestNoclipMode(int mode) {
+    on = mode;
+    walking_set_active(mode == MODE_WALK);
 }
 /* one controller reading (XINPUT_GAMEPAD, 12 bytes) as the game's controller hook gives it */
 __declspec(dllexport) unsigned Fh2TestNoclipPad(unsigned user, unsigned char *gamepad) {

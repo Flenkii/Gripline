@@ -109,7 +109,7 @@ def binding(index, k=0):
 
 LEVEL_CLOSED, LEVEL_GROUPS, LEVEL_LIST, LEVEL_BINDING, LEVEL_CAPTURE = 0, 1, 2, 3, 4
 
-check(e.call('Fh2TestKeyMenuCover') == 44, 'jede der 44 Tasten steht genau einmal im Menue')
+check(e.call('Fh2TestKeyMenuCover') == 45, 'jede der 45 Tasten steht genau einmal im Menue')
 check(tick() == LEVEL_CLOSED and panel() == 0, 'Menue anfangs zu')
 card = e.alloc(256)
 ok = e.call('Fh2TestKeyMenuStartCard', card, 256)

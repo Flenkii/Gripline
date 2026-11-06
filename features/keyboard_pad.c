@@ -144,6 +144,7 @@ static Binding bindings[] = {
     {L"Freecam", KIND_NOCLIP, 0, L"F7", {0}},
     {L"KeyMenu", KIND_MENU, 0, L"F8", {0}},
     {L"CruiseControl", KIND_NOCLIP, 0, L"K", {0}}, /* cruise.c reads it through keyboard_held */
+    {L"Walk", KIND_NOCLIP, 0, L"F", {0}},          /* walking.h: out of / into the car (V7 test) */
 };
 
 static const struct {
@@ -255,7 +256,9 @@ static const char default_ini[] =
     ";   NoclipUp/NoclipDown up/down, NoclipFast held = faster.\r\n"
     "; KeyMenu: Gripline menu to change these keys in the game (arrows, Enter, Esc/Backspace = back).\r\n"
     ";   It saves its changes into this file.\r\n"
-    "; CruiseControl: keeps the speed of the moment, again/brake = off (controller: LS + D-pad left; settings: F8).\r\n";
+    "; CruiseControl: keeps the speed of the moment, again/brake = off (controller: LS + D-pad left; settings: F8).\r\n"
+    "; Walk: get out and walk (offline only, controller: LS + Y), again near the car = get in (or Y).\r\n"
+    ";   Throttle/Brake/SteerLeft/SteerRight walk, arrow keys look, NoclipFast runs, NoclipUp jumps.\r\n";
 
 /* Default file text including the key bindings (also used by ini_migrate.c). Returns the
    length, 0 if it does not fit. */
@@ -299,7 +302,7 @@ static const wchar_t *const labels_german[ARRAY_COUNT(bindings)] = {
     L"Menü/Kamera hoch", L"Menü/Kamera runter", L"Menü/Kamera links", L"Menü/Kamera rechts",
     L"Steuerkreuz hoch", L"Steuerkreuz runter", L"Steuerkreuz links", L"Steuerkreuz rechts",
     L"Noclip ein/aus", L"Noclip: steigen", L"Noclip: sinken", L"Noclip: schneller (halten)", L"Freecam ein/aus",
-    L"Tastenmenü öffnen", L"Tempomat ein/aus"};
+    L"Tastenmenü öffnen", L"Tempomat ein/aus", L"Walking: aus-/einsteigen"};
 static const wchar_t *const labels_english[ARRAY_COUNT(bindings)] = {
     L"Throttle", L"Brake", L"Steer left", L"Steer right", L"Handbrake", L"Shift up", L"Shift down",
     L"Clutch", L"Change camera", L"Rewind", L"Telemetry (hold)", L"Photo mode (hold)", L"Radio: previous",
@@ -309,7 +312,7 @@ static const wchar_t *const labels_english[ARRAY_COUNT(bindings)] = {
     L"Menu/camera up", L"Menu/camera down", L"Menu/camera left", L"Menu/camera right",
     L"D-pad up", L"D-pad down", L"D-pad left", L"D-pad right",
     L"Noclip on/off", L"Noclip: rise", L"Noclip: sink", L"Noclip: faster (hold)", L"Freecam on/off",
-    L"Open key menu", L"Cruise control on/off"};
+    L"Open key menu", L"Cruise control on/off", L"Walking: get out / in"};
 _Static_assert(ARRAY_COUNT(bindings) + 1 <= NOTIFY_PANEL_ROWS, "key list rows");
 
 static unsigned char *game_base;
@@ -841,7 +844,7 @@ static void keyboard_reading(PadReading *r) {
         const Binding *b = &bindings[i];
         int pressed = focused && !input_blocked && b->vk[0] && down(b);
         /* noclip / freecam: the driving keys only fly (noclip.c), so they do not look like a controller there */
-        if (flying && (b->kind == KIND_ACTION || b->kind == KIND_STEER || (b->kind == KIND_NAV && noclip_freecam_active())))
+        if (flying && (b->kind == KIND_ACTION || b->kind == KIND_STEER || (b->kind == KIND_NAV && noclip_own_look())))
             pressed = 0; /* noclip keeps the arrows for the game's camera, freecam looks with them itself */
         switch (b->kind) {
             case KIND_STEER:
@@ -1403,7 +1406,7 @@ int keyboard_held(unsigned which) {
                                                               L"SteerRight", L"NoclipUp", L"NoclipDown",
                                                               L"NoclipFast", L"Noclip", L"Freecam",
                                                               L"ArrowUp", L"ArrowDown", L"ArrowLeft",
-                                                              L"ArrowRight", L"CruiseControl"};
+                                                              L"ArrowRight", L"CruiseControl", L"Walk"};
     static int index[KEYBOARD_HOLD_COUNT];
     if (which >= KEYBOARD_HOLD_COUNT || !loaded || !user32_ready()) return 0;
     if (!index[which]) {
