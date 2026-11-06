@@ -153,7 +153,8 @@ static void ignore_line(unsigned number, const char *what) {
     note[n++] = ')';
     note[n] = 0;
     ++ignored_lines;
-    if (ignored_lines <= 8) status_append(note);
+    if (ignored_lines == 1) status_set(note); /* replaces "Not initialized" at the top of Gripline.log */
+    else if (ignored_lines <= 8) status_append(note);
 }
 
 static int parse_ini(char *text, ModOptions *options) {
@@ -277,3 +278,19 @@ int settings_read(const wchar_t *directory, ModOptions *options) {
     }
     return parse_ini(ini_buffer, options);
 }
+
+#ifdef FH2_TWEAKS_TEST
+/* tests/test_settings.py: reads Gripline.ini of directory; values in setting_definitions order */
+__declspec(dllexport) int Fh2TestSettingsRead(const wchar_t *directory, int *values, unsigned count,
+                                              unsigned *ignored, char *status, unsigned status_size) {
+    static ModOptions options;
+    int ok = settings_read(directory, &options);
+    for (unsigned i = 0; i < count && i < setting_count; ++i) values[i] = settings_value(&options, &setting_definitions[i]);
+    *ignored = settings_ignored_lines();
+    const char *s = status_get();
+    unsigned n = 0;
+    while (s[n] && n + 1 < status_size) status[n] = s[n], ++n;
+    status[n] = 0;
+    return ok;
+}
+#endif
