@@ -1,4 +1,4 @@
-Gripline V6.5 – Keyboard bindings / Tastenbelegung
+Gripline V7 – Keyboard bindings / Tastenbelegung
 ========================================================================
 Default bindings. Change them in FH2_Keyboard.ini next to azimuth.exe (several keys with a
 comma, e.g. Throttle=W,Up; the key names are listed at the top of the file).
@@ -32,7 +32,23 @@ GRIPLINE
   F5                 Tastenliste ein/aus          Key list on/off
   F6                 Noclip ein/aus (offline)     Noclip on/off (offline)
   F7                 Freecam ein/aus (offline)    Freecam on/off (offline)
-  F8                 Tastenmenü (Tasten ändern)   Key menu (change keys)
+  F8                 Gripline-Menü                Gripline menu
+  F                  Aussteigen/Einsteigen (offl.) Get out / get in (offline)
+  K                  Tempomat ein/aus             Cruise control on/off
+
+CONTROLLER (LS halten / hold LS)
+  LS + Steuerkreuz ▲ Noclip                       LS + D-pad up: noclip
+  LS + Steuerkreuz ▼ Freecam                      LS + D-pad down: freecam
+  LS + Steuerkreuz ► Gripline-Menü                LS + D-pad right: Gripline menu
+  LS + Steuerkreuz ◄ Tempomat                     LS + D-pad left: cruise control
+  LS + Y             Aussteigen (Y = einsteigen)  LS + Y: get out (Y = get in)
+
+LAUFEN / WALKING (wenn ausgestiegen / while out of the car)
+  W A S D            Laufen                       Walk
+  Pfeiltasten        Umschauen                    Arrow keys: look
+  Linke Shift-Taste  Rennen                       Left Shift: run
+  Leertaste          Springen                     Space: jump
+  F                  Einsteigen (nah am Auto)     Get in (near the car)
 
 NOCLIP (wenn an / while on)
   W / S              Vorwärts / rückwärts fliegen Fly forward / back

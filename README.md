@@ -1,11 +1,11 @@
 # Gripline
 
-**Keyboard driving, cockpit and traffic for Forza Horizon 2 on PC** (Xbox One version on the **Azimuth** wrapper).
+**Keyboard driving, cockpit, traffic, walking, freecam and more for Forza Horizon 2 on PC** (Xbox One version on the **Azimuth** wrapper).
 Works offline and online with [FH2MP](https://github.com/Charelene/FH2MP).
 
-**[⬇ Download the latest version](../../releases/latest)** · current version: **V6.5**
+**[⬇ Download the latest version](../../releases/latest)** · current version: **V7 – The Big Update**
 
-**[Join the Gripline Discord](https://discord.gg/g83eBcrq)** · problems, questions, ideas for V7 and showcase. Join to always stay up to date with every new version.
+**[Join the Gripline Discord](https://discord.gg/g83eBcrq)** · problems, questions, ideas and showcase. Join to always stay up to date with every new version.
 
 Gripline is an add-on next to Azimuth, the official [Extra Options](https://github.com/RokkuDayo/ForzaHorizon2_ExtraOptions)
 by RokkuDayo and FH2MP. It is one file, `fh2-mods\Gripline.dll`, a [FH2 Mod Platform](https://github.com/Trinculo54/fh2-mod-platform)
@@ -20,7 +20,16 @@ mod. Since V6 Gripline only does what the others don't:
 | **Nitro key** | For [NitroSystem](https://github.com/qiangqiang101/NitroSystem) by qiangqiang101: **N** presses its nitro button. Off in online sessions. |
 | **Key list** | **F5** shows all your key bindings at the right of the picture; F5 again hides it. |
 | **Noclip** *(V6.4)* | **F6** lets your car fly through the map: through walls, the ground and buildings. W/S fly forward/back, A/D turn, Space/Left Ctrl up/down, Left Shift held = 4x faster; the arrow keys still move the camera. A card says on/off and shows speed and height while flying (mph/ft or km/h/m, like the game's speedometer). Offline only: a card says when it is locked in an online session and available again offline (like nitro). |
-| **Cards** | Small Gripline cards at the top right of the picture (also in fullscreen). Can be switched off; colour selectable (*Gripline: Card Colour*: blue, red, green, purple, orange, yellow, pink, white). V6.4 cards: every setting changed in the menu ("Traffic: Preset – Much More Traffic"), a trip summary in the pause menu (distance, top speed, driving time of the session; miles/mph when the game is set to mph), wheel connected (green) / disconnected (red, WARNING), and a start check when Azimuth, Extra Options and FH2MP do not fit together (e.g. FH2MP needs an update for a new Azimuth; red, WARNING). Warning cards are always red with WARNING in the title (also "Nitro off" online, with the reason), noclip locked is orange, "Nitro on again" and noclip available again are green; all other cards use the chosen colour. |
+| **Cards** | Small Gripline cards at the top right of the picture (also in fullscreen). Can be switched off; colour selectable (*Gripline: Card Colour*: blue, red, green, purple, orange, yellow, pink, white, black, rainbow), three designs (Classic, Enhanced, Overdrive; F8 › Card design), card groups can be hidden one by one or with presets (F8 › Cards & notices). V6.4 cards: every setting changed in the menu ("Traffic: Preset – Much More Traffic"), a trip summary in the pause menu (distance, top speed, driving time of the session; miles/mph when the game is set to mph), wheel connected (green) / disconnected (red, WARNING), and a start check when Azimuth, Extra Options and FH2MP do not fit together (e.g. FH2MP needs an update for a new Azimuth; red, WARNING). Warning cards are always red with WARNING in the title (also "Nitro off" online, with the reason), noclip locked is orange, "Nitro on again" and noclip available again are green; all other cards use the chosen colour. |
+| **Walking** *(V7)* | **F** (controller: LS + Y) gets you out of the car: the picture fades to black, the door opens and shuts, and you stand next to your car. Walk with WASD / left stick, look with the arrow keys / right stick, Left Shift / RT runs, Space / A jumps, with collision (trees, walls, ground) and a soft head bob. The car stays parked; F / Y near it gets you back in. A card shows your speed and how far the car is. The HUD is hidden while walking. Offline only. |
+| **Freecam** *(V7)* | **F7** (controller: LS + D-pad down): the camera flies freely without the car, which stays where it was. Arrow keys / right stick look, WASD / left stick fly, Space / Left Ctrl / RT / LT up/down. Offline only. |
+| **Gripline menu** *(V7)* | **F8** (controller: LS + D-pad right) opens the Gripline menu in the game: change every key (it saves into `FH2_Keyboard.ini`), card colour and design, cockpit view 2, traffic, cruise control, live telemetry, mouse steering, logbook, records, world options, no damage, which cards show, problem report, all keys back to default. |
+| **No damage** *(V7)* | F8 › No damage on cars: Off / Others (drivatars and traffic) / All. Visible damage only, applies at once. |
+| **Cruise control** *(V7)* | **K** (controller: LS + D-pad left) keeps the speed of the moment; K again or braking switches it off. F8: minimum speed and off on impact. |
+| **Live telemetry & records** *(V7)* | A panel with speed, grip (slip angle, drift), g-forces, turn rate, slope, 0-100 km/h (0-60 mph), top speed and best values; position, size and opacity in F8; can record a CSV. Records for 0-100, 0-200, quarter mile, braking distance and top speed stay in `Gripline_Records.txt`, a new one brings a card. The logbook counts kilometres and driving time per car. |
+| **World options** *(V7)* | F8 › World: speed cameras off, names above cars off, event icons on the road off (after a restart). |
+| **Mouse steering** *(V7, experimental)* | Steer with the mouse (like ETS2): sensitivity, dead zone and back-to-centre in F8. |
+| **Update notice** *(V7)* | At the start Gripline asks GitHub for the latest release and shows an orange card when a newer version is out. Nothing else is sent. |
 | **Azimuth Mapper check** | While Azimuth Mapper (by bigdamnhero6) runs, Gripline's keyboard stays off and a card says so. |
 | **Problem report** | *Gripline: Create Problem Report* packs logs and settings into `Gripline_Report.zip` next to `azimuth.exe`. Nothing is sent anywhere. |
 
@@ -104,6 +113,10 @@ itself when it cannot hook the game, and makes them new when the game's car file
 | V | Cockpit view 2 | F5 | Key list |
 | F6 | Noclip on/off (offline) | Space / Left Ctrl | Noclip: up / down |
 | Left Shift (held) | Noclip: faster | W / S, A / D | Noclip: fly, turn |
+| F7 | Freecam on/off (offline) | F8 | Gripline menu |
+| F | Get out and walk / get in (offline) | K | Cruise control |
+
+Controller: hold **LS** and press D-pad up = noclip, down = freecam, right = Gripline menu, left = cruise control, **Y** = get out / in.
 
 ## Reporting problems
 GitHub: [**Issues → New issue**](../../issues/new/choose). Pause › Settings › MODS › *Gripline: Create Problem Report*,
@@ -114,7 +127,8 @@ Wheel problems belong to Azimuth (report them there without mods).
 
 ## Known limits
 - Traffic, steering animation and keyboard on/off need a restart of Azimuth.
-- Online, traffic comes from the session and nitro and noclip are off.
+- Online, traffic comes from the session and nitro, noclip, freecam and walking are off.
+- Walking: the car is held parked; far from it (over ~45 m) it is hidden under the ground below you so the ground collision stays loaded. The door sounds play at the Windows volume.
 - Noclip only flies the car (its physics is held still); while it is on, the car can still make collision sounds or take visual damage inside walls. Switching it off drops the car where it is.
 - The steering animation turns as far as the rotation in the Azimuth launcher (900° when none is set).
 

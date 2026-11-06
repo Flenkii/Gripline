@@ -1,4 +1,4 @@
-GRIPLINE V6.5 – keyboard, cockpit & traffic for Forza Horizon 2 (Azimuth)
+GRIPLINE V7 – The Big Update – for Forza Horizon 2 (Azimuth)
 =======================================================================
 An add-on next to Azimuth, the official Extra Options and FH2MP.
 
@@ -43,11 +43,32 @@ Gripline:
     (MODS > Installed mods > Gripline > Traffic), 30-100 cars, rush hour all day (restart needed).
   - Nitro key N for the mod NitroSystem (off online), key list F5, Gripline cards,
     problem report (Gripline_Report.zip).
+  - V7: walking (F), freecam (F7), noclip (F6), Gripline menu (F8), cruise control (K),
+    no damage, telemetry, records, logbook, world options, mouse steering.
 Azimuth (its launcher): wheel, pedals, buttons, rotation and force feedback.
 Extra Options: weather, time of day, hiding the HUD (F1), autodrive (F2).
 
 
-3. NEW IN V6.5 (bug fix)
+3. NEW IN V7 – THE BIG UPDATE
+-----------------------------
+  - Walking: F (controller: LS + Y) gets you out of the car - fade to black, door sounds,
+    and you stand next to it. WASD/left stick walk, arrows/right stick look, Shift/RT run,
+    Space/A jump, with collision. The car stays parked, F/Y near it gets you back in.
+  - Freecam: F7 (LS + D-pad down), the camera flies without the car.
+  - Gripline menu: F8 (LS + D-pad right) - change every key in the game, card colour and
+    design (Classic / Enhanced / Overdrive), traffic, cockpit view 2, cruise control,
+    telemetry, mouse steering, logbook, records, world options, which cards show.
+  - No damage on cars: Off / Others / All (F8).
+  - Cruise control: K (LS + D-pad left), K again or brake = off.
+  - Live telemetry panel (speed, grip, g-forces, 0-100, top speed, CSV recording),
+    records (0-100, 0-200, quarter mile, braking, top speed) and a logbook per car.
+  - World: speed cameras, names above cars and event icons can be switched off (F8).
+  - Mouse steering (experimental, F8).
+  - Update notice: an orange card at the start when a newer Gripline is out.
+  - Card colours black and rainbow, card groups can be hidden (F8 > Cards & notices).
+  - Includes all fixes of V6.4.1 and V6.5.
+
+NEW IN V6.5 (bug fix)
 ------------------------
   - Fix: hands missing / glitching or the cockpit gone in some cars. Gripline now removes
     its own cockpit files by itself when it cannot hook the game or could not make them,
@@ -88,16 +109,18 @@ Pause > Settings > MODS > "Gripline: Create Problem Report", then attach
 Gripline_Report.zip (next to azimuth.exe). Nothing is sent anywhere.
 
 Known limits: traffic, steering animation and keyboard on/off need a restart.
-Online, traffic comes from the session and nitro is off.
+Online, traffic comes from the session; nitro, noclip, freecam and walking are off.
 
 Credits: RokkuDayo (Extra Options, base of Gripline's code), Trinculo54 (FH2 Mod Platform
 API, MIT), Lancaster, qiangqiang101 (NitroSystem), bigdamnhero6 (Azimuth Mapper), a YouTube
-viewer (cockpit view 2 idea).
+viewer (cockpit view 2 idea), Sounds From The Lab (car door sounds, royalty-free),
+MRAlexis99 / Alexis99 / Midnight and the community (ideas), seveN (bug report).
 
 ----------------------------------------------------------------------------------------
 DEUTSCH (kurz)
 fh2-mods\Gripline.dll aus dem Ordner "Azimuth" neben azimuth.exe kopieren. winmm.dll NICHT
 ersetzen (bleibt das offizielle Extra Options). Einstellungen: Pause > Einstellungen > MODS.
+V7: F = aussteigen und laufen, F7 = Freecam, F8 = Gripline-Menü, K = Tempomat.
 Lenkrad und Force Feedback: im Azimuth-Launcher. Wetter, Tageszeit, HUD aus (F1):
 Extra Options. Gripline: Tastatur, Cockpit, Verkehr, Nitro-Taste, Fehlerbericht.
 Probleme: im MODS-Menü "Gripline: Create Problem Report" und Gripline_Report.zip auf
