@@ -732,11 +732,49 @@ static void sample_trip(void *car, float dt) {
     if (float_is_finite(r[0]) && float_is_finite(r[2]) && float_is_finite(f[0]) && float_is_finite(f[2])) drive_look_mirror(r, f);
 }
 
+/* V7.1 walking (Marvin 07.11.2026): out of the car the driver figure still sat in it. The game's own
+   "draw the driver" switch of the car (game+0xf75500 (car, on): the driver model's slot 0x358, the
+   flag at car+0x4f10; the game calls it itself, e.g. in photo mode) hides it while walking and puts
+   the car's own setting back after. Checked against the game's code first. */
+#define RVA_SET_DRAW_DRIVER 0xf75500u
+#define CAR_DRAW_DRIVER 0x4f10u
+typedef void (*SetDrawDriverFn)(void *car, unsigned char on);
+static const unsigned char set_draw_driver_code[] = {0x48, 0x89, 0x5c, 0x24, 0x08, 0x57, 0x48, 0x83, 0xec, 0x20,
+                                                     0x48, 0x8b, 0xd9, 0x48, 0x8b, 0x89, 0x38, 0x4d, 0x00, 0x00};
+static int draw_driver_ok = -1; /* -1 not checked, 0 game code differs, 1 ok */
+static void *driver_hidden_car;
+static unsigned char driver_was_drawn;
+
+static int draw_driver_ready(void) {
+    if (draw_driver_ok < 0) {
+        draw_driver_ok = game && memory_equal(game + RVA_SET_DRAW_DRIVER, set_draw_driver_code, sizeof(set_draw_driver_code));
+        log_append(draw_driver_ok ? "NOCLIP: walking - the driver figure is hidden while walking.\r\n"
+                                  : "NOCLIP: walking - game code differs, the driver figure stays visible.\r\n");
+    }
+    return draw_driver_ok;
+}
+
+/* car update thread: walking on = hidden (again, if the game drew it again), off = back */
+static void walk_driver(void *car, int walking) {
+    if (!draw_driver_ready()) return;
+    unsigned char drawn = 0;
+    if (walking) {
+        if (!memory_read((unsigned char *)car + CAR_DRAW_DRIVER, &drawn, 1)) return;
+        if (driver_hidden_car != car) driver_hidden_car = car, driver_was_drawn = drawn;
+        else if (drawn) driver_was_drawn = 1; /* the game switched it on meanwhile (camera change) */
+        if (drawn) ((SetDrawDriverFn)(game + RVA_SET_DRAW_DRIVER))(car, 0);
+    } else if (driver_hidden_car == car) {
+        driver_hidden_car = NULL;
+        if (driver_was_drawn) ((SetDrawDriverFn)(game + RVA_SET_DRAW_DRIVER))(car, 1);
+    }
+}
+
 void noclip_car_update(void *car, float dt, float frame_dt, unsigned frame) {
     void *dynamics = NULL;
     int local = game && car && is_local_car(car);
     if (local) traffic_load_reached(dt); /* the start reached the road (load guard, traffic_files.c) */
     void *park = NULL;
+    if (local && (on == MODE_WALK || driver_hidden_car == car)) walk_driver(car, on == MODE_WALK && walking_active());
     if (on == MODE_WALK && local) {
         /* on foot: the car stands where it was; the walker is moved in the camera (walking.c) */
         void *walk_body = car_body(car);
