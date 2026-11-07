@@ -244,27 +244,56 @@ static void add_tile(unsigned char *tile) {
     if (tile_count < MAX_TILES) tiles[tile_count++] = tile;
 }
 
-/* the Canvas keeps its children in an array somewhere behind one or two pointers: find the array that
-   holds the focused tile and take every tile in it */
+/* the Canvas keeps its children in an array somewhere behind up to three pointers (exact place not known,
+   menumouse5: not directly behind one): search for the array that holds the focused tile (or its input
+   interface at +0xb8) and take every tile in it. Once per new Canvas. */
+#define LIST_ITEMS 64
+static int scan_list(unsigned char *list, unsigned char *canvas, unsigned char *focused, unsigned *adjust) {
+    if (!list || (uintptr_t)list & 7 || (uintptr_t)list < 0x10000 || (uintptr_t)list >> 47) return 0;
+    int at = -1;
+    for (int i = 0; i < LIST_ITEMS && at < 0; ++i) {
+        unsigned char *item = NULL;
+        if (!memory_read(list + 8 * i, &item, 8)) break;
+        if (item == focused) at = i, *adjust = 0;
+        else if (item == focused + 0xb8) at = i, *adjust = 0xb8;
+    }
+    if (at < 0) return 0;
+    int found = 0;
+    for (int i = 0; i < LIST_ITEMS; ++i) {
+        unsigned char *item = NULL;
+        if (!memory_read(list + 8 * i, &item, 8)) break;
+        if (!item || (uintptr_t)item & 7) continue;
+        item -= *adjust;
+        if (read_pointer(item + ELEMENT_PARENT) == canvas && is_tile(item)) add_tile(item), ++found;
+    }
+    return found;
+}
+
 static void collect_siblings(unsigned char *canvas, unsigned char *focused) {
-    for (unsigned off = 0x78; off < 0x300; off += 8) {
-        unsigned char *a = read_pointer(canvas + off);
-        if (!a || (uintptr_t)a & 7) continue;
-        for (unsigned inner = 0; inner < 0x60; inner += 8) {
-            unsigned char *list = inner ? read_pointer(a + inner - 8) : a;
-            if (!list || (uintptr_t)list & 7) continue;
-            void *items[64];
-            if (!memory_read(list, items, sizeof(items))) continue;
-            int found = 0;
-            for (int i = 0; i < 64; ++i) if (items[i] == focused) found = 1;
-            if (!found) continue;
-            for (int i = 0; i < 64; ++i)
-                if (items[i] && !((uintptr_t)items[i] & 7) && read_pointer((unsigned char *)items[i] + ELEMENT_PARENT) == canvas &&
-                    is_tile(items[i]))
-                    add_tile(items[i]);
-            return;
+    unsigned adjust = 0;
+    for (unsigned o1 = 0x78; o1 < 0x300; o1 += 8) {
+        unsigned char *p1 = read_pointer(canvas + o1);
+        if (!p1 || p1 == focused || (uintptr_t)p1 & 7) continue;
+        if (scan_list(p1, canvas, focused, &adjust)) goto done;
+        for (unsigned o2 = 0; o2 < 0x80; o2 += 8) {
+            unsigned char *p2 = read_pointer(p1 + o2);
+            if (!p2 || (uintptr_t)p2 & 7 || p2 == canvas) continue;
+            if (scan_list(p2, canvas, focused, &adjust)) { log_append_value("MENUMOUSE: children at canvas+", (int)o1); log_append_value("MENUMOUSE:   then +", (int)o2); goto done; }
+            for (unsigned o3 = 0; o3 < 0x40; o3 += 8) {
+                unsigned char *p3 = read_pointer(p2 + o3);
+                if (scan_list(p3, canvas, focused, &adjust)) {
+                    log_append_value("MENUMOUSE: children at canvas+", (int)o1);
+                    log_append_value("MENUMOUSE:   then +", (int)o2);
+                    log_append_value("MENUMOUSE:   then +", (int)o3);
+                    goto done;
+                }
+            }
         }
     }
+    log_append("MENUMOUSE: children list of the tile canvas not found.\r\n");
+    return;
+done:
+    if (adjust) log_append("MENUMOUSE:   (list holds input interfaces)\r\n");
 }
 
 enum { IN_DPAD_LEFT = 2, IN_DPAD_RIGHT = 3 };
