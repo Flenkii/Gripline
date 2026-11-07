@@ -17,7 +17,8 @@
    vtable slot 9, the one walking.c also chains) and only when that thread has a UI context.
    Gripline draws its own pointer (notify_cursor) - the system cursor is held by Azimuth.
 
-   FH2_Keyboard.ini [Keyboard] MenuMouse = pointer speed in percent (default 100, 0 = off). */
+   Uses the real Windows cursor (not held; Azimuth's own menu needs it). Wheel: tabs (LB/RB) over the top part, up/down
+   elsewhere; right click = B. FH2_Keyboard.ini [Keyboard] MenuMouse = 1 on (default), 0 off. */
 
 /* chain the UI frame hook (after walking_start, so walking's HUD skip stays inside) */
 int menu_mouse_start(unsigned char *game_image);

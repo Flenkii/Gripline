@@ -89,9 +89,12 @@ void keyboard_set_mouse_dead_zone(int percent);
 int keyboard_walk_mouse(float *dx, float *dy);
 /* V7.1 mouse look in the car: same, DriveMouseLook %; 0 while mouse steering is on */
 int keyboard_drive_mouse(float *dx, float *dy);
-/* V7.1 mouse pointer in the menus: mouse counts (* MenuMouse %), buttons (1 left, 2 right, 4 middle),
-   wheel and the game window's client size; 0 while driving, unfocused or MenuMouse = 0 */
-int keyboard_menu_mouse(int *dx, int *dy, int *buttons, int *wheel, int *client_w, int *client_h);
+/* V7.1 mouse in the menus: the Windows cursor in client pixels, buttons (1 left, 2 right, 4 middle), wheel,
+   the client size and whether Windows shows its cursor; 0 while driving, unfocused, outside the window or MenuMouse=0 */
+int keyboard_menu_mouse(int *x, int *y, int *buttons, int *wheel, int *client_w, int *client_h, int *system_shown);
+/* V7.1 menu mouse: one short press of a controller input (wheel_buttons.c numbering: 0 dpad up, 1 dpad down,
+   8 LB, 9 RB, 12 A, 13 B), queued; safe from any thread */
+void keyboard_menu_pulse(unsigned input);
 int keyboard_mouse_center(void);
 void keyboard_set_mouse_center(int seconds);
 
