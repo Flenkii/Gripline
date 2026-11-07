@@ -13,7 +13,7 @@
 #define LOOK_RETURN_EASE 0.45f     /* back to the game's camera (s) */
 #define DRIVE_LOOK_RETURN_MS 2000u /* mouse left alone this long while driving: back */
 #define LOOK_RETURN_SPEED 2.0f     /* m/s: slower counts as standing (the camera stays) */
-#define LOOK_YAW_MAX 3.1f          /* about all the way round to looking back */
+#define PI_ 3.14159265f
 #define LOOK_PITCH_INSIDE 1.2f
 #define LOOK_PITCH_UP_OUTSIDE 0.3f   /* outside the camera goes down when looking up: not into the road */
 #define LOOK_PITCH_DOWN_OUTSIDE 0.8f
@@ -111,14 +111,19 @@ void drive_look_frame(void) {
     ULONGLONG tick = GetTickCount64();
     float mx, my;
     if (keyboard_drive_mouse(&mx, &my) && (mx != 0.0f || my != 0.0f)) {
-        target_yaw = clampf(target_yaw + mx * LOOK_RAD_PER_COUNT, -LOOK_YAW_MAX, LOOK_YAW_MAX);
+        target_yaw += mx * LOOK_RAD_PER_COUNT; /* all the way round, as often as you like (Marvin 07.11.2026) */
         target_pitch = clampf(target_pitch - my * LOOK_RAD_PER_COUNT, -LOOK_PITCH_INSIDE, LOOK_PITCH_INSIDE);
         moved_at = tick;
         if (!logged) {
             logged = 1;
             log_append("DRIVELOOK: the mouse turns the car camera (FH2_Keyboard.ini DriveMouseLook).\r\n");
         }
-    } else if (tick - moved_at >= DRIVE_LOOK_RETURN_MS && car_speed > LOOK_RETURN_SPEED) {
+    }
+    /* keep the turn within one round (both together, so the easing does not spin back): back to the
+       game's camera then goes the short way */
+    while (target_yaw > PI_) target_yaw -= 2.0f * PI_, yaw -= 2.0f * PI_;
+    while (target_yaw < -PI_) target_yaw += 2.0f * PI_, yaw += 2.0f * PI_;
+    if (!(tick - moved_at < DRIVE_LOOK_RETURN_MS) && car_speed > LOOK_RETURN_SPEED) {
         float k = ease(dt, LOOK_RETURN_EASE); /* driving: back to the game's camera */
         target_yaw -= target_yaw * k, target_pitch -= target_pitch * k;
     }
