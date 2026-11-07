@@ -316,6 +316,15 @@ void notify_fade_black(int permille, unsigned ms) {
     ReleaseSRWLockExclusive(&lock);
 }
 
+/* V7.1 menu mouse pointer (menu_mouse.c): drawn by the card window, at client pixel (x, y) */
+static volatile LONG cursor_on, cursor_x, cursor_y;
+
+void notify_cursor(int show, int x, int y) {
+    InterlockedExchange(&cursor_x, x);
+    InterlockedExchange(&cursor_y, y);
+    InterlockedExchange(&cursor_on, show ? 1 : 0);
+}
+
 void notify_panel_set(const wchar_t *title, const NotifyPanelRow *rows, unsigned count) {
     notify_panel_show(title, rows, count, 0);
 }
@@ -1543,7 +1552,7 @@ static int draw_panel_v7(const wchar_t *title, const NotifyPanelRow *rows, unsig
         gdi.SelectObject(dc, tiny);
         RECT kclip = {title_x, g, right - l->pad, g + header};
         gdi.SetTextColor(dc, over && over_light_card(tone) ? RGB(40, 30, 20) : RGB(mix8(tone[1][0], 255, 0.55f), mix8(tone[1][1], 255, 0.55f), mix8(tone[1][2], 255, 0.55f)));
-        gdi.ExtTextOutW(dc, title_x + (int)(2 * s), g + header / 2 - (int)(25 * s), ETO_CLIPPED, &kclip, L"GRIPLINE  V7", 12, NULL);
+        gdi.ExtTextOutW(dc, title_x + (int)(2 * s), g + header / 2 - (int)(25 * s), ETO_CLIPPED, &kclip, L"GRIPLINE  V7.1", 14, NULL);
         gdi.SelectObject(dc, main);
         HFONT fit = NULL; /* long titles step down a size instead of being cut */
         if (text_px(dc, title, 15.0f * s) > clip.right - clip.left) {
@@ -2552,6 +2561,56 @@ static void blend_block(unsigned char *frame, int frame_w, int frame_h, int x, i
     }
 }
 
+/* the menu pointer: a white arrow with a dark rim (premultiplied BGRA, size x size, tip at 0,0) */
+#define CURSOR_MAX 72
+static unsigned char cursor_pixels[CURSOR_MAX * CURSOR_MAX * 4];
+static int cursor_size;
+
+static float edge_distance(float px, float py, float ax, float ay, float bx, float by) {
+    float ex = bx - ax, ey = by - ay, wx = px - ax, wy = py - ay;
+    float t = (wx * ex + wy * ey) / (ex * ex + ey * ey);
+    if (t < 0.0f) t = 0.0f;
+    if (t > 1.0f) t = 1.0f;
+    float dx = wx - ex * t, dy = wy - ey * t;
+    return root(dx * dx + dy * dy);
+}
+
+static void make_cursor(int screen_h) {
+    int size = (int)(30.0f * (float)screen_h / 1080.0f + 0.5f);
+    if (size < 20) size = 20;
+    if (size > CURSOR_MAX) size = CURSOR_MAX;
+    if (size == cursor_size) return;
+    /* arrow in a 13 x 21 unit box */
+    static const float ux[7] = {1.0f, 1.0f, 4.9f, 7.6f, 11.0f, 8.3f, 13.4f};
+    static const float uy[7] = {1.0f, 18.0f, 14.6f, 21.0f, 19.6f, 13.4f, 13.4f};
+    float k = (float)size / 22.0f, px[7], py[7], rim = 0.9f * (k > 1.0f ? k : 1.0f);
+    for (int i = 0; i < 7; ++i) px[i] = ux[i] * k, py[i] = uy[i] * k;
+    for (int y = 0; y < size; ++y)
+        for (int x = 0; x < size; ++x) {
+            float white = 0.0f, dark = 0.0f;
+            for (int sy = 0; sy < 4; ++sy)
+                for (int sx = 0; sx < 4; ++sx) {
+                    float qx = (float)x + (sx + 0.5f) / 4.0f, qy = (float)y + (sy + 0.5f) / 4.0f;
+                    int inside = 0;
+                    float d = 1e9f;
+                    for (int i = 0, j = 6; i < 7; j = i++) {
+                        if ((py[i] > qy) != (py[j] > qy) && qx < (px[j] - px[i]) * (qy - py[i]) / (py[j] - py[i]) + px[i])
+                            inside = !inside;
+                        float e = edge_distance(qx, qy, px[j], py[j], px[i], py[i]);
+                        if (e < d) d = e;
+                    }
+                    if (inside && d > rim) white += 1.0f / 16.0f;
+                    else if (inside || d < 0.6f * k) dark += 1.0f / 16.0f;
+                }
+            unsigned char *o = cursor_pixels + ((size_t)y * size + x) * 4;
+            float a = white + dark * 0.85f;
+            unsigned v = (unsigned)(white * 255.0f + dark * 0.85f * 24.0f + 0.5f);
+            o[0] = o[1] = o[2] = (unsigned char)(v > 255 ? 255 : v);
+            o[3] = (unsigned char)(a * 255.0f + 0.5f > 255.0f ? 255 : (unsigned)(a * 255.0f + 0.5f));
+        }
+    cursor_size = size;
+}
+
 static DWORD WINAPI overlay_thread(void *unused) {
     (void)unused;
     HINSTANCE instance = GetModuleHandleW(NULL);
@@ -2613,7 +2672,9 @@ static DWORD WINAPI overlay_thread(void *unused) {
         HWND top = win.GetForegroundWindow();
         int focused = top && (top == game_window || win.GetAncestor(game_window, GA_ROOT) == top);
         if (!enabled) count = 0, panel = 0, tele_n = 0;
-        if ((!count && !panel && !tele_n && !dark) || !focused /* black shows even with cards off */ || win.IsIconic(game_window)) {
+        int pointer = cursor_on != 0; /* V7.1 menu pointer, shown even with cards off */
+        int pointer_x = (int)cursor_x, pointer_y = (int)cursor_y;
+        if ((!count && !panel && !tele_n && !dark && !pointer) || !focused /* black shows even with cards off */ || win.IsIconic(game_window)) {
             if (visible) win.ShowWindow(window, SW_HIDE);
             visible = 0;
             continue;
@@ -2623,6 +2684,44 @@ static DWORD WINAPI overlay_thread(void *unused) {
         if (!win.GetClientRect(game_window, &client) || !win.ClientToScreen(game_window, &origin)) continue;
         int screen_w = client.right - client.left, screen_h = client.bottom - client.top;
         if (screen_w < 320 || screen_h < 240) continue;
+        if (pointer) make_cursor(screen_h);
+        if (pointer && !count && !panel && !tele_n && !dark) { /* only the pointer: a small window at the pointer */
+            static unsigned char *small_bits;
+            static HBITMAP small_bitmap;
+            static HDC small_dc;
+            static int small_size;
+            if (small_size != cursor_size) {
+                if (!small_dc) small_dc = gdi.CreateCompatibleDC(NULL);
+                if (small_bitmap) gdi.DeleteObject(small_bitmap);
+                BITMAPINFO info;
+                memset(&info, 0, sizeof(info));
+                info.bmiHeader.biSize = sizeof(info.bmiHeader);
+                info.bmiHeader.biWidth = cursor_size;
+                info.bmiHeader.biHeight = -cursor_size;
+                info.bmiHeader.biPlanes = 1;
+                info.bmiHeader.biBitCount = 32;
+                info.bmiHeader.biCompression = BI_RGB;
+                void *bits = NULL;
+                small_bitmap = small_dc ? gdi.CreateDIBSection(small_dc, &info, DIB_RGB_COLORS, &bits, NULL, 0) : NULL;
+                if (!small_bitmap || !bits) {
+                    small_bitmap = NULL, small_size = 0;
+                    continue;
+                }
+                gdi.SelectObject(small_dc, small_bitmap);
+                small_bits = (unsigned char *)bits;
+                small_size = cursor_size;
+                memory_copy(small_bits, cursor_pixels, (size_t)cursor_size * cursor_size * 4);
+            }
+            gdi.GdiFlush();
+            POINT position = {origin.x + pointer_x, origin.y + pointer_y}, source = {0, 0};
+            SIZE size = {small_size, small_size};
+            BLENDFUNCTION blend = {AC_SRC_OVER, 0, 255, AC_SRC_ALPHA};
+            win.UpdateLayeredWindow(window, NULL, &position, &size, small_dc, &source, 0, &blend, ULW_ALPHA);
+            if (!visible) win.ShowWindow(window, SW_SHOWNOACTIVATE);
+            visible = 1;
+            frame_w = 0; /* the big frame is set up again when cards come */
+            continue;
+        }
         Layout l = layout_for((UINT)screen_h);
         if ((size_t)l.width * l.height * MAX_CARDS * 4 > sizeof(scratch_cards) ||
             (size_t)l.width * l.panel_height * 4 > sizeof(scratch_panel))
@@ -2636,7 +2735,7 @@ static DWORD WINAPI overlay_thread(void *unused) {
         }
         int want_w = l.margin + 2 * l.width + l.gap + (int)(40.0f * l.scale) + 4;
         if (tele && (tele_pos >= NOTIFY_TELE_LEFT_TOP || pl.width + l.margin + 4 > want_w)) want_w = screen_w;
-        if (dark || want_w > screen_w) want_w = screen_w;
+        if (dark || pointer || want_w > screen_w) want_w = screen_w;
         if (want_w != frame_w || screen_h != frame_h) {
             if (bitmap) gdi.DeleteObject(bitmap);
             BITMAPINFO info;
@@ -2714,6 +2813,9 @@ static DWORD WINAPI overlay_thread(void *unused) {
                             l.width * 4, l.width, l.height, a);
             y += l.height + l.gap;
         }
+        if (pointer) /* the frame spans the whole width here */
+            blend_block(frame, frame_w, frame_h, pointer_x - (screen_w - frame_w), pointer_y, cursor_pixels,
+                        cursor_size * 4, cursor_size, cursor_size, 1.0f);
         gdi.GdiFlush();
         POINT position = {origin.x + screen_w - frame_w, origin.y}, source = {0, 0};
         SIZE size = {frame_w, frame_h};

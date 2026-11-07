@@ -7,7 +7,7 @@ Works offline and online with [FH2MP](https://github.com/Charelene/FH2MP).
 > Press **F** (controller: hold **LS + Y**) and walk around Forza Horizon 2 on foot – **with real collision** (trees, walls, buildings, ground).
 > Walk, run and jump, fade to black with **car door sounds**, your car stays parked until you get back in. Offline only.
 
-**[⬇ Download the latest version](../../releases/latest)** · current version: **V7 – The Big Update**
+**[⬇ Download the latest version](../../releases/latest)** · current version: **V7.1**
 
 **[Join the Gripline Discord](https://discord.gg/g83eBcrq)** · problems, questions, ideas for V8 and showcase. Join to always stay up to date with every new version.
 
@@ -26,7 +26,8 @@ mod. Since V6 Gripline only does what the others don't:
 | **Noclip** *(V6.4)* | **F6** lets your car fly through the map: through walls, the ground and buildings. W/S fly forward/back, A/D turn, Space/Left Ctrl up/down, Left Shift held = 4x faster; the arrow keys still move the camera. A card says on/off and shows speed and height while flying (mph/ft or km/h/m, like the game's speedometer). Offline only: a card says when it is locked in an online session and available again offline (like nitro). |
 | **Cards** | Small Gripline cards at the top right of the picture (also in fullscreen). Can be switched off; colour selectable (*Gripline: Card Colour*: blue, red, green, purple, orange, yellow, pink, white). V6.4 cards: every setting changed in the menu ("Traffic: Preset – Much More Traffic"), a trip summary in the pause menu (distance, top speed, driving time of the session; miles/mph when the game is set to mph), wheel connected (green) / disconnected (red, WARNING), and a start check when Azimuth, Extra Options and FH2MP do not fit together (e.g. FH2MP needs an update for a new Azimuth; red, WARNING). Warning cards are always red with WARNING in the title (also "Nitro off" online, with the reason), noclip locked is orange, "Nitro on again" and noclip available again are green; all other cards use the chosen colour. |
 | **Gripline menu** *(V7)* | **F8** (controller: hold **LS + D-pad right**) opens the Gripline menu in the game: change, add or reset keys, traffic, cards, card design, steering animation, cockpit view 2, live telemetry, cruise control, world options, no damage, problem report. Arrows/Enter/Esc or D-pad/A/B. |
-| **Walking** *(V7)* | **F** (controller: hold **LS + Y**) gets you out of the car: walk on foot, invisible, with collision (trees, walls, buildings). WASD walk, arrows look, Shift run, Space jump (controller: sticks, RT run, A jump). The car stays parked; **F** / **Y** near the car gets you back in. Fade to black with car door sounds. Offline only. |
+| **Walking** *(V7)* | **F** (controller: hold **LS + Y**) gets you out of the car: walk on foot, invisible, with collision (trees, walls, buildings). WASD walk, mouse or arrows look, Shift run, Space jump, hold Ctrl to crouch (controller: sticks, RT run, A jump, hold B to crouch). Smooth movement and camera since V7.1; mouse steering pauses while walking. The car stays parked; **F** / **Y** near the car gets you back in. Fade to black with car door sounds. Offline only. |
+| **Mouse look** *(V7.1)* | Move the mouse while driving to look around, in every view (inside the camera turns, outside it circles the car). Leave the mouse alone for 2 s while driving and it eases back; standing still it stays. Off while mouse steering is on. `DriveMouseLook` in FH2_Keyboard.ini (percent, 0 = off). |
 | **Freecam** *(V7)* | **F7** (controller: hold **LS + D-pad down**) flies a free camera through the world, keys like noclip. Offline only. Noclip is now also on the controller (**LS + D-pad up**). |
 | **Cruise control** *(V7)* | **K** (controller: hold **LS + D-pad left**) holds your speed. Off with K, braking or a crash; options in F8. |
 | **Live telemetry** *(V7)* | Panel with speed, grip/drift angle, g-forces, 0-100 km/h (0-60 mph), quarter mile, 0-200, braking distance, top speed; position, size and opacity selectable; optional CSV recording (`Gripline_Telemetry`). |
@@ -35,6 +36,7 @@ mod. Since V6 Gripline only does what the others don't:
 | **World** *(V7)* | Speed cameras off, names over cars off, event icons on the road off (F8, after a restart). |
 | **Card designs** *(V7)* | Classic, Enhanced and Overdrive; colours incl. black and rainbow; each card group can be hidden (presets All / Few / Warnings only). |
 | **Update notice** *(V7)* | At start Gripline asks GitHub once for the latest release and shows an orange card when a newer version is out. Nothing else is sent; switch it off in F8 › Settings. |
+| **Mouse in the menus** *(V7.1)* | Press Esc: move the mouse over a tile to select it, left click opens it, the wheel switches the tabs at the top and scrolls lists, right click goes back. Uses the normal Windows mouse. `MenuMouse` in FH2_Keyboard.ini (1 = on, 0 = off). |
 | **Mouse steering** *(V7, experimental)* | Steer with the mouse (off by default, F8). |
 | **Azimuth Mapper check** | While Azimuth Mapper (by bigdamnhero6) runs, Gripline's keyboard stays off and a card says so. |
 | **Problem report** | *Gripline: Create Problem Report* packs logs and settings into `Gripline_Report.zip` next to `azimuth.exe`. Nothing is sent anywhere. |
@@ -151,6 +153,7 @@ Wheel problems belong to Azimuth (report them there without mods).
 - **MRAlexis99**, Midnight and the Discord community – ideas for V7 (no damage, telemetry, world options, mouse steering)
 - seveN and a YouTube viewer – bug reports (V6.4.1, V6.5)
 - **[Sounds From The Lab](https://soundsfromthelab.com)** – car door sounds for walking (royalty-free, "Car Door Opening And Closing Slamming Shut")
+- **[Deuquan](https://github.com/Deuquan/FH2-CameraMods)** – his FH2 Camera Mods showed how smooth walking can feel; that inspired the V7.1 walking polish (easing, crouch, mouse look). No code was taken: Gripline's walking mode is its own implementation, with real collision
 - Works well with: **[NitroSystem](https://github.com/qiangqiang101/NitroSystem)** by qiangqiang101, **Azimuth Mapper** by bigdamnhero6
 
 ## Building

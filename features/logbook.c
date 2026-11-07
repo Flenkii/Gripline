@@ -432,13 +432,13 @@ static void show_news(void) {
         if (save_news_seen()) log_append("LOGBOOK: what's-new cards hidden (CardsHidden), NewsSeen saved.\r\n");
         return;
     }
-    const char *badge = de ? "NEU IN V7" : "NEW IN V7";
+    const char *badge = de ? "NEU IN V7.1" : "NEW IN V7.1";
     /* the last one shown ends up on top */
-    notify_show_tinted(de ? "Freecam & Fahrtenbuch\nF7 Freecam, km pro Auto in F8" : "Freecam & logbook\nF7 freecam, km per car in F8",
+    notify_show_tinted(de ? "Maus im Menü\nEsc: Kacheln anklicken, Rad, Rechtsklick" : "Mouse in the menus\nEsc: click tiles, wheel, right click",
                        NOTIFY_COLOR_GREEN, badge, 1);
-    notify_show_tinted(de ? "Live-Telemetrie\nViertelmeile, Bremsweg & mehr (F8)" : "Live telemetry\nQuarter mile, braking & more (F8)",
+    notify_show_tinted(de ? "Maus-Blick im Auto\nMaus bewegen = umschauen" : "Mouse look in the car\nMove the mouse to look around",
                        NOTIFY_COLOR_GREEN, badge, 1);
-    notify_show_tinted(de ? "Das Gripline-Menü\nF8: Tasten, Kein Schaden, Welt" : "The Gripline menu\nF8: keys, no damage, world",
+    notify_show_tinted(de ? "Laufen, weicher\nDucken (Strg), Handkamera (F8)" : "Smoother walking\nCrouch (Ctrl), handheld camera (F8)",
                        NOTIFY_COLOR_GREEN, badge, 1);
     if (save_news_seen()) log_append("LOGBOOK: what's-new cards shown, NewsSeen saved.\r\n");
     else log_append("LOGBOOK: what's-new cards shown, but Gripline.ini could not be written.\r\n");

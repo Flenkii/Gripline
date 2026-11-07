@@ -53,9 +53,22 @@ int walking_car_hidden(float out[3]);
 /* Input of one step (noclip.c fills it from the keyboard and the controllers). */
 typedef struct {
     float ahead, side, yaw, pitch; /* -1..1 */
-    int run, jump;
+    int run, jump, crouch;
+    float mouse_x, mouse_y; /* mouse counts this step (already times WalkMouseLook %) */
 } WalkInput;
 void noclip_walk_input(WalkInput *input);
+
+/* V7.1: the hooked camera the game views through now (index into walking.c's list, -1 = none of
+   them / not known), and 1 when it is one of the follow (outside) cameras. */
+int walking_view_camera(void);
+int walking_view_outside(void);
+
+/* V7.1 handheld camera (Marvin 07.11.2026): the walking camera moves like a phone held in the hand
+   (slow drift, breathing, a dip at each step, a little lag when turning). 0 off, 1 light, 2 medium,
+   3 strong; Gripline.ini [Gripline] WalkHandheld, F8 menu. */
+#define WALK_HANDHELD_COUNT 4
+void walking_set_handheld(int level);
+int walking_handheld(void);
 
 /* Door sounds of the fade when getting out / in (Marvin 06.11.2026, his own sound file, cut in two,
    built into the DLL): 0 = door opens, 1 = door shuts. Played through Windows (winmm PlaySoundW,

@@ -15,6 +15,7 @@
 #include "no_damage.h"
 #include "update_check.h"
 #include "cruise.h"
+#include "walking.h"
 
 #define VK_UP_ 0x26
 #define VK_LEFT_ 0x25
@@ -29,11 +30,11 @@
 #define MAX_ROWS (NOTIFY_PANEL_ROWS - 1)
 
 enum { LEVEL_CLOSED, LEVEL_GROUPS, LEVEL_LIST, LEVEL_BINDING, LEVEL_CAPTURE, LEVEL_RESET_ALL, LEVEL_STYLE, LEVEL_MOUSE, LEVEL_TELEMETRY, LEVEL_WORLD, LEVEL_LOGBOOK, LEVEL_RECORDS, LEVEL_DAMAGE,
-       LEVEL_SETTINGS, LEVEL_COLOR, LEVEL_VIEW_FORWARD, LEVEL_VIEW_UP, LEVEL_TRAFFIC, LEVEL_CARDS, LEVEL_CRUISE, LEVEL_COUNT };
+       LEVEL_SETTINGS, LEVEL_COLOR, LEVEL_VIEW_FORWARD, LEVEL_VIEW_UP, LEVEL_TRAFFIC, LEVEL_CARDS, LEVEL_CRUISE, LEVEL_HANDHELD, LEVEL_COUNT };
 
 /* first page: rows after the binding pages */
 enum { TOP_STYLE = 100, TOP_RESET = 101, TOP_MOUSE = 102, TOP_TELEMETRY = 103, TOP_WORLD = 104, TOP_LOGBOOK = 105, TOP_RECORDS = 106, TOP_REPORT = 108, TOP_DAMAGE = 109,
-       TOP_SETTINGS = 110, TOP_CARDS = 111, TOP_TRAFFIC = 112, TOP_CRUISE = 113 };
+       TOP_SETTINGS = 110, TOP_CARDS = 111, TOP_TRAFFIC = 112, TOP_CRUISE = 113, TOP_HANDHELD = 114 };
 
 /* settings page (V7): rows */
 enum { SET_COLOR, SET_STEERING, SET_VIEW_FORWARD, SET_VIEW_UP, SET_UPDATE };
@@ -565,6 +566,9 @@ static const unsigned world_ids[3] = {RIG_GRIP_SPEED_CAMERAS, RIG_GRIP_CAR_LABEL
 static const wchar_t *const world_german[3] = {L"Blitzer", L"Namen über Autos", L"Event-Symbole auf der Straße"};
 static const wchar_t *const world_english[3] = {L"Speed cameras", L"Names above cars", L"Event icons on the road"};
 
+/* V7.1 walking: handheld camera levels (walking.h) */
+static const wchar_t *const hand_german[WALK_HANDHELD_COUNT] = {L"Aus (ruhig)", L"Leicht", L"Mittel", L"Stark"};
+static const wchar_t *const hand_english[WALK_HANDHELD_COUNT] = {L"Off (steady)", L"Light", L"Medium", L"Strong"};
 static const wchar_t *const damage_german[NO_DAMAGE_COUNT] = {L"Aus (wie im Spiel)", L"Andere Autos", L"Alle Autos"};
 static const wchar_t *const damage_english[NO_DAMAGE_COUNT] = {L"Off (as in the game)", L"Other cars", L"All cars"};
 static const wchar_t *const damage_short_german[NO_DAMAGE_COUNT] = {L"Aus", L"Andere", L"Alle"};
@@ -637,6 +641,8 @@ static void build_page(wchar_t *title) {
                     tr(damage_short_german[no_damage_mode()], damage_short_english[no_damage_mode()]), 0, TOP_DAMAGE);
             row_add(L"Gripline", L"", NOTIFY_ROW_SECTION, -1);
             row_add(tr(L"Einstellungen", L"Settings"), L"›", 0, TOP_SETTINGS);
+            row_add(tr(L"Laufen: Handkamera", L"Walking: handheld camera"),
+                    tr(hand_german[walking_handheld()], hand_english[walking_handheld()]), 0, TOP_HANDHELD);
             row_add(tr(L"Karten & Hinweise", L"Cards & notices"), cards_preset_name(), 0, TOP_CARDS);
             row_add(tr(L"Karten-Design", L"Card design"), style_names[style_saved], 0, TOP_STYLE);
             row_add(tr(L"Problem-Bericht erstellen", L"Create problem report"), L"ZIP", 0, TOP_REPORT);
@@ -880,6 +886,14 @@ static void build_page(wchar_t *title) {
             row_add(tr(L"Wirkt nach Spiel-Neustart", L"Takes effect after a restart"), L"", NOTIFY_ROW_INFO, -1);
             hint(0);
             break;
+        case LEVEL_HANDHELD:
+            wcopy(title, 0, 64, tr(L"Laufen: Handkamera", L"Walking: handheld camera"));
+            for (int i = 0; i < WALK_HANDHELD_COUNT; ++i)
+                row_add(tr(hand_german[i], hand_english[i]), i == walking_handheld() ? tr(L"✓ aktiv", L"✓ active") : L"", 0, i);
+            row_add(tr(L"Kamera wie ein Handy in der Hand", L"Camera like a phone in your hand"), L"", NOTIFY_ROW_INFO, -1);
+            row_add(tr(L"Wirkt sofort", L"Takes effect at once"), L"", NOTIFY_ROW_INFO, -1);
+            hint(0);
+            break;
         case LEVEL_DAMAGE:
             wcopy(title, 0, 64, tr(L"Kein Schaden an Autos", L"No damage on cars"));
             for (int i = 0; i < NO_DAMAGE_COUNT; ++i)
@@ -950,6 +964,7 @@ static void back(void) {
         case LEVEL_TELEMETRY: m.level = LEVEL_GROUPS; break;
         case LEVEL_WORLD: m.level = LEVEL_GROUPS; break;
         case LEVEL_DAMAGE: m.level = LEVEL_GROUPS; break;
+        case LEVEL_HANDHELD: m.level = LEVEL_GROUPS; break;
         case LEVEL_LOGBOOK: m.level = LEVEL_GROUPS; break;
         case LEVEL_RECORDS: confirm_clear = 0; m.level = LEVEL_GROUPS; break;
         case LEVEL_BINDING: m.level = LEVEL_LIST; break;
@@ -1007,6 +1022,9 @@ static void choose(void) {
             } else if (action == TOP_LOGBOOK) {
                 m.level = LEVEL_LOGBOOK;
                 m.sel[LEVEL_LOGBOOK] = 0;
+            } else if (action == TOP_HANDHELD) {
+                m.level = LEVEL_HANDHELD;
+                m.sel[LEVEL_HANDHELD] = walking_handheld();
             } else if (action == TOP_DAMAGE) {
                 m.level = LEVEL_DAMAGE;
                 m.sel[LEVEL_DAMAGE] = no_damage_mode();
@@ -1098,6 +1116,22 @@ static void choose(void) {
                 }
             }
             break;
+        case LEVEL_HANDHELD: {
+            if (action < 0 || action >= WALK_HANDHELD_COUNT) break;
+            walking_set_handheld(action);
+            int saved = save_gripline_digit("WalkHandheld", action);
+            char text[192];
+            unsigned t = 0;
+            wchar_t line[128];
+            unsigned n = wcopy(line, 0, 128, tr(L"Handkamera: ", L"Handheld camera: "));
+            n = wcopy(line, n, 128, tr(hand_german[action], hand_english[action]));
+            if (!saved) wcopy(line, n, 128, tr(L"\nNur bis zum Spielende (nicht gespeichert)", L"\nUntil the game closes (not saved)"));
+            utf8(line, text, sizeof(text), &t);
+            text[t] = 0;
+            notify_show(text);
+            log_append_value("KEYMENU: walking handheld camera ", action);
+            break;
+        }
         case LEVEL_DAMAGE: {
             if (action < 0 || action >= NO_DAMAGE_COUNT) break;
             no_damage_set_mode(action);
