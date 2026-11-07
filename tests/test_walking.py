@@ -32,6 +32,7 @@ e.call('Fh2TestKeyboardAsync', e.stub('GetAsyncKeyState', lambda: 0x8000 if (e.a
 e.call('Fh2TestKeyboardSetup', e.stub('RoGetActivationFactory', lambda: 0x80004002), e.put_wstr('C:\\test'))
 check('Fh2TestWalkStep' in e.exports, 'Walking-Testfunktion vorhanden')
 out = e.alloc(64)
+e.call('Fh2TestWalkHandheld', 0)  # steady camera for the exact checks; the handheld one at the end
 near = lambda a, b, d=2e-3: all(abs(x - y) < d for x, y in zip(a, b))
 
 
@@ -146,6 +147,21 @@ eye0 = eye
 eye, d, dist, kmh = step(200)
 check(abs(eye[1] - eye0[1]) < 1e-3, 'ohne Kollisionswelt: kein Springen, bleibt auf Autohoehe')
 keys.clear()
+
+# V7.1 handheld camera: standing still the look drifts a little, slowly, and stays near the middle
+keys.clear()
+eye, d, dist, kmh = step(20, reset=1)
+e.call('Fh2TestWalkHandheld', 2)
+looks = []
+for i in range(150):
+    eye, d, dist, kmh = step(20)
+    looks.append(d)
+dev = max(math.degrees(math.acos(max(-1.0, min(1.0, l[2] / math.hypot(*l))))) for l in looks)
+jump = max(math.degrees(math.acos(max(-1.0, min(1.0, sum(a * b for a, b in zip(p, q)) / (math.hypot(*p) * math.hypot(*q))))))
+           for p, q in zip(looks, looks[1:]))
+check(0.05 < dev < 1.5, f'Handkamera Mittel: Blick wandert leicht (max {dev:.2f} Grad)')
+check(jump < 0.1, f'Handkamera: ohne Ruckeln (max {jump:.3f} Grad pro Bild)')
+e.call('Fh2TestWalkHandheld', 0)
 
 # controller (XINPUT_GAMEPAD as the game's controller hook gives it)
 pad = e.alloc(16)

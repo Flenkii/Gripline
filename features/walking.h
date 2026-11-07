@@ -63,6 +63,13 @@ void noclip_walk_input(WalkInput *input);
 int walking_view_camera(void);
 int walking_view_outside(void);
 
+/* V7.1 handheld camera (Marvin 07.11.2026): the walking camera moves like a phone held in the hand
+   (slow drift, breathing, a dip at each step, a little lag when turning). 0 off, 1 light, 2 medium,
+   3 strong; Gripline.ini [Gripline] WalkHandheld, F8 menu. */
+#define WALK_HANDHELD_COUNT 4
+void walking_set_handheld(int level);
+int walking_handheld(void);
+
 /* Door sounds of the fade when getting out / in (Marvin 06.11.2026, his own sound file, cut in two,
    built into the DLL): 0 = door opens, 1 = door shuts. Played through Windows (winmm PlaySoundW,
    loaded only when needed), so at the Windows volume, not the game's. Silent when winmm is missing. */

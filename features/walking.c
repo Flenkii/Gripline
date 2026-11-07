@@ -70,6 +70,9 @@ static float bob_amount;           /* 0..1 */
 static float eye_y;                /* the eased eye height */
 static int eye_y_set;
 static float look[3] = {0, 0, 1};
+/* V7.1 handheld camera: level (any thread), wave phases (camera thread) */
+static volatile LONG handheld = 2;
+static float hand_phase[7];
 #ifdef FH2_TWEAKS_TEST
 static float test_mouse[2]; /* tests: mouse counts for the next step */
 #endif  /* the direction given to the camera (with the stride's small sway) */
@@ -221,6 +224,24 @@ static void sin_cos_wide(float a, float *s, float *c) {
     } else {
         sin_cos(a, s, c);
     }
+}
+
+void walking_set_handheld(int level) {
+    InterlockedExchange(&handheld, level < 0 ? 0 : level >= WALK_HANDHELD_COUNT ? WALK_HANDHELD_COUNT - 1 : level);
+}
+
+int walking_handheld(void) {
+    return (int)handheld;
+}
+
+/* the hand: slow waves of different lengths that never quite repeat (0.6..1.2 s for the shake,
+   ~4 s breathing, 7-11 s drift); each one -1..1 */
+static const float hand_hz[7] = {0.093f, 0.137f, 0.21f, 0.26f, 0.83f, 1.31f, 1.67f};
+static float hand_wave(unsigned a, unsigned b, float wa) {
+    float s1, c1, s2, c2;
+    sin_cos_wide(hand_phase[a], &s1, &c1);
+    sin_cos_wide(hand_phase[b], &s2, &c2);
+    return s1 * wa + s2 * (1.0f - wa);
 }
 
 void walking_enter(const float position[3], const float right[3], const float forward[3]) {
@@ -404,12 +425,13 @@ static void step(float dt) {
     test_mouse[0] = test_mouse[1] = 0.0f;
 #endif
     /* looking: arrows / stick turn at an eased rate, the mouse turn is handed out over a few frames */
-    float kl = ease(dt, WALK_EASE_LOOK);
+    float hand = handheld == 1 ? 0.5f : handheld == 2 ? 1.0f : handheld >= 3 ? 1.7f : 0.0f;
+    float kl = ease(dt, WALK_EASE_LOOK * (1.0f + 0.7f * hand)); /* the hand turns a little behind */
     yaw_rate += (in.yaw * WALK_LOOK - yaw_rate) * kl;
     pitch_rate += (in.pitch * WALK_LOOK - pitch_rate) * kl;
     mouse_yaw = clampf(mouse_yaw - in.mouse_x * WALK_MOUSE_RAD, -1.5f, 1.5f);
     mouse_pitch = clampf(mouse_pitch - in.mouse_y * WALK_MOUSE_RAD, -1.5f, 1.5f);
-    float km = ease(dt, WALK_EASE_MOUSE);
+    float km = ease(dt, WALK_EASE_MOUSE * (1.0f + 1.2f * hand));
     float myaw = mouse_yaw * km, mpitch = mouse_pitch * km;
     mouse_yaw -= myaw, mouse_pitch -= mpitch;
     float yaw_step = yaw_rate * dt + myaw;
@@ -569,12 +591,33 @@ static void step(float dt) {
     if (!eye_y_set || eye_y - eye_want > 1.5f || eye_want - eye_y > 1.5f) eye_y = eye_want, eye_y_set = 1;
     eye_y += (eye_want - eye_y) * ease(dt, WALK_EASE_EYE);
     eye_y = clampf(eye_y, eye_want - WALK_EYE_BELOW, eye_want + WALK_EYE_ABOVE);
-    eye[0] = head[0] + rx * side_sway, eye[1] = eye_y + bob, eye[2] = head[2] + rz * side_sway;
+    /* handheld camera: drift and breathing standing still, a hand that bounces with the steps */
+    float hand_yaw = 0.0f, hand_pitch = 0.0f, hand_side = 0.0f, hand_up = 0.0f;
+    if (hand > 0.0f) {
+        for (unsigned i = 0; i < 7; ++i) {
+            hand_phase[i] += dt * 6.2831853f * hand_hz[i];
+            if (hand_phase[i] > 6.2831853f) hand_phase[i] -= 6.2831853f;
+        }
+        float moving = bob_amount;
+        hand_yaw = hand * (0.0075f * hand_wave(0, 2, 0.6f) + 0.0018f * hand_wave(4, 6, 0.5f));
+        hand_pitch = hand * (0.0045f * hand_wave(1, 3, 0.5f) + 0.0015f * hand_wave(5, 4, 0.6f));
+        hand_side = hand * 0.008f * hand_wave(2, 5, 0.7f);
+        hand_up = hand * 0.006f * hand_wave(3, 6, 0.6f);
+        if (bob_on) { /* each step jolts the hand a little: down, then back */
+            float s2, c2;
+            sin_cos_wide(2.0f * bob_phase + 0.6f, &s2, &c2);
+            hand_pitch -= hand * 0.006f * moving * c2;
+            hand_yaw += hand * 0.004f * moving * s2 * 0.5f;
+        }
+    }
+    eye[0] = head[0] + rx * (side_sway + hand_side), eye[1] = eye_y + bob + hand_up,
+    eye[2] = head[2] + rz * (side_sway + hand_side);
     {
-        float ss, sc;
-        sin_cos(look_sway, &ss, &sc);
+        float ss, sc, ps = pitch_sin, pc = pitch_cos;
+        sin_cos(look_sway + hand_yaw, &ss, &sc);
+        if (hand_pitch != 0.0f) sin_cos(clampf(pitch + hand_pitch, -WALK_PITCH_MAX, WALK_PITCH_MAX), &ps, &pc);
         float lx = -mirror * dir[1], lz = mirror * dir[0]; /* left, as in turn() */
-        look[0] = pitch_cos * (dir[0] * sc + lx * ss), look[1] = pitch_sin, look[2] = pitch_cos * (dir[1] * sc + lz * ss);
+        look[0] = pc * (dir[0] * sc + lx * ss), look[1] = ps, look[2] = pc * (dir[1] * sc + lz * ss);
     }
     hide_at[0] = centre[0], hide_at[1] = centre[1] - WALK_HIDE_BELOW, hide_at[2] = centre[2];
     float cx = centre[0] - car_place[0], cz = centre[2] - car_place[2];
@@ -818,6 +861,9 @@ __declspec(dllexport) void Fh2TestWalkStep(unsigned char *game_image, int reset,
     out[7] = (float)walking_speed_kmh();
 }
 
+__declspec(dllexport) void Fh2TestWalkHandheld(int level) {
+    walking_set_handheld(level);
+}
 __declspec(dllexport) void Fh2TestWalkMouse(int dx, int dy) {
     test_mouse[0] = (float)dx, test_mouse[1] = (float)dy;
 }
