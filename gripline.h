@@ -6,12 +6,12 @@
 #include <windows.h>
 
 /* Gripline: an FH2 Mod Platform mod (fh2-mods\Gripline.dll) next to the official Extra Options. */
-#define GRIPLINE_VERSION "V7"
+#define GRIPLINE_VERSION "V7.1"
 /* this build as a release number: the update notice compares it with the newest GitHub release */
 #define GRIPLINE_RELEASE_MAJOR 7
-#define GRIPLINE_RELEASE_MINOR 0
+#define GRIPLINE_RELEASE_MINOR 1
 #define GRIPLINE_RELEASE_PATCH 0 /* third number of the release tag (fork6.4.1), update_check.c */
-/* NewsSeen value of this version (70 = V7.0): what's-new cards and the F8 hint card show until then */
+/* NewsSeen value of this version (71 = V7.1): what's-new cards and the F8 hint card show until then */
 #define GRIPLINE_NEWS_VERSION (GRIPLINE_RELEASE_MAJOR * 10 + GRIPLINE_RELEASE_MINOR)
 #define MOD_INI_NAME L"Gripline.ini"
 #define MOD_LOG_NAME L"Gripline.log"
@@ -29,7 +29,7 @@ typedef struct {
     int card_style; /* NOTIFY_STYLE_*: 0 Classic, 1 Enhanced, 2 Overdrive (V7) */
     int update_check; /* [Gripline] UpdateCheck: ask GitHub for a newer release at start (V7) */
     int speed_cameras, car_labels, telemetry, event_icons;
-    int news_seen; /* [Gripline] NewsSeen: version whose what's-new cards were shown (70 = V7.0), logbook.c */
+    int news_seen; /* [Gripline] NewsSeen: version whose what's-new cards were shown (71 = V7.1), logbook.c */
     int no_damage; /* [Gripline] NoDamage: 0 off, 1 other cars, 2 all cars (V7, no_damage.h) */
     int telemetry_pos, telemetry_opacity, telemetry_size; /* [Gripline] TelemetryPosition 0..5, TelemetryOpacity %, TelemetrySize % (V7, notify.h) */
     int cruise_crash_off, cruise_min_speed, cruise_slow_off; /* [Gripline] CruiseCrashOff 0/1, CruiseMinSpeed km/h (V7, cruise.h) */

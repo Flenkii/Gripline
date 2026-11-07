@@ -1,4 +1,4 @@
-Gripline V7 – Keyboard bindings / Tastenbelegung
+Gripline V7.1 – Keyboard bindings / Tastenbelegung
 ========================================================================
 Default bindings. Change them in FH2_Keyboard.ini next to azimuth.exe (several keys with a
 comma, e.g. Throttle=W,Up; the key names are listed at the top of the file).
@@ -41,6 +41,12 @@ NOCLIP (wenn an / while on)
   A / D              Drehen                       Turn
   Leertaste / Strg   Steigen / sinken             Space / Left Ctrl: up / down
   Linke Shift-Taste  Schneller (halten)           Left Shift: faster (hold)
+
+MAUS IM MENÜ (V7.1) / MOUSE IN THE MENUS (Esc)
+  Maus über Kachel   Kachel auswählen             Mouse over a tile: select it
+  Linksklick         Öffnen                       Left click: open
+  Mausrad            Reiter oben / Listen         Wheel: tabs at the top / scroll lists
+  Rechtsklick        Zurück                       Right click: back
 
 MAUS-BLICK IM AUTO (V7.1) / MOUSE LOOK IN THE CAR
   Maus bewegen       Kamera drehen (jede Ansicht)  Move the mouse: turn the camera (every view)

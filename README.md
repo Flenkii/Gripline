@@ -7,7 +7,7 @@ Works offline and online with [FH2MP](https://github.com/Charelene/FH2MP).
 > Press **F** (controller: hold **LS + Y**) and walk around Forza Horizon 2 on foot – **with real collision** (trees, walls, buildings, ground).
 > Walk, run and jump, fade to black with **car door sounds**, your car stays parked until you get back in. Offline only.
 
-**[⬇ Download the latest version](../../releases/latest)** · current version: **V7 – The Big Update**
+**[⬇ Download the latest version](../../releases/latest)** · current version: **V7.1**
 
 **[Join the Gripline Discord](https://discord.gg/g83eBcrq)** · problems, questions, ideas for V8 and showcase. Join to always stay up to date with every new version.
 
@@ -36,6 +36,7 @@ mod. Since V6 Gripline only does what the others don't:
 | **World** *(V7)* | Speed cameras off, names over cars off, event icons on the road off (F8, after a restart). |
 | **Card designs** *(V7)* | Classic, Enhanced and Overdrive; colours incl. black and rainbow; each card group can be hidden (presets All / Few / Warnings only). |
 | **Update notice** *(V7)* | At start Gripline asks GitHub once for the latest release and shows an orange card when a newer version is out. Nothing else is sent; switch it off in F8 › Settings. |
+| **Mouse in the menus** *(V7.1)* | Press Esc: move the mouse over a tile to select it, left click opens it, the wheel switches the tabs at the top and scrolls lists, right click goes back. Uses the normal Windows mouse. `MenuMouse` in FH2_Keyboard.ini (1 = on, 0 = off). |
 | **Mouse steering** *(V7, experimental)* | Steer with the mouse (off by default, F8). |
 | **Azimuth Mapper check** | While Azimuth Mapper (by bigdamnhero6) runs, Gripline's keyboard stays off and a card says so. |
 | **Problem report** | *Gripline: Create Problem Report* packs logs and settings into `Gripline_Report.zip` next to `azimuth.exe`. Nothing is sent anywhere. |

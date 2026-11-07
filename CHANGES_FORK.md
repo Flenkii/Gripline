@@ -74,6 +74,14 @@ Plugin build on Azimuth 1.0.3 (October 29, 2026, tested in the game by Flenkii):
 - traffic: amounts 30/45/70/100/200 cars, faster spawning; presets Original / Much More Traffic / No Traffic /
   Drivatars Only, chosen by name on the platform page *Traffic* (MODS > Installed mods > Gripline)
 
+## V7.1 (November 2026)
+- `features/menu_mouse.c/.h` – mouse in the game's menus: the real Windows cursor, the tile under it gets the
+  pad selection (D-pad steps, tile places read from the menu's own layout), left click = A, wheel = LB/RB over the
+  tab row or up/down, right click = B (`MenuMouse` in FH2_Keyboard.ini)
+- `features/drive_look.c/.h` – mouse look in the car, every view (outside the camera circles the car)
+- walking: easing, mouse look, crouch, handheld camera (F8), driver figure hidden, follow camera when getting out
+- what's-new cards for V7.1
+
 ## V7 – The Big Update (November 2026)
 New files:
 - `features/key_menu.c/.h` – Gripline menu (F8 / LS + D-pad right), keys saved to `FH2_Keyboard.ini`, other settings to `Gripline.ini`

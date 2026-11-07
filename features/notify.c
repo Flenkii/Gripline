@@ -1552,7 +1552,7 @@ static int draw_panel_v7(const wchar_t *title, const NotifyPanelRow *rows, unsig
         gdi.SelectObject(dc, tiny);
         RECT kclip = {title_x, g, right - l->pad, g + header};
         gdi.SetTextColor(dc, over && over_light_card(tone) ? RGB(40, 30, 20) : RGB(mix8(tone[1][0], 255, 0.55f), mix8(tone[1][1], 255, 0.55f), mix8(tone[1][2], 255, 0.55f)));
-        gdi.ExtTextOutW(dc, title_x + (int)(2 * s), g + header / 2 - (int)(25 * s), ETO_CLIPPED, &kclip, L"GRIPLINE  V7", 12, NULL);
+        gdi.ExtTextOutW(dc, title_x + (int)(2 * s), g + header / 2 - (int)(25 * s), ETO_CLIPPED, &kclip, L"GRIPLINE  V7.1", 14, NULL);
         gdi.SelectObject(dc, main);
         HFONT fit = NULL; /* long titles step down a size instead of being cut */
         if (text_px(dc, title, 15.0f * s) > clip.right - clip.left) {

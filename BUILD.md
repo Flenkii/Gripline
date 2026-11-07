@@ -38,5 +38,5 @@ python test_no_damage.py ../out-test/fh2-mods/Gripline.dll path/to/forza_durango
 ## Release ZIP
 
 ```text
-python tools/make_release.py out Gripline_V7.zip
+python tools/make_release.py out Gripline_V7.1.zip
 ```

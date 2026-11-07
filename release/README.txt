@@ -1,4 +1,4 @@
-GRIPLINE V7 "THE BIG UPDATE" – keyboard, cockpit, walking & more for Forza Horizon 2 (Azimuth)
+GRIPLINE V7.1 – keyboard, cockpit, walking & more for Forza Horizon 2 (Azimuth)
 =========================================================================================
 An add-on next to Azimuth, the official Extra Options and FH2MP.
 
@@ -53,6 +53,14 @@ Gripline:
 Azimuth (its launcher): wheel, pedals, buttons, rotation and force feedback.
 Extra Options: weather, time of day, hiding the HUD (F1), autodrive (F2).
 
+
+NEW IN V7.1
+-----------
+  - Mouse in the menus: press Esc, move the mouse over a tile to select it, left click
+    opens it, wheel = tabs at the top / scroll lists, right click = back.
+  - Mouse look in the car (every view; outside the camera circles the car).
+  - Smoother walking: easing, mouse look, crouch (hold Ctrl / B), handheld camera (F8),
+    driver hidden while you walk, follow camera when you get out.
 
 3. NEW IN V7 – THE BIG UPDATE
 -----------------------------
@@ -137,6 +145,8 @@ fh2-mods\Gripline.dll aus dem Ordner "Azimuth" neben azimuth.exe kopieren. winmm
 ersetzen (bleibt das offizielle Extra Options). Einstellungen: Pause > Einstellungen > MODS.
 Lenkrad und Force Feedback: im Azimuth-Launcher. Wetter, Tageszeit, HUD aus (F1):
 Extra Options. Gripline: Tastatur, Cockpit, Verkehr, Nitro-Taste, Fehlerbericht.
+NEU IN V7.1: Maus im Menü (Esc: Kachel anklicken, Rad, Rechtsklick = zurück), Maus-Blick im
+Auto, weicheres Laufen mit Ducken und Handkamera.
 NEU IN V7: Gripline-Menü (F8), Laufen (F), Freecam (F7), Tempomat (K), Live-Telemetrie,
 Fahrtenbuch, Rekorde, Kein Schaden an Autos, Welt-Optionen, 3 Karten-Designs, Update-Hinweis.
 Probleme: im MODS-Menü "Gripline: Create Problem Report" und Gripline_Report.zip auf
