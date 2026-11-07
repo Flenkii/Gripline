@@ -58,6 +58,11 @@ typedef struct {
 } WalkInput;
 void noclip_walk_input(WalkInput *input);
 
+/* V7.1: the hooked camera the game views through now (index into walking.c's list, -1 = none of
+   them / not known), and 1 when it is one of the follow (outside) cameras. */
+int walking_view_camera(void);
+int walking_view_outside(void);
+
 /* Door sounds of the fade when getting out / in (Marvin 06.11.2026, his own sound file, cut in two,
    built into the DLL): 0 = door opens, 1 = door shuts. Played through Windows (winmm PlaySoundW,
    loaded only when needed), so at the Windows volume, not the game's. Silent when winmm is missing. */

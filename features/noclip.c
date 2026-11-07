@@ -438,6 +438,7 @@ static void tinted(const char *german, const char *english, int color) {
 }
 
 static NoclipHookFn switch_hook;
+static int view_before = -1, second_before, view_changed; /* V7.1, see fade_begin */
 
 static void put_int_card(char *out, size_t *n, int value) {
     char digits[12];
@@ -472,6 +473,11 @@ static void set_on(LONG value) {
         driver_wait = GetTickCount64() + FREE_DRIVER_WAIT_MS;
         cockpit_view_want_driver(1); /* the freecam is the driver camera, moved out of the car */
     }
+    if (before == MODE_WALK && value != MODE_WALK && value != MODE_FREECAM && view_changed) {
+        cockpit_view_want_camera(view_before, second_before); /* back in the car: the view from before */
+        view_changed = 0;
+    }
+    if (before == MODE_WALK && value == MODE_FREECAM) view_changed = 0;
     if (before == MODE_WALK && value != MODE_WALK) /* the car back at its place (it may be under the walker) */
         InterlockedExchange64(&park_until, (LONG64)(GetTickCount64() + FREE_PARK_MS));
     if (value == MODE_WALK) {
@@ -509,11 +515,20 @@ static void walk_out_card(void) {
     }
 }
 
+/* V7.1 (Marvin 07.11.2026): out of a cockpit view the car would be seen as the game's cut interior
+   model. In the black the camera goes outside first; back in the car the old view comes back. */
+#define FADE_CAMERA_WAIT_MS 3000 /* at most this much longer black while the camera changes */
 static void fade_begin(LONG to) {
     fade_to = to;
     fade_stage = 1;
     fade_at = GetTickCount64();
     notify_fade_black(1000, FADE_DOWN_MS);
+    if (to == MODE_WALK) {
+        view_before = walking_view_camera();
+        second_before = cockpit_view_second();
+        view_changed = view_before >= 0 && !walking_view_outside();
+        if (view_changed) cockpit_view_want_outside();
+    }
 }
 
 static void fade_stop(void) { /* online or a failed switch: the picture back at once */
@@ -524,9 +539,13 @@ static void fade_stop(void) { /* online or a failed switch: the picture back at 
 
 static void fade_tick(ULONGLONG now) {
     if (fade_stage == 1 && now >= fade_at + FADE_DOWN_MS) {
+        /* out of the car: wait in the black until the outside camera is there */
+        if (fade_to == MODE_WALK && cockpit_view_want_pending() && now < fade_at + FADE_DOWN_MS + FADE_CAMERA_WAIT_MS)
+            return;
         walking_door_sound(0);
         set_on(fade_to);
         if (on != fade_to) { /* not switched (see the log) */
+            if (fade_to == MODE_WALK && view_changed) cockpit_view_want_camera(view_before, second_before), view_changed = 0;
             fade_stop();
             return;
         }
@@ -542,7 +561,8 @@ static void fade_tick(ULONGLONG now) {
     } else if (fade_stage == 2 && !fade_shut && now >= fade_at + FADE_SHUT_MS) {
         fade_shut = 1;
         walking_door_sound(1);
-    } else if (fade_stage == 2 && now >= fade_at + FADE_HOLD_MS) {
+    } else if (fade_stage == 2 && now >= fade_at + FADE_HOLD_MS &&
+               !(cockpit_view_want_pending() && now < fade_at + FADE_HOLD_MS + FADE_CAMERA_WAIT_MS)) {
         notify_fade_black(0, FADE_UP_MS);
         if (fade_to == MODE_WALK) walk_out_card();
         else card("Eingestiegen", "Back in the car");

@@ -23,6 +23,13 @@ void cockpit_view_frame(void *camera);
 int cockpit_view_driver_active(void);
 void cockpit_view_want_driver(int on);
 
+/* V7.1 walking: press the camera button until an outside (follow) camera is active, or until the
+   given camera of walking.c's list (and cockpit 2 on / off) is back. pending = still pressing
+   (at most DRIVER_SEARCH_MS). */
+void cockpit_view_want_outside(void);
+void cockpit_view_want_camera(int index, int second);
+int cockpit_view_want_pending(void);
+
 /* Game start: hooks the game's controller state read so the camera button gets the extra step. */
 void cockpit_view_start(unsigned char *game_image);
 

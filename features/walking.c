@@ -632,9 +632,27 @@ static void *camera_update(void *camera, float dt, uintptr_t a, uintptr_t b) {
     return result;
 }
 
+/* V7.1: the camera the game looks through (its view getter runs for it), for the camera change
+   when getting out of / into the car (noclip.c, cockpit_view.c) */
+static volatile LONG view_index = -1;
+static volatile LONG64 view_tick;
+
+int walking_view_camera(void) {
+    LONG64 seen = view_tick;
+    if (!seen || GetTickCount64() - (ULONGLONG)seen > 300u) return -1;
+    return (int)view_index;
+}
+
+int walking_view_outside(void) {
+    int i = walking_view_camera();
+    return i >= 0 && cameras[i].family == 1;
+}
+
 static void *camera_view(void *camera, void *out) {
     int i = camera_index(camera);
     if (i < 0) return out;
+    InterlockedExchange(&view_index, i);
+    InterlockedExchange64(&view_tick, (LONG64)GetTickCount64());
     if (active) put_eye(camera, cameras[i].family);
     unsigned family = cameras[i].family;
     int turned = !active && drive_look_apply(camera, family, eye_field[family], dir_field[family]);
