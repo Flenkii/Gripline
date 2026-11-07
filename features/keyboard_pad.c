@@ -66,6 +66,7 @@ static int mouse_dead = 30;   /* [Keyboard] MouseDeadZone: percent of the game's
 static int mouse_center;      /* [Keyboard] MouseCenter: seconds without mouse movement until the wheel turns back straight, 0 = never */
 static int walk_mouse = 100;  /* [Keyboard] WalkMouseLook: walking's mouse look in percent, 0 = off (V7.1) */
 static int drive_mouse = 100; /* [Keyboard] DriveMouseLook: mouse look in the car in percent, 0 = off (V7.1) */
+static int menu_mouse = 100;  /* [Keyboard] MenuMouse: mouse pointer in the game's menus, speed in percent, 0 = off (V7.1) */
 static volatile LONG values[KEY_SETTING_COUNT];
 static int loaded;
 static const wchar_t *const setting_keys[KEY_SETTING_COUNT] = {L"Enabled", L"SteerTime", L"ReturnTime",
@@ -461,6 +462,8 @@ static void settings_load(void) {
     if (walk_mouse < 0 || walk_mouse > 300) walk_mouse = 100;
     drive_mouse = read_int(L"DriveMouseLook", 100);
     if (drive_mouse < 0 || drive_mouse > 300) drive_mouse = 100;
+    menu_mouse = read_int(L"MenuMouse", 100);
+    if (menu_mouse < 0 || menu_mouse > 300) menu_mouse = 100;
     for (unsigned i = 0; i < ARRAY_COUNT(bindings); ++i) {
         wchar_t text[96];
         GetPrivateProfileStringW(L"Keyboard", bindings[i].key, bindings[i].defaults, text, 96, ini_path);
@@ -891,6 +894,41 @@ int keyboard_drive_mouse(float *dx, float *dy) {
     *dx = 0.0f, *dy = 0.0f;
     if (!drive_mouse || mouse_sensitivity || !mouse_look_read(dx, dy)) return 0;
     *dx *= (float)drive_mouse / 100.0f, *dy *= (float)drive_mouse / 100.0f;
+    return 1;
+}
+
+/* V7.1 mouse pointer in the menus (menu_mouse.c): counts, buttons and wheel since the last call while
+   the game window is in front and the simulation does NOT run (menus, pause menu). The system cursor
+   stays parked in the middle of the window (Gripline draws its own pointer). */
+int keyboard_menu_mouse(int *dx, int *dy, int *buttons, int *wheel, int *client_w, int *client_h) {
+    *dx = *dy = *buttons = *wheel = 0;
+    *client_w = *client_h = 0;
+    if (!menu_mouse || !mouse_ready()) return 0;
+    HWND window = (game_has_focus() && !input_blocked && !driving_now()) ? foreground() : NULL;
+    RECT rect;
+    MousePoint centre = {0, 0}, now;
+    if (window && mouse.client_rect(window, &rect) && rect.right > 0 && rect.bottom > 0) {
+        centre.x = rect.right / 2;
+        centre.y = rect.bottom / 2;
+        if (!mouse.to_screen(window, &centre)) window = NULL;
+    } else {
+        window = NULL;
+    }
+    if (window && !di_open(window)) window = NULL;
+    if (!window) return 0;
+    if (InterlockedCompareExchange(&di_busy, 1, 0)) return 0;
+    DiMouseState state;
+    memory_copy(&state, &(DiMouseState){0}, sizeof(state));
+    HRESULT hr = ((DiStateFn)DI_SLOT(di.device, 9))(di.device, sizeof(state), &state);
+    if (FAILED(hr)) ((DiDeviceFn)DI_SLOT(di.device, 7))(di.device);
+    InterlockedExchange(&di_busy, 0);
+    if (FAILED(hr)) return 0;
+    if (mouse.get_pos(&now) && (now.x != centre.x || now.y != centre.y)) mouse.set_pos((int)centre.x, (int)centre.y);
+    *dx = (int)(state.x * menu_mouse / 100);
+    *dy = (int)(state.y * menu_mouse / 100);
+    *wheel = (int)state.z;
+    *buttons = ((state.buttons[0] & 0x80) ? 1 : 0) | ((state.buttons[1] & 0x80) ? 2 : 0) | ((state.buttons[2] & 0x80) ? 4 : 0);
+    *client_w = (int)rect.right, *client_h = (int)rect.bottom;
     return 1;
 }
 

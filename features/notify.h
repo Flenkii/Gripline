@@ -40,6 +40,9 @@ int notify_enabled(void);
 /* V7 walking: darkens the whole game picture, 0 = off .. 1000 = black, reached smoothly in ms
    (the fade when getting out and in). Shown even with cards switched off. Safe from any thread. */
 void notify_fade_black(int permille, unsigned ms);
+/* V7.1 menu mouse pointer: shown at client pixel (x, y) of the game window (tip of the arrow), also
+   with cards switched off. Card window only (the build Gripline ships). Safe from any thread. */
+void notify_cursor(int show, int x, int y);
 
 /* Card colour (menu, INI [Gripline] CardColor): bar, logo and title. Safe from any thread. */
 enum {

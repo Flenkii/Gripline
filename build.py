@@ -40,6 +40,7 @@ PLUGIN_SOURCES = [
     "features/noclip.c",
     "features/walking.c",
     "features/drive_look.c",
+    "features/menu_mouse.c",
     "features/no_damage.c",
     "features/trip.c",
     "features/wheel_watch.c",

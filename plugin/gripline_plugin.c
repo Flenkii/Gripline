@@ -37,6 +37,7 @@
 #include "features/game_language.h"
 #include "features/noclip.h"
 #include "features/walking.h"
+#include "features/menu_mouse.h"
 #include "features/no_damage.h"
 #include "features/version_check.h"
 #include "features/update_check.h"
@@ -513,6 +514,7 @@ static void start_features(void) {
     cockpit_view_start(game);
     walking_start(game);
     walking_set_handheld(options.walk_handheld);
+    menu_mouse_start(game); /* after walking: both chain the UI frame */
     no_damage_bind(game);
     no_damage_set_mode(options.no_damage);
     noclip_install();
