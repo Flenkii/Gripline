@@ -210,17 +210,12 @@ static void log_focus_chain(unsigned char *keyboard) {
 /* ---- hover + click (menumouse4): tiles are children of a Canvas (Canvas.Left/Top at +0x90/+0x94,
    RenderSize at +0x134/+0x138). AVUI's own hit test misses them (3D planes), so Gripline maps the pointer
    to a tile itself and gives it the keyboard focus, like the pad does. Left click then = A. */
-#define RVA_KEYBOARD_FOCUS 0x14d01d0u /* Keyboard::Focus(out ref, IInputElement*) */
-#define RVA_RELEASE 0x257730u
-#define ELEMENT_INPUT 0xb8u
 #define ELEMENT_LEFT 0x90u
 #define ELEMENT_SIZE 0x134u
 #define KEYBOARD_FOCUS 0x40u
 #define ORIGIN_X 100.0f /* the tile Canvas' place in the 1920x1080 menu (screenshot + StackPanel margin) */
 #define ORIGIN_Y 288.0f
 #define MAX_TILES 32
-typedef void (*FocusFn)(void *out, void *element);
-typedef void (*ReleaseFn)(void *object);
 static unsigned char *tile_canvas, *tiles[MAX_TILES];
 static int tile_count, hover_logs;
 static unsigned char *hovered;
@@ -272,6 +267,15 @@ static void collect_siblings(unsigned char *canvas, unsigned char *focused) {
     }
 }
 
+enum { IN_DPAD_LEFT = 2, IN_DPAD_RIGHT = 3 };
+#define STEP_WAIT_MS 260u
+#define MAX_STEPS 10
+static unsigned char *target;
+static int steps, click_waiting;
+static ULONGLONG step_at;
+static unsigned char *step_from;
+static void log_rect(const char *label, unsigned char *tile);
+
 static void track_focus(unsigned char *keyboard) {
     unsigned char *focused = keyboard ? read_pointer(keyboard + KEYBOARD_FOCUS) : NULL;
     if (!focused || !is_tile(focused)) return;
@@ -283,20 +287,57 @@ static void track_focus(unsigned char *keyboard) {
     if (tile_count != before) {
         collect_siblings(canvas, focused);
         log_append_value("MENUMOUSE: tiles known on this page ", tile_count);
+        for (int i = 0; i < tile_count && i < 12; ++i) log_rect("MENUMOUSE:   tile ", tiles[i]);
     }
 }
 
-static void focus_tile(unsigned char *tile) {
-    unsigned char out[16] = {0};
-    ((FocusFn)(game + RVA_KEYBOARD_FOCUS))(out, tile + ELEMENT_INPUT);
-    unsigned char *ref = NULL;
-    memory_copy(&ref, out + 8, 8);
-    if (ref && InterlockedDecrement((volatile LONG *)(ref + 0x10)) == 0) ((ReleaseFn)(game + RVA_RELEASE))(ref);
+static void log_rect(const char *label, unsigned char *tile) {
+    float r[4];
+    if (!tile || !tile_rect(tile, r)) return;
+    static char line[200];
+    unsigned n = 0;
+    line[0] = 0;
+    put_text(line, &n, sizeof(line), label);
+    put_float(line, &n, sizeof(line), r[0]);
+    put_text(line, &n, sizeof(line), ",");
+    put_float(line, &n, sizeof(line), r[1]);
+    put_text(line, &n, sizeof(line), " - ");
+    put_float(line, &n, sizeof(line), r[2]);
+    put_text(line, &n, sizeof(line), ",");
+    put_float(line, &n, sizeof(line), r[3]);
+    put_text(line, &n, sizeof(line), " ");
+    const char *name = class_name(tile);
+    put_text(line, &n, sizeof(line), name ? name : "?");
+    put_text(line, &n, sizeof(line), "\r\n");
+    log_append(line);
 }
 
-/* pointer in UI units -> focus the tile under it (only when it changes) */
+static void navigate(unsigned char *keyboard) {
+    unsigned char *focused = keyboard ? read_pointer(keyboard + KEYBOARD_FOCUS) : NULL;
+    ULONGLONG now = GetTickCount64();
+    if (!target || focused == target || steps >= MAX_STEPS || !focused) {
+        target = NULL;
+        if (click_waiting && now - step_at >= STEP_WAIT_MS) { click_waiting = 0; keyboard_menu_pulse(IN_A); }
+        return;
+    }
+    if (step_from && focused == step_from && now - step_at < STEP_WAIT_MS) return; /* step still on its way */
+    float a[4], b[4];
+    if (!tile_rect(focused, a) || !tile_rect(target, b)) { target = NULL; return; }
+    float cx = (b[0] + b[2]) * 0.5f, cy = (b[1] + b[3]) * 0.5f;
+    unsigned input;
+    if (cx < a[0]) input = IN_DPAD_LEFT;
+    else if (cx >= a[2]) input = IN_DPAD_RIGHT;
+    else if (cy < a[1]) input = IN_DPAD_UP;
+    else input = IN_DPAD_DOWN;
+    keyboard_menu_pulse(input);
+    ++steps;
+    step_from = focused;
+    step_at = now;
+}
+
 static void hover(unsigned char *keyboard, float ux, float uy, int moved) {
     track_focus(keyboard);
+    navigate(keyboard);
     if (!moved || !tile_count) return;
     unsigned char *under = NULL;
     float r[4];
@@ -305,13 +346,12 @@ static void hover(unsigned char *keyboard, float ux, float uy, int moved) {
             ux >= r[0] && ux < r[2] && uy >= r[1] && uy < r[3]) under = tiles[i];
     if (!under || under == hovered) return;
     hovered = under;
-    if (read_pointer(keyboard + KEYBOARD_FOCUS) != under) focus_tile(under);
+    target = under, steps = 0, step_from = NULL;
     if (hover_logs < 12) {
         ++hover_logs;
         log_append_value("MENUMOUSE: hover tile at UI x ", (int)ux);
         log_append_value("MENUMOUSE:   UI y ", (int)uy);
-        log_append(class_name(under) ? class_name(under) : "?");
-        log_append("\r\n");
+        log_rect("MENUMOUSE:   tile ", under);
     }
 }
 
@@ -431,7 +471,10 @@ static void frame(void) {
         for (int i = 0; i < notches; ++i) keyboard_menu_pulse(wheel > 0 ? (top ? IN_LB : IN_DPAD_UP) : (top ? IN_RB : IN_DPAD_DOWN));
     }
     if ((buttons & 2) && !(buttons_before & 2)) keyboard_menu_pulse(IN_B); /* right click: back */
-    if ((buttons & 1) && !(buttons_before & 1)) keyboard_menu_pulse(IN_A); /* left click: open the focused tile */
+    if ((buttons & 1) && !(buttons_before & 1)) { /* left click: open the tile (after the walk to it) */
+        if (target) click_waiting = 1;
+        else keyboard_menu_pulse(IN_A);
+    }
     feed(moved, buttons, 0);
     buttons_before = buttons;
 }
