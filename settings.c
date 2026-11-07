@@ -28,6 +28,7 @@ const SettingDefinition setting_definitions[] = {
     SETTING("Gripline", "TelemetryPosition", telemetry_pos, SETTING_MASK),
     SETTING("Gripline", "TelemetryOpacity", telemetry_opacity, SETTING_MASK),
     SETTING("Gripline", "TelemetrySize", telemetry_size, SETTING_MASK),
+    SETTING("Gripline", "WalkHandheld", walk_handheld, SETTING_MASK),
 };
 
 const size_t setting_count = ARRAY_COUNT(setting_definitions);
@@ -47,6 +48,7 @@ void settings_defaults(ModOptions *options) {
         .car_labels = 1,
         .event_icons = 1,
         .telemetry_show = -1, /* telemetry.c default */
+        .walk_handheld = 2, /* medium (V7.1) */
         .cruise_crash_off = 1,
         .cruise_min_speed = 20,
         .cruise_slow_off = 1,

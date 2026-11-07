@@ -5,6 +5,7 @@
 #include "support.h"
 #include "walking.h"
 #include "keyboard_pad.h"
+#include "drive_look.h"
 
 /* ------------------------------------------------------------------ game addresses */
 
@@ -60,6 +61,28 @@ static float fall;           /* vertical speed, m/s (+ = up) */
 static int grounded, bob_on, no_floor, recovered_logged, jump_logged;
 static float last_ground;
 static float bob_phase;
+/* V7.1 smoothing state */
+static float vel[2];               /* horizontal velocity, m/s (world x, z) */
+static float yaw_rate, pitch_rate; /* rad/s, eased */
+static float mouse_yaw, mouse_pitch; /* mouse turn still to do, rad */
+static float crouch;               /* 0 standing .. 1 crouched */
+static float bob_amount;           /* 0..1 */
+static float eye_y;                /* the eased eye height */
+static int eye_y_set;
+static float look[3] = {0, 0, 1};
+/* V7.1 handheld camera: level (any thread), wave phases (camera thread) */
+static volatile LONG handheld = 2;
+/* V7.1b (Marvin 07.11.2026: "not natural yet - too even, every step the same"): random, never
+   repeating movement (smooth noise) and steps that each differ, pushed into a small spring */
+typedef struct { float from, to, t; } HandNoise;
+static HandNoise hand_noise[6];
+static unsigned hand_seed = 0x9e3779b9u;
+static float step_gain = 1.0f, step_gain_to = 1.0f; /* this step's strength, eased */
+static int step_half = -1;
+static float spring_pitch, spring_pitch_v, spring_yaw, spring_yaw_v, spring_up, spring_up_v;
+#ifdef FH2_TWEAKS_TEST
+static float test_mouse[2]; /* tests: mouse counts for the next step */
+#endif  /* the direction given to the camera (with the stride's small sway) */
 static float car_place[3], car_right[3], car_forward[3];
 static LARGE_INTEGER last_step;
 static int stepped;
@@ -83,6 +106,21 @@ static int world_tried; /* tests: no lookup */
 #define WALK_JUMP 4.2f       /* m/s up: about 0.9 m high */
 #define WALK_GRAVITY 9.81f
 #define WALK_LOOK 1.6f       /* rad/s */
+/* V7.1 smooth walking (Marvin 07.11.2026), own values: every change eases in over a short time
+   instead of jumping. Times in seconds until about two thirds of the way. */
+#define WALK_CROUCH_SPEED 1.1f  /* m/s while crouching (no running then) */
+#define WALK_EASE_START 0.17f   /* speeding up (also walk <-> run) */
+#define WALK_EASE_STOP 0.11f    /* slowing down / stopping */
+#define WALK_EASE_AIR 0.9f      /* in the air: little control */
+#define WALK_EASE_LOOK 0.07f    /* arrows / right stick: turning starts and stops softly */
+#define WALK_EASE_MOUSE 0.03f   /* mouse: follows a little behind instead of snapping */
+#define WALK_MOUSE_RAD 0.0018f  /* rad per mouse count at WalkMouseLook=100 */
+#define WALK_EASE_CROUCH 0.13f
+#define WALK_CROUCH_DROP 0.65f  /* the head this much lower when crouched: eye ~0.97 m above the ground */
+#define WALK_EASE_EYE 0.08f     /* steps, curbs, landing: the eye follows the body softly */
+#define WALK_EYE_BELOW 0.4f     /* ... but never more than this below / above where it belongs */
+#define WALK_EYE_ABOVE 0.12f
+#define WALK_EASE_BOB 0.3f      /* head bob fades in and out */
 #define WALK_PITCH_MAX 1.4f
 #define WALK_MAX_DISTANCE 2000.0f /* from the car */
 #define WALK_HIDE_FROM 45.0f /* the game loads floor collision only ~65 m around the car: farther away the car */
@@ -180,6 +218,49 @@ static void sin_cos(float a, float *s, float *c) {
     float a2 = a * a; /* |a| <= 1.6 */
     *s = a * (1.0f - a2 / 6.0f * (1.0f - a2 / 20.0f * (1.0f - a2 / 42.0f * (1.0f - a2 / 72.0f))));
     *c = 1.0f - a2 / 2.0f * (1.0f - a2 / 12.0f * (1.0f - a2 / 30.0f * (1.0f - a2 / 56.0f)));
+}
+
+/* any angle (the bob's phases): back to -pi..pi, then mirrored into the range above */
+static void sin_cos_wide(float a, float *s, float *c) {
+    while (a > 3.14159265f) a -= 6.2831853f;
+    while (a < -3.14159265f) a += 6.2831853f;
+    if (a > 1.5707963f) {
+        sin_cos(3.14159265f - a, s, c), *c = -*c;
+    } else if (a < -1.5707963f) {
+        sin_cos(-3.14159265f - a, s, c), *c = -*c;
+    } else {
+        sin_cos(a, s, c);
+    }
+}
+
+void walking_set_handheld(int level) {
+    InterlockedExchange(&handheld, level < 0 ? 0 : level >= WALK_HANDHELD_COUNT ? WALK_HANDHELD_COUNT - 1 : level);
+}
+
+int walking_handheld(void) {
+    return (int)handheld;
+}
+
+/* -1..1, a new number each call (xorshift) */
+static float hand_random(void) {
+    hand_seed ^= hand_seed << 13, hand_seed ^= hand_seed >> 17, hand_seed ^= hand_seed << 5;
+    return (float)(hand_seed & 0xffffu) / 32767.5f - 1.0f;
+}
+
+/* smooth noise: from one random value to the next in 1/rate s, eased (no corners), never the same */
+static float hand_noise_step(HandNoise *n, float dt, float rate) {
+    if (n->from == 0.0f && n->to == 0.0f) n->from = hand_random(), n->to = hand_random(); /* first use */
+    n->t += dt * rate;
+    while (n->t >= 1.0f) n->t -= 1.0f, n->from = n->to, n->to = hand_random();
+    float t = n->t, e = t * t * t * (t * (t * 6.0f - 15.0f) + 10.0f);
+    return n->from + (n->to - n->from) * e;
+}
+
+/* a small spring (the hand holding the phone): pushed by the steps, swings back softly */
+static void hand_spring(float *x, float *v, float dt, float hz, float damping) {
+    float w = 6.2831853f * hz;
+    *v += (-w * w * *x - 2.0f * damping * w * *v) * dt;
+    *x += *v * dt;
 }
 
 void walking_enter(const float position[3], const float right[3], const float forward[3]) {
@@ -304,6 +385,18 @@ static int slide(const float from[3], const float to[3], int floor, float out[3]
 
 /* ------------------------------------------------------------------ the walker */
 
+/* share of the way to a target after dt with ease time tau (1 - e^(-dt/tau), series of e^x) */
+static float ease(float dt, float tau) {
+    if (!(dt > 0.0f)) return 0.0f;
+    float x = dt / tau;
+    if (x > 8.0f) return 1.0f;
+    return 1.0f - 1.0f / (1.0f + x + x * x / 2.0f + x * x * x / 6.0f + x * x * x * x / 24.0f);
+}
+
+static float clampf(float v, float lo, float hi) {
+    return v < lo ? lo : v > hi ? hi : v;
+}
+
 static void turn(float a) {
     float s, c;
     sin_cos(a, &s, &c);
@@ -319,6 +412,8 @@ static void spawn(void) {
     mirror = car_right[0] * dir[1] - car_right[2] * dir[0] >= 0.0f ? 1.0f : -1.0f;
     pitch = 0.0f, pitch_sin = 0.0f, pitch_cos = 1.0f;
     fall = 0.0f, grounded = 0, no_floor = 0;
+    vel[0] = vel[1] = 0.0f, yaw_rate = pitch_rate = 0.0f, mouse_yaw = mouse_pitch = 0.0f;
+    crouch = 0.0f, bob_amount = 0.0f, bob_phase = 0.0f, eye_y_set = 0;
     if (!world && !world_tried) { /* again at every getting out until found */
         make_params();
         __try {
@@ -344,16 +439,42 @@ static void spawn(void) {
 static void step(float dt) {
     WalkInput in = {0};
     noclip_walk_input(&in);
-    if (in.yaw != 0.0f) turn(in.yaw * WALK_LOOK * dt);
-    if (in.pitch != 0.0f) {
-        pitch += in.pitch * WALK_LOOK * dt;
-        if (pitch > WALK_PITCH_MAX) pitch = WALK_PITCH_MAX;
-        if (pitch < -WALK_PITCH_MAX) pitch = -WALK_PITCH_MAX;
-    }
+#ifdef FH2_TWEAKS_TEST
+    in.mouse_x += test_mouse[0], in.mouse_y += test_mouse[1];
+    test_mouse[0] = test_mouse[1] = 0.0f;
+#endif
+    /* looking: arrows / stick turn at an eased rate, the mouse turn is handed out over a few frames */
+    /* Marvin 07.11.2026: "strong feels light" - light is the former strong, medium and strong more */
+    float hand = handheld == 1 ? 1.7f : handheld == 2 ? 2.8f : handheld >= 3 ? 4.2f : 0.0f;
+    float lag = hand < 1.7f ? hand : 1.7f; /* the turning lag stays as before (more feels sluggish) */
+    float kl = ease(dt, WALK_EASE_LOOK * (1.0f + 0.7f * lag)); /* the hand turns a little behind */
+    yaw_rate += (in.yaw * WALK_LOOK - yaw_rate) * kl;
+    pitch_rate += (in.pitch * WALK_LOOK - pitch_rate) * kl;
+    mouse_yaw = clampf(mouse_yaw - in.mouse_x * WALK_MOUSE_RAD, -1.5f, 1.5f);
+    mouse_pitch = clampf(mouse_pitch - in.mouse_y * WALK_MOUSE_RAD, -1.5f, 1.5f);
+    float km = ease(dt, WALK_EASE_MOUSE * (1.0f + 1.2f * lag));
+    float myaw = mouse_yaw * km, mpitch = mouse_pitch * km;
+    mouse_yaw -= myaw, mouse_pitch -= mpitch;
+    float yaw_step = yaw_rate * dt + myaw;
+    if (yaw_step > 1e-6f || yaw_step < -1e-6f) turn(yaw_step);
+    pitch = clampf(pitch + pitch_rate * dt + mpitch, -WALK_PITCH_MAX, WALK_PITCH_MAX);
+    if (pitch >= WALK_PITCH_MAX || pitch <= -WALK_PITCH_MAX) mouse_pitch = 0.0f;
     sin_cos(pitch, &pitch_sin, &pitch_cos);
-    float speed = in.run ? WALK_RUN : WALK_SPEED;
+    /* crouching: eases down and up; the head sphere below keeps it low under something */
+    crouch += ((in.crouch ? 1.0f : 0.0f) - crouch) * ease(dt, WALK_EASE_CROUCH);
+    int crouching = in.crouch || crouch > 0.5f;
+    /* moving: the velocity eases to the wanted one (speeding up, slowing down, walk <-> run) */
+    float speed = crouching ? WALK_CROUCH_SPEED : in.run ? WALK_RUN : WALK_SPEED;
     float rx = mirror * dir[1], rz = -mirror * dir[0];
-    float mx = (dir[0] * in.ahead + rx * in.side) * speed * dt, mz = (dir[1] * in.ahead + rz * in.side) * speed * dt;
+    float ia = in.ahead, is = in.side, il = root(ia * ia + is * is);
+    if (il > 1.0f) ia /= il, is /= il; /* diagonally not faster */
+    float want[2] = {(dir[0] * ia + rx * is) * speed, (dir[1] * ia + rz * is) * speed};
+    float v2 = vel[0] * vel[0] + vel[1] * vel[1], w2 = want[0] * want[0] + want[1] * want[1];
+    float kv = ease(dt, !grounded && world ? WALK_EASE_AIR : w2 >= v2 ? WALK_EASE_START : WALK_EASE_STOP);
+    vel[0] += (want[0] - vel[0]) * kv, vel[1] += (want[1] - vel[1]) * kv;
+    if (w2 == 0.0f && vel[0] * vel[0] + vel[1] * vel[1] < 0.0004f) vel[0] = vel[1] = 0.0f;
+    float mx = vel[0] * dt, mz = vel[1] * dt;
+    float head_up = WALK_HEAD - WALK_CROUCH_DROP * crouch;
     float before[3] = {centre[0], centre[1], centre[2]};
 
     /* along the ground: first up by a step (curbs, stairs), then forward sliding along walls; the
@@ -371,7 +492,7 @@ static void step(float dt) {
             if (world) {
                 /* the head first: where it is stopped (a slanted trunk, a branch, a roof edge) the body
                    stops too. Under something low the head ducks. */
-                float body_top[3] = {raised[0], raised[1] + WALK_HEAD, raised[2]}, hf[3];
+                float body_top[3] = {raised[0], raised[1] + head_up, raised[2]}, hf[3];
                 slide(raised, body_top, 0, hf);
                 if (hf[1] - raised[1] > 0.3f) {
                     float ht[3] = {hf[0] + mx, hf[1], hf[2] + mz}, hd[3];
@@ -385,7 +506,7 @@ static void step(float dt) {
         }
     }
     /* gravity and jumping: stops on a floor */
-    if (in.jump && grounded) fall = WALK_JUMP, grounded = 0, lifted = 0.0f;
+    if (in.jump && grounded && !crouching) fall = WALK_JUMP, grounded = 0, lifted = 0.0f;
     fall -= WALK_GRAVITY * dt;
     if (fall < -50.0f) fall = -50.0f;
     if (world) {
@@ -448,29 +569,93 @@ static void step(float dt) {
     if (centre[1] < car_place[1] - WALK_FALL_LIMIT) { /* fell out of the world: back to the car */
         log_append("WALKING: fell through the world - back at the car.\r\n");
         spawn();
+        before[0] = centre[0], before[1] = centre[1], before[2] = centre[2];
     }
     float dx = centre[0] - before[0], dz = centre[2] - before[2];
     float moved = dt > 0.0f ? root(dx * dx + dz * dz) / dt : 0.0f;
     smooth_speed += (moved - smooth_speed) * (dt * 6.0f > 1.0f ? 1.0f : dt * 6.0f);
     InterlockedExchange(&speed_x10, (LONG)(smooth_speed * 36.0f + 0.5f));
-    /* a little head bob while walking on the ground */
-    if (grounded && moved > 0.3f) bob_phase += dt * (in.run ? 13.0f : 9.0f), bob_on = 1;
-    else bob_on = 0;
-    float bob = 0.0f;
+    /* blocked by a wall: the velocity is only what was really walked (no run-up against the wall) */
+    if (dt > 0.0f) {
+        float ax = dx / dt, az = dz / dt, va = vel[0] * vel[0] + vel[1] * vel[1];
+        if (ax * ax + az * az < va) vel[0] = ax, vel[1] = az;
+    }
+    /* head bob: fades in with the speed and out when standing or in the air; one stride = two steps
+       (the eye goes down at each step, a little to the side of the stepping foot, the look sways gently) */
+    float hs = root(vel[0] * vel[0] + vel[1] * vel[1]);
+    float bob_want = grounded ? clampf(hs / WALK_SPEED, 0.0f, 1.0f) : 0.0f;
+    bob_amount += (bob_want - bob_amount) * ease(dt, WALK_EASE_BOB);
+    if (bob_amount < 0.002f && bob_want == 0.0f) bob_amount = 0.0f;
+    bob_on = bob_amount > 0.0f;
+    float bob = 0.0f, side_sway = 0.0f, look_sway = 0.0f;
     if (bob_on) {
-        float t = bob_phase;
-        while (t > 3.14159265f) t -= 6.2831853f;
-        float s, c;
-        sin_cos(t > 1.5707963f ? 3.14159265f - t : t < -1.5707963f ? -3.14159265f - t : t, &s, &c);
-        bob = s * (in.run ? 0.05f : 0.03f);
+        float strides = 0.55f + 0.16f * hs; /* per second: ~0.9 walking, ~1.5 running */
+        bob_phase += dt * 6.2831853f * strides;
+        if (bob_phase > 6.2831853f) bob_phase -= 6.2831853f;
+        float s1, c1, s2, c2;
+        sin_cos_wide(bob_phase, &s1, &c1);
+        sin_cos_wide(2.0f * bob_phase, &s2, &c2);
+        float run_share = clampf((hs - WALK_SPEED) / (WALK_RUN - WALK_SPEED), 0.0f, 1.0f);
+        float height = (0.026f + 0.02f * run_share) * (1.0f - 0.5f * crouch);
+        bob = -height * c2 * bob_amount;
+        side_sway = (0.022f + 0.012f * run_share) * s1 * bob_amount;
+        look_sway = 0.0035f * (1.0f + run_share) * s1 * bob_amount;
     }
     if (world) { /* the eye inside the head sphere, under whatever is above */
-        float top[3] = {centre[0], centre[1] + WALK_HEAD, centre[2]};
+        float top[3] = {centre[0], centre[1] + head_up, centre[2]};
         slide(centre, top, 0, head);
     } else {
-        head[0] = centre[0], head[1] = centre[1] + WALK_HEAD, head[2] = centre[2];
+        head[0] = centre[0], head[1] = centre[1] + head_up, head[2] = centre[2];
     }
-    eye[0] = head[0], eye[1] = head[1] + (WALK_EYE - WALK_HEAD) + bob, eye[2] = head[2];
+    /* the eye height eases after the body (steps, curbs, landing), big jumps (teleports) at once */
+    float eye_want = head[1] + (WALK_EYE - WALK_HEAD);
+    if (!eye_y_set || eye_y - eye_want > 1.5f || eye_want - eye_y > 1.5f) eye_y = eye_want, eye_y_set = 1;
+    eye_y += (eye_want - eye_y) * ease(dt, WALK_EASE_EYE);
+    eye_y = clampf(eye_y, eye_want - WALK_EYE_BELOW, eye_want + WALK_EYE_ABOVE);
+    /* handheld camera: drift and breathing standing still, a hand that bounces with the steps */
+    float hand_yaw = 0.0f, hand_pitch = 0.0f, hand_side = 0.0f, hand_up = 0.0f;
+    if (hand > 0.0f && dt > 0.0f) {
+        float moving = bob_amount, run_share = clampf((hs - WALK_SPEED) / (WALK_RUN - WALK_SPEED), 0.0f, 1.0f);
+        float calm = 1.0f - 0.45f * crouch; /* crouched the hands are steadier */
+        /* standing: slow drift and breathing; walking and running: faster, stronger shake */
+        float slow = 0.35f + 0.25f * moving, fast = 1.4f + 1.6f * moving + 1.5f * run_share;
+        float shake = hand * calm * (0.4f + 0.6f * moving + 0.8f * run_share);
+        hand_yaw = hand * calm * 0.011f * hand_noise_step(&hand_noise[0], dt, slow) +
+                   shake * 0.0022f * hand_noise_step(&hand_noise[1], dt, fast);
+        hand_pitch = hand * calm * 0.007f * hand_noise_step(&hand_noise[2], dt, slow * 1.3f) +
+                     shake * 0.0018f * hand_noise_step(&hand_noise[3], dt, fast * 1.2f);
+        hand_side = hand * calm * 0.008f * hand_noise_step(&hand_noise[4], dt, slow * 0.8f);
+        hand_up = hand * calm * 0.005f * hand_noise_step(&hand_noise[5], dt, slow * 1.1f);
+        /* every footfall pushes the spring a little differently: strength, side, timing feel */
+        int half = bob_on ? (bob_phase >= 3.14159265f) : -1;
+        if (half >= 0 && step_half >= 0 && half != step_half) {
+            step_gain_to = 1.0f + 0.35f * hand_random();
+            float kick = hand * calm * moving * (0.7f + 0.5f * run_share) * (0.75f + 0.25f * hand_random());
+            spring_pitch_v -= kick * 0.09f;                              /* the phone dips at the footfall */
+            spring_yaw_v += kick * 0.05f * (half ? 1.0f : -1.0f) * (0.6f + 0.4f * hand_random()); /* to the foot's side */
+            spring_up_v -= kick * 0.12f;
+        }
+        step_half = half;
+        hand_spring(&spring_pitch, &spring_pitch_v, dt, 2.6f, 0.45f);
+        hand_spring(&spring_yaw, &spring_yaw_v, dt, 1.9f, 0.5f);
+        hand_spring(&spring_up, &spring_up_v, dt, 2.2f, 0.5f);
+        hand_pitch += spring_pitch, hand_yaw += spring_yaw, hand_up += spring_up;
+        /* the regular bob gets this step's strength too */
+        step_gain += (step_gain_to - step_gain) * ease(dt, 0.12f);
+        bob *= step_gain, side_sway *= step_gain, look_sway *= step_gain;
+    } else if (hand == 0.0f) {
+        step_gain = step_gain_to = 1.0f, step_half = -1;
+        spring_pitch = spring_pitch_v = spring_yaw = spring_yaw_v = spring_up = spring_up_v = 0.0f;
+    }
+    eye[0] = head[0] + rx * (side_sway + hand_side), eye[1] = eye_y + bob + hand_up,
+    eye[2] = head[2] + rz * (side_sway + hand_side);
+    {
+        float ss, sc, ps = pitch_sin, pc = pitch_cos;
+        sin_cos(look_sway + hand_yaw, &ss, &sc);
+        if (hand_pitch != 0.0f) sin_cos(clampf(pitch + hand_pitch, -WALK_PITCH_MAX, WALK_PITCH_MAX), &ps, &pc);
+        float lx = -mirror * dir[1], lz = mirror * dir[0]; /* left, as in turn() */
+        look[0] = pc * (dir[0] * sc + lx * ss), look[1] = ps, look[2] = pc * (dir[1] * sc + lz * ss);
+    }
     hide_at[0] = centre[0], hide_at[1] = centre[1] - WALK_HIDE_BELOW, hide_at[2] = centre[2];
     float cx = centre[0] - car_place[0], cz = centre[2] - car_place[2];
     InterlockedExchange(&distance_cm, (LONG)(root(cx * cx + cz * cz) * 100.0f));
@@ -501,7 +686,7 @@ static void put_eye(void *camera, unsigned family) {
     float d[4];
     unsigned char *c = (unsigned char *)camera;
     if (!memory_read(c + dir_field[family], d, sizeof(d))) return;
-    d[0] = pitch_cos * dir[0], d[1] = pitch_sin, d[2] = pitch_cos * dir[1];
+    d[0] = look[0], d[1] = look[1], d[2] = look[2];
     memory_copy(c + eye_field[family], e, sizeof(e));
     memory_copy(c + dir_field[family], d, 12);
 }
@@ -517,17 +702,40 @@ static int camera_index(void *camera) {
 static void *camera_update(void *camera, float dt, uintptr_t a, uintptr_t b) {
     int i = camera_index(camera);
     if (i < 0) return NULL; /* not one of ours: cannot happen, the slot is only in our vtables */
+    unsigned family = cameras[i].family;
+    drive_look_restore(camera, (unsigned)i, eye_field[family], dir_field[family]); /* the game's own values first */
     void *result = ((CameraUpdateFn)previous_update[i])(camera, dt, a, b);
     if (active) {
         walk_frame();
-        put_eye(camera, cameras[i].family);
+        put_eye(camera, family);
+    } else {
+        drive_look_frame(); /* V7.1 mouse look in the car */
+        drive_look_apply(camera, (unsigned)i, family, eye_field[family], dir_field[family]);
     }
     return result;
+}
+
+/* V7.1: the camera the game looks through (its view getter runs for it), for the camera change
+   when getting out of / into the car (noclip.c, cockpit_view.c) */
+static volatile LONG view_index = -1;
+static volatile LONG64 view_tick;
+
+int walking_view_camera(void) {
+    LONG64 seen = view_tick;
+    if (!seen || GetTickCount64() - (ULONGLONG)seen > 300u) return -1;
+    return (int)view_index;
+}
+
+int walking_view_outside(void) {
+    int i = walking_view_camera();
+    return i >= 0 && cameras[i].family == 1;
 }
 
 static void *camera_view(void *camera, void *out) {
     int i = camera_index(camera);
     if (i < 0) return out;
+    InterlockedExchange(&view_index, i);
+    InterlockedExchange64(&view_tick, (LONG64)GetTickCount64());
     if (active) put_eye(camera, cameras[i].family);
     return ((CameraViewFn)previous_view[i])(camera, out);
 }
@@ -684,8 +892,15 @@ __declspec(dllexport) void Fh2TestWalkStep(unsigned char *game_image, int reset,
     }
     step((float)dt_ms / 1000.0f);
     out[0] = eye[0], out[1] = eye[1], out[2] = eye[2];
-    out[3] = pitch_cos * dir[0], out[4] = pitch_sin, out[5] = pitch_cos * dir[1];
+    out[3] = look[0], out[4] = look[1], out[5] = look[2];
     out[6] = walking_car_distance();
     out[7] = (float)walking_speed_kmh();
+}
+
+__declspec(dllexport) void Fh2TestWalkHandheld(int level) {
+    walking_set_handheld(level);
+}
+__declspec(dllexport) void Fh2TestWalkMouse(int dx, int dy) {
+    test_mouse[0] = (float)dx, test_mouse[1] = (float)dy;
 }
 #endif

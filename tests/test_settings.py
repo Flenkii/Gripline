@@ -18,7 +18,7 @@ e = Emu(DLL, root)
 KEYS = ['TrafficLevel', 'RushHourAllDay', 'Notifications', 'SteeringAnimation', 'CockpitViewForward',
         'CockpitViewUp', 'CardColor', 'CardStyle', 'UpdateCheck', 'SpeedCameras', 'CarLabels', 'Telemetry',
         'TelemetryShow', 'EventIcons', 'NewsSeen', 'NoDamage', 'CardsHidden', 'CruiseCrashOff', 'CruiseMinSpeed', 'CruiseSlowOff',
-        'TelemetryPosition', 'TelemetryOpacity', 'TelemetrySize']
+        'TelemetryPosition', 'TelemetryOpacity', 'TelemetrySize', 'WalkHandheld']
 
 
 def read(text):
@@ -60,6 +60,9 @@ check(ok == 1 and v['TelemetryShow'] == 4095, 'UTF-8 mit BOM')
 
 ok, v, n, s = read('[Gripline]\r\nCardsHidden=117\r\n')
 check(ok == 1 and v['CardsHidden'] == 117, 'CardsHidden gelesen')
+
+ok, v, n, s = read('[Gripline]\r\nWalkHandheld=3\r\n')
+check(ok == 1 and v['WalkHandheld'] == 3, 'V7.1 WalkHandheld gelesen')
 
 print(f'\n{checks[0]} checks, {len(fails)} failed')
 sys.exit(1 if fails else 0)

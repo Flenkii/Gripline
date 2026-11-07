@@ -118,7 +118,7 @@ check(ok == 1 and card_text == 'Press F8 to change your keys\nKey menu: arrows, 
 check(e.call('Fh2TestKeyboardBinding', 42, 0) == F8, 'KeyMenu = F8 (Standard)')
 
 press(F8)
-check(tick() == LEVEL_GROUPS and panel() == 22, f'F8 oeffnet das Menue (4 Abschnitte + 4 Seiten + Maus + Telemetrie + Tempomat + Fahrtenbuch + Rekorde + Welt + Verkehr + Kein Schaden + Einstellungen + Karten & Hinweise + Karten-Design + Problem-Bericht + Alle Tasten + Hinweis): {panel()}')
+check(tick() == LEVEL_GROUPS and panel() == 23, f'F8 oeffnet das Menue (4 Abschnitte + 4 Seiten + Maus + Telemetrie + Tempomat + Fahrtenbuch + Rekorde + Welt + Verkehr + Kein Schaden + Einstellungen + Handkamera + Karten & Hinweise + Karten-Design + Problem-Bericht + Alle Tasten + Hinweis): {panel()}')
 top = panel_rows()
 check(top.get('Keys & controls') == '' and top.get('Driving & data') == '' and top.get('World & cars') == '' and top.get('Gripline') == '',
       f'vier Abschnitte: {list(top)}')

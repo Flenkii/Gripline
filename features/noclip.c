@@ -29,6 +29,7 @@
 #include "traffic_files.h"
 #include "wheel_buttons.h"
 #include "walking.h"
+#include "drive_look.h"
 
 #define RVA_DYNAMICS_VTABLE 0x2eb4bb8u
 #define RVA_DYNAMICS_REF_VTABLE 0x2eb5e18u
@@ -116,6 +117,7 @@ int noclip_own_look(void) {
 #define XI_BACK 0x0020u
 #define XI_LS 0x0040u
 #define XI_A 0x1000u
+#define XI_B 0x2000u
 #define XI_Y 0x8000u
 #define PAD_FRESH_MS 250u
 #define STICK_DEAD 0.24f
@@ -124,7 +126,7 @@ int noclip_own_look(void) {
 /* the last reading of each controller (game input thread), used in the car update */
 static volatile struct {
     float lx, ly, rx, ry, lt, rt;
-    LONG fast, jump;
+    LONG fast, jump, crouch;
     LONG64 tick;
 } pads[4];
 static unsigned short pad_buttons[4];
@@ -174,6 +176,7 @@ void noclip_pad_input(unsigned user, unsigned char *gamepad) {
     pads[user].lt = trigger(gamepad[2]), pads[user].rt = trigger(gamepad[3]);
     pads[user].fast = (buttons & XI_A) != 0;
     pads[user].jump = (buttons & XI_A) != 0;
+    pads[user].crouch = (buttons & XI_B) != 0; /* walking: B held = crouch (V7.1) */
     pads[user].tick = (LONG64)GetTickCount64();
     if (on == MODE_FREECAM) { /* the right stick looks for the freecam, not for the game's camera */
         short zero[2] = {0, 0};
@@ -191,7 +194,7 @@ void noclip_pad_input(unsigned user, unsigned char *gamepad) {
 /* all controllers read lately: the strongest of each axis */
 typedef struct {
     float lx, ly, rx, ry, lt, rt;
-    int fast, jump;
+    int fast, jump, crouch;
 } PadAxes;
 
 static float stronger(float a, float b) {
@@ -209,6 +212,7 @@ static PadAxes pad_axes(void) {
         p.lt = stronger(p.lt, pads[i].lt), p.rt = stronger(p.rt, pads[i].rt);
         p.fast |= pads[i].fast != 0;
         p.jump |= pads[i].jump != 0;
+        p.crouch |= pads[i].crouch != 0;
     }
     return p;
 }
@@ -409,8 +413,8 @@ static void fly_free(float dt) {
 }
 
 /* walking.c: one step's input. Keys: Throttle/Brake forward/back, SteerLeft/SteerRight sideways,
-   arrows look, NoclipFast (LShift) runs, NoclipUp (Space) jumps. Controller: left stick walks, right
-   stick looks, RT runs, A jumps. */
+   arrows and the mouse look, NoclipFast (LShift) runs, NoclipUp (Space) jumps, NoclipDown (LCtrl)
+   held crouches. Controller: left stick walks, right stick looks, RT runs, A jumps, B held crouches. */
 void noclip_walk_input(WalkInput *in) {
     PadAxes pad = pad_axes();
     in->yaw = limit1((float)(keyboard_held(KEYBOARD_HOLD_LOOK_LEFT) - keyboard_held(KEYBOARD_HOLD_LOOK_RIGHT)) - pad.rx);
@@ -419,6 +423,8 @@ void noclip_walk_input(WalkInput *in) {
     in->side = limit1((float)(keyboard_held(KEYBOARD_HOLD_RIGHT) - keyboard_held(KEYBOARD_HOLD_LEFT)) + pad.lx);
     in->run = keyboard_held(KEYBOARD_HOLD_FAST) || pad.rt > 0.5f;
     in->jump = keyboard_held(KEYBOARD_HOLD_UP) || pad.jump;
+    in->crouch = keyboard_held(KEYBOARD_HOLD_DOWN) || pad.crouch;
+    keyboard_walk_mouse(&in->mouse_x, &in->mouse_y);
 }
 
 static void card(const char *german, const char *english) {
@@ -432,6 +438,7 @@ static void tinted(const char *german, const char *english, int color) {
 }
 
 static NoclipHookFn switch_hook;
+static int view_before = -1, second_before, view_changed; /* V7.1, see fade_begin */
 
 static void put_int_card(char *out, size_t *n, int value) {
     char digits[12];
@@ -466,6 +473,11 @@ static void set_on(LONG value) {
         driver_wait = GetTickCount64() + FREE_DRIVER_WAIT_MS;
         cockpit_view_want_driver(1); /* the freecam is the driver camera, moved out of the car */
     }
+    if (before == MODE_WALK && value != MODE_WALK && value != MODE_FREECAM && view_changed) {
+        cockpit_view_want_camera(view_before, second_before); /* back in the car: the view from before */
+        view_changed = 0;
+    }
+    if (before == MODE_WALK && value == MODE_FREECAM) view_changed = 0;
     if (before == MODE_WALK && value != MODE_WALK) /* the car back at its place (it may be under the walker) */
         InterlockedExchange64(&park_until, (LONG64)(GetTickCount64() + FREE_PARK_MS));
     if (value == MODE_WALK) {
@@ -489,17 +501,34 @@ static ULONGLONG fade_at;
 static int fade_shut; /* the door has shut (sound played) */
 
 static void walk_out_card(void) {
-    card("Ausgestiegen - Walking an\nWASD/linker Stick laufen, Pfeile/rechter Stick schauen, Shift/RT rennen, "
-         "Leertaste/A springen, F/Y einsteigen",
-         "Out of the car - walking on\nWASD/left stick walk, arrows/right stick look, Shift/RT run, Space/A jump, "
-         "F/Y get in");
+    card("Ausgestiegen - Walking an\nWASD/linker Stick laufen, Maus/Pfeile/rechter Stick schauen, Shift/RT rennen, "
+         "Strg/B ducken, Leertaste/A springen, F/Y einsteigen",
+         "Out of the car - walking on\nWASD/left stick walk, mouse/arrows/right stick look, Shift/RT run, "
+         "Ctrl/B crouch, Space/A jump, F/Y get in");
+    /* V7.1 (Marvin 07.11.2026): mouse steering pauses while walking, the mouse looks around instead */
+    if (keyboard_mouse_steering()) {
+        int de = game_language_is_german(game);
+        notify_show_tinted(de ? "Maus-Lenkung pausiert\nBeim Laufen schaut die Maus, im Auto lenkt sie wieder."
+                              : "Mouse steering paused\nWhile walking the mouse looks around, back in the car it steers again.",
+                           NOTIFY_COLOR_ORANGE, de ? "HINWEIS" : "NOTE", 0);
+        log_append("NOCLIP: walking - mouse steering paused until back in the car.\r\n");
+    }
 }
 
+/* V7.1 (Marvin 07.11.2026): out of a cockpit view the car would be seen as the game's cut interior
+   model. In the black the camera goes outside first; back in the car the old view comes back. */
+#define FADE_CAMERA_WAIT_MS 3000 /* at most this much longer black while the camera changes */
 static void fade_begin(LONG to) {
     fade_to = to;
     fade_stage = 1;
     fade_at = GetTickCount64();
     notify_fade_black(1000, FADE_DOWN_MS);
+    if (to == MODE_WALK) {
+        view_before = walking_view_camera();
+        second_before = cockpit_view_second();
+        view_changed = view_before >= 0 && !walking_view_outside();
+        if (view_changed) cockpit_view_want_outside();
+    }
 }
 
 static void fade_stop(void) { /* online or a failed switch: the picture back at once */
@@ -510,9 +539,13 @@ static void fade_stop(void) { /* online or a failed switch: the picture back at 
 
 static void fade_tick(ULONGLONG now) {
     if (fade_stage == 1 && now >= fade_at + FADE_DOWN_MS) {
+        /* out of the car: wait in the black until the outside camera is there */
+        if (fade_to == MODE_WALK && cockpit_view_want_pending() && now < fade_at + FADE_DOWN_MS + FADE_CAMERA_WAIT_MS)
+            return;
         walking_door_sound(0);
         set_on(fade_to);
         if (on != fade_to) { /* not switched (see the log) */
+            if (fade_to == MODE_WALK && view_changed) cockpit_view_want_camera(view_before, second_before), view_changed = 0;
             fade_stop();
             return;
         }
@@ -528,7 +561,8 @@ static void fade_tick(ULONGLONG now) {
     } else if (fade_stage == 2 && !fade_shut && now >= fade_at + FADE_SHUT_MS) {
         fade_shut = 1;
         walking_door_sound(1);
-    } else if (fade_stage == 2 && now >= fade_at + FADE_HOLD_MS) {
+    } else if (fade_stage == 2 && now >= fade_at + FADE_HOLD_MS &&
+               !(cockpit_view_want_pending() && now < fade_at + FADE_HOLD_MS + FADE_CAMERA_WAIT_MS)) {
         notify_fade_black(0, FADE_UP_MS);
         if (fade_to == MODE_WALK) walk_out_card();
         else card("Eingestiegen", "Back in the car");
@@ -682,8 +716,10 @@ static void sample_trip(void *car, float dt) {
     {
         _Alignas(16) float p[4];
         _mm_store_ps(p, state.position);
-        if (float_is_finite(p[0]) && float_is_finite(p[1]) && float_is_finite(p[2]))
+        if (float_is_finite(p[0]) && float_is_finite(p[1]) && float_is_finite(p[2])) {
             records_sample(dt, p, root(v[0] * v[0] + v[1] * v[1] + v[2] * v[2]));
+            drive_look_car(p, root(v[0] * v[0] + v[1] * v[1] + v[2] * v[2])); /* V7.1 mouse look: pivot, speed */
+        }
     }
     _Alignas(16) float r[4], f[4], w[4];
     _mm_store_ps(r, state.right);
@@ -693,6 +729,44 @@ static void sample_trip(void *car, float dt) {
         float_is_finite(f[2]) && float_is_finite(w[1]))
         telemetry_sample(dt, v, r, f, w);
     if (float_is_finite(f[0]) && float_is_finite(f[1]) && float_is_finite(f[2])) cruise_sample(dt, v, f);
+    if (float_is_finite(r[0]) && float_is_finite(r[2]) && float_is_finite(f[0]) && float_is_finite(f[2])) drive_look_mirror(r, f);
+}
+
+/* V7.1 walking (Marvin 07.11.2026): out of the car the driver figure still sat in it. The game's own
+   "draw the driver" switch of the car (game+0xf75500 (car, on): the driver model's slot 0x358, the
+   flag at car+0x4f10; the game calls it itself, e.g. in photo mode) hides it while walking and puts
+   the car's own setting back after. Checked against the game's code first. */
+#define RVA_SET_DRAW_DRIVER 0xf75500u
+#define CAR_DRAW_DRIVER 0x4f10u
+typedef void (*SetDrawDriverFn)(void *car, unsigned char on);
+static const unsigned char set_draw_driver_code[] = {0x48, 0x89, 0x5c, 0x24, 0x08, 0x57, 0x48, 0x83, 0xec, 0x20,
+                                                     0x48, 0x8b, 0xd9, 0x48, 0x8b, 0x89, 0x38, 0x4d, 0x00, 0x00};
+static int draw_driver_ok = -1; /* -1 not checked, 0 game code differs, 1 ok */
+static void *driver_hidden_car;
+static unsigned char driver_was_drawn;
+
+static int draw_driver_ready(void) {
+    if (draw_driver_ok < 0) {
+        draw_driver_ok = game && memory_equal(game + RVA_SET_DRAW_DRIVER, set_draw_driver_code, sizeof(set_draw_driver_code));
+        log_append(draw_driver_ok ? "NOCLIP: walking - the driver figure is hidden while walking.\r\n"
+                                  : "NOCLIP: walking - game code differs, the driver figure stays visible.\r\n");
+    }
+    return draw_driver_ok;
+}
+
+/* car update thread: walking on = hidden (again, if the game drew it again), off = back */
+static void walk_driver(void *car, int walking) {
+    if (!draw_driver_ready()) return;
+    unsigned char drawn = 0;
+    if (walking) {
+        if (!memory_read((unsigned char *)car + CAR_DRAW_DRIVER, &drawn, 1)) return;
+        if (driver_hidden_car != car) driver_hidden_car = car, driver_was_drawn = drawn;
+        else if (drawn) driver_was_drawn = 1; /* the game switched it on meanwhile (camera change) */
+        if (drawn) ((SetDrawDriverFn)(game + RVA_SET_DRAW_DRIVER))(car, 0);
+    } else if (driver_hidden_car == car) {
+        driver_hidden_car = NULL;
+        if (driver_was_drawn) ((SetDrawDriverFn)(game + RVA_SET_DRAW_DRIVER))(car, 1);
+    }
 }
 
 void noclip_car_update(void *car, float dt, float frame_dt, unsigned frame) {
@@ -700,6 +774,7 @@ void noclip_car_update(void *car, float dt, float frame_dt, unsigned frame) {
     int local = game && car && is_local_car(car);
     if (local) traffic_load_reached(dt); /* the start reached the road (load guard, traffic_files.c) */
     void *park = NULL;
+    if (local && (on == MODE_WALK || driver_hidden_car == car)) walk_driver(car, on == MODE_WALK && walking_active());
     if (on == MODE_WALK && local) {
         /* on foot: the car stands where it was; the walker is moved in the camera (walking.c) */
         void *walk_body = car_body(car);

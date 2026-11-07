@@ -512,6 +512,7 @@ static void start_features(void) {
     nitro_link_start(game);
     cockpit_view_start(game);
     walking_start(game);
+    walking_set_handheld(options.walk_handheld);
     no_damage_bind(game);
     no_damage_set_mode(options.no_damage);
     noclip_install();
