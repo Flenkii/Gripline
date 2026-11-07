@@ -206,6 +206,115 @@ static void log_focus_chain(unsigned char *keyboard) {
     }
 }
 
+
+/* ---- hover + click (menumouse4): tiles are children of a Canvas (Canvas.Left/Top at +0x90/+0x94,
+   RenderSize at +0x134/+0x138). AVUI's own hit test misses them (3D planes), so Gripline maps the pointer
+   to a tile itself and gives it the keyboard focus, like the pad does. Left click then = A. */
+#define RVA_KEYBOARD_FOCUS 0x14d01d0u /* Keyboard::Focus(out ref, IInputElement*) */
+#define RVA_RELEASE 0x257730u
+#define ELEMENT_INPUT 0xb8u
+#define ELEMENT_LEFT 0x90u
+#define ELEMENT_SIZE 0x134u
+#define KEYBOARD_FOCUS 0x40u
+#define ORIGIN_X 100.0f /* the tile Canvas' place in the 1920x1080 menu (screenshot + StackPanel margin) */
+#define ORIGIN_Y 288.0f
+#define MAX_TILES 32
+typedef void (*FocusFn)(void *out, void *element);
+typedef void (*ReleaseFn)(void *object);
+static unsigned char *tile_canvas, *tiles[MAX_TILES];
+static int tile_count, hover_logs;
+static unsigned char *hovered;
+
+static int is_tile(const void *object) {
+    const char *name = class_name(object);
+    if (!name) return 0;
+    for (const char *c = name; *c; ++c)
+        if ((c[0] == 'T' && c[1] == 'i' && c[2] == 'l' && c[3] == 'e' && c[4] == '@') ||
+            (c[0] == 'B' && c[1] == 'u' && c[2] == 't' && c[3] == 't' && c[4] == 'o' && c[5] == 'n' && c[6] == '@'))
+            return 1;
+    return 0;
+}
+
+static int tile_rect(unsigned char *tile, float r[4]) {
+    float pos[2] = {0, 0}, size[2] = {0, 0};
+    if (!memory_read(tile + ELEMENT_LEFT, pos, 8) || !memory_read(tile + ELEMENT_SIZE, size, 8)) return 0;
+    for (int i = 0; i < 2; ++i) if (!(pos[i] > -20000.0f && pos[i] < 20000.0f)) pos[i] = 0.0f; /* NaN = not set */
+    if (!(size[0] > 20.0f && size[0] < 3000.0f && size[1] > 20.0f && size[1] < 3000.0f)) return 0;
+    r[0] = ORIGIN_X + pos[0], r[1] = ORIGIN_Y + pos[1], r[2] = r[0] + size[0], r[3] = r[1] + size[1];
+    return 1;
+}
+
+static void add_tile(unsigned char *tile) {
+    for (int i = 0; i < tile_count; ++i) if (tiles[i] == tile) return;
+    if (tile_count < MAX_TILES) tiles[tile_count++] = tile;
+}
+
+/* the Canvas keeps its children in an array somewhere behind one or two pointers: find the array that
+   holds the focused tile and take every tile in it */
+static void collect_siblings(unsigned char *canvas, unsigned char *focused) {
+    for (unsigned off = 0x78; off < 0x300; off += 8) {
+        unsigned char *a = read_pointer(canvas + off);
+        if (!a || (uintptr_t)a & 7) continue;
+        for (unsigned inner = 0; inner < 0x60; inner += 8) {
+            unsigned char *list = inner ? read_pointer(a + inner - 8) : a;
+            if (!list || (uintptr_t)list & 7) continue;
+            void *items[64];
+            if (!memory_read(list, items, sizeof(items))) continue;
+            int found = 0;
+            for (int i = 0; i < 64; ++i) if (items[i] == focused) found = 1;
+            if (!found) continue;
+            for (int i = 0; i < 64; ++i)
+                if (items[i] && !((uintptr_t)items[i] & 7) && read_pointer((unsigned char *)items[i] + ELEMENT_PARENT) == canvas &&
+                    is_tile(items[i]))
+                    add_tile(items[i]);
+            return;
+        }
+    }
+}
+
+static void track_focus(unsigned char *keyboard) {
+    unsigned char *focused = keyboard ? read_pointer(keyboard + KEYBOARD_FOCUS) : NULL;
+    if (!focused || !is_tile(focused)) return;
+    unsigned char *canvas = read_pointer(focused + ELEMENT_PARENT);
+    if (!canvas) return;
+    if (canvas != tile_canvas) { tile_canvas = canvas, tile_count = 0; hovered = NULL; }
+    int before = tile_count;
+    add_tile(focused);
+    if (tile_count != before) {
+        collect_siblings(canvas, focused);
+        log_append_value("MENUMOUSE: tiles known on this page ", tile_count);
+    }
+}
+
+static void focus_tile(unsigned char *tile) {
+    unsigned char out[16] = {0};
+    ((FocusFn)(game + RVA_KEYBOARD_FOCUS))(out, tile + ELEMENT_INPUT);
+    unsigned char *ref = NULL;
+    memory_copy(&ref, out + 8, 8);
+    if (ref && InterlockedDecrement((volatile LONG *)(ref + 0x10)) == 0) ((ReleaseFn)(game + RVA_RELEASE))(ref);
+}
+
+/* pointer in UI units -> focus the tile under it (only when it changes) */
+static void hover(unsigned char *keyboard, float ux, float uy, int moved) {
+    track_focus(keyboard);
+    if (!moved || !tile_count) return;
+    unsigned char *under = NULL;
+    float r[4];
+    for (int i = 0; i < tile_count; ++i)
+        if (read_pointer(tiles[i] + ELEMENT_PARENT) == tile_canvas && tile_rect(tiles[i], r) &&
+            ux >= r[0] && ux < r[2] && uy >= r[1] && uy < r[3]) under = tiles[i];
+    if (!under || under == hovered) return;
+    hovered = under;
+    if (read_pointer(keyboard + KEYBOARD_FOCUS) != under) focus_tile(under);
+    if (hover_logs < 12) {
+        ++hover_logs;
+        log_append_value("MENUMOUSE: hover tile at UI x ", (int)ux);
+        log_append_value("MENUMOUSE:   UI y ", (int)uy);
+        log_append(class_name(under) ? class_name(under) : "?");
+        log_append("\r\n");
+    }
+}
+
 static unsigned char report(void *provider, unsigned actions, const float point[2], int wheel) {
     return ((ReportInputFn)(game + RVA_REPORT_INPUT))(provider, 0, (unsigned)GetTickCount64(), actions, point, wheel);
 }
@@ -240,6 +349,9 @@ static void feed(int moved, int buttons, int wheel) {
         point[0] = px * size[0] / (float)last_w;
         point[1] = py * size[1] / (float)last_h;
     }
+    hover(read_pointer((unsigned char *)context + CONTEXT_INPUT_MANAGER + 0) ?
+              read_pointer((unsigned char *)read_pointer((unsigned char *)context + CONTEXT_INPUT_MANAGER) + INPUT_KEYBOARD_DEVICE) : NULL,
+          point[0], point[1], moved);
     if (provider != active_provider) moved = 1; /* the first report activates the mouse in that window */
     active_provider = provider;
     if (moved) {
@@ -319,6 +431,7 @@ static void frame(void) {
         for (int i = 0; i < notches; ++i) keyboard_menu_pulse(wheel > 0 ? (top ? IN_LB : IN_DPAD_UP) : (top ? IN_RB : IN_DPAD_DOWN));
     }
     if ((buttons & 2) && !(buttons_before & 2)) keyboard_menu_pulse(IN_B); /* right click: back */
+    if ((buttons & 1) && !(buttons_before & 1)) keyboard_menu_pulse(IN_A); /* left click: open the focused tile */
     feed(moved, buttons, 0);
     buttons_before = buttons;
 }
