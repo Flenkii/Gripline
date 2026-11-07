@@ -116,6 +116,7 @@ int noclip_own_look(void) {
 #define XI_BACK 0x0020u
 #define XI_LS 0x0040u
 #define XI_A 0x1000u
+#define XI_B 0x2000u
 #define XI_Y 0x8000u
 #define PAD_FRESH_MS 250u
 #define STICK_DEAD 0.24f
@@ -124,7 +125,7 @@ int noclip_own_look(void) {
 /* the last reading of each controller (game input thread), used in the car update */
 static volatile struct {
     float lx, ly, rx, ry, lt, rt;
-    LONG fast, jump;
+    LONG fast, jump, crouch;
     LONG64 tick;
 } pads[4];
 static unsigned short pad_buttons[4];
@@ -174,6 +175,7 @@ void noclip_pad_input(unsigned user, unsigned char *gamepad) {
     pads[user].lt = trigger(gamepad[2]), pads[user].rt = trigger(gamepad[3]);
     pads[user].fast = (buttons & XI_A) != 0;
     pads[user].jump = (buttons & XI_A) != 0;
+    pads[user].crouch = (buttons & XI_B) != 0; /* walking: B held = crouch (V7.1) */
     pads[user].tick = (LONG64)GetTickCount64();
     if (on == MODE_FREECAM) { /* the right stick looks for the freecam, not for the game's camera */
         short zero[2] = {0, 0};
@@ -191,7 +193,7 @@ void noclip_pad_input(unsigned user, unsigned char *gamepad) {
 /* all controllers read lately: the strongest of each axis */
 typedef struct {
     float lx, ly, rx, ry, lt, rt;
-    int fast, jump;
+    int fast, jump, crouch;
 } PadAxes;
 
 static float stronger(float a, float b) {
@@ -209,6 +211,7 @@ static PadAxes pad_axes(void) {
         p.lt = stronger(p.lt, pads[i].lt), p.rt = stronger(p.rt, pads[i].rt);
         p.fast |= pads[i].fast != 0;
         p.jump |= pads[i].jump != 0;
+        p.crouch |= pads[i].crouch != 0;
     }
     return p;
 }
@@ -409,8 +412,8 @@ static void fly_free(float dt) {
 }
 
 /* walking.c: one step's input. Keys: Throttle/Brake forward/back, SteerLeft/SteerRight sideways,
-   arrows look, NoclipFast (LShift) runs, NoclipUp (Space) jumps. Controller: left stick walks, right
-   stick looks, RT runs, A jumps. */
+   arrows and the mouse look, NoclipFast (LShift) runs, NoclipUp (Space) jumps, NoclipDown (LCtrl)
+   held crouches. Controller: left stick walks, right stick looks, RT runs, A jumps, B held crouches. */
 void noclip_walk_input(WalkInput *in) {
     PadAxes pad = pad_axes();
     in->yaw = limit1((float)(keyboard_held(KEYBOARD_HOLD_LOOK_LEFT) - keyboard_held(KEYBOARD_HOLD_LOOK_RIGHT)) - pad.rx);
@@ -419,6 +422,8 @@ void noclip_walk_input(WalkInput *in) {
     in->side = limit1((float)(keyboard_held(KEYBOARD_HOLD_RIGHT) - keyboard_held(KEYBOARD_HOLD_LEFT)) + pad.lx);
     in->run = keyboard_held(KEYBOARD_HOLD_FAST) || pad.rt > 0.5f;
     in->jump = keyboard_held(KEYBOARD_HOLD_UP) || pad.jump;
+    in->crouch = keyboard_held(KEYBOARD_HOLD_DOWN) || pad.crouch;
+    keyboard_walk_mouse(&in->mouse_x, &in->mouse_y);
 }
 
 static void card(const char *german, const char *english) {
@@ -489,10 +494,18 @@ static ULONGLONG fade_at;
 static int fade_shut; /* the door has shut (sound played) */
 
 static void walk_out_card(void) {
-    card("Ausgestiegen - Walking an\nWASD/linker Stick laufen, Pfeile/rechter Stick schauen, Shift/RT rennen, "
-         "Leertaste/A springen, F/Y einsteigen",
-         "Out of the car - walking on\nWASD/left stick walk, arrows/right stick look, Shift/RT run, Space/A jump, "
-         "F/Y get in");
+    card("Ausgestiegen - Walking an\nWASD/linker Stick laufen, Maus/Pfeile/rechter Stick schauen, Shift/RT rennen, "
+         "Strg/B ducken, Leertaste/A springen, F/Y einsteigen",
+         "Out of the car - walking on\nWASD/left stick walk, mouse/arrows/right stick look, Shift/RT run, "
+         "Ctrl/B crouch, Space/A jump, F/Y get in");
+    /* V7.1 (Marvin 07.11.2026): mouse steering pauses while walking, the mouse looks around instead */
+    if (keyboard_mouse_steering()) {
+        int de = game_language_is_german(game);
+        notify_show_tinted(de ? "Maus-Lenkung pausiert\nBeim Laufen schaut die Maus, im Auto lenkt sie wieder."
+                              : "Mouse steering paused\nWhile walking the mouse looks around, back in the car it steers again.",
+                           NOTIFY_COLOR_ORANGE, de ? "HINWEIS" : "NOTE", 0);
+        log_append("NOCLIP: walking - mouse steering paused until back in the car.\r\n");
+    }
 }
 
 static void fade_begin(LONG to) {

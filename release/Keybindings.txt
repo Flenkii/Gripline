@@ -44,9 +44,10 @@ NOCLIP (wenn an / while on)
 
 LAUFEN (wenn ausgestiegen) / WALKING (when out of the car)
   W A S D            Laufen                       Walk
-  Pfeiltasten        Umschauen                    Arrow keys: look around
+  Maus / Pfeiltasten Umschauen                    Mouse / arrow keys: look around
   Linke Shift-Taste  Rennen                       Left Shift: run
   Leertaste          Springen                     Space: jump
+  Linke Strg (halten) Ducken                      Left Ctrl (hold): crouch
   F (nah am Auto)    Einsteigen                   F (near the car): get back in
 
 FREECAM: wie Noclip (W/S/A/D fliegen, Leertaste/Strg hoch/runter, Shift schneller,
@@ -59,8 +60,8 @@ CONTROLLER (LS = linker Stick gedrückt halten / hold left stick)
   LS + Steuerkreuz ◄   Tempomat                   LS + D-pad left: cruise control
   LS + Y               Aussteigen / Laufen        LS + Y: get out / walk
   Y (nah am Auto)      Einsteigen                 Y (near the car): get back in
-  Laufen: linker Stick laufen, rechter schauen, RT rennen, A springen
-  Walking: left stick walk, right stick look, RT run, A jump
+  Laufen: linker Stick laufen, rechter schauen, RT rennen, A springen, B halten ducken
+  Walking: left stick walk, right stick look, RT run, A jump, hold B crouch
 
 MENÜS / MENUS
   Pfeiltasten        Blättern                     Arrow keys: navigate

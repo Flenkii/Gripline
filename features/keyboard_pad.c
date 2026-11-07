@@ -64,6 +64,7 @@ static wchar_t ini_path[PATH_CAPACITY];
 static int mouse_sensitivity; /* [Keyboard] MouseSteering, 0 = off */
 static int mouse_dead = 30;   /* [Keyboard] MouseDeadZone: percent of the game's stick dead zone the mouse skips */
 static int mouse_center;      /* [Keyboard] MouseCenter: seconds without mouse movement until the wheel turns back straight, 0 = never */
+static int walk_mouse = 100;  /* [Keyboard] WalkMouseLook: walking's mouse look in percent, 0 = off (V7.1) */
 static volatile LONG values[KEY_SETTING_COUNT];
 static int loaded;
 static const wchar_t *const setting_keys[KEY_SETTING_COUNT] = {L"Enabled", L"SteerTime", L"ReturnTime",
@@ -455,6 +456,8 @@ static void settings_load(void) {
     mouse_dead = read_int(L"MouseDeadZone", 30);
     if (mouse_dead < 0 || mouse_dead > 60) mouse_dead = 30;
     if (mouse_center < 0 || mouse_center > 30) mouse_center = 0;
+    walk_mouse = read_int(L"WalkMouseLook", 100);
+    if (walk_mouse < 0 || walk_mouse > 300) walk_mouse = 100;
     for (unsigned i = 0; i < ARRAY_COUNT(bindings); ++i) {
         wchar_t text[96];
         GetPrivateProfileStringW(L"Keyboard", bindings[i].key, bindings[i].defaults, text, 96, ini_path);
@@ -695,16 +698,29 @@ static int di_open(HWND window) {
     return 1;
 }
 
-/* mouse counts left/right since the last call */
-static LONG di_dx(void) {
+/* mouse counts since the last call. Mouse steering (input thread) and walking's mouse look (camera
+   thread) take turns: only one of them reads at a time (they never both want it, but the switch
+   between driving and walking could overlap for a frame). */
+static volatile LONG di_busy;
+
+static void di_read(LONG *x, LONG *y) {
+    *x = 0, *y = 0;
+    if (InterlockedCompareExchange(&di_busy, 1, 0)) return;
     DiMouseState state;
     memory_copy(&state, &(DiMouseState){0}, sizeof(state));
     HRESULT hr = ((DiStateFn)DI_SLOT(di.device, 9))(di.device, sizeof(state), &state);
     if (FAILED(hr)) { /* lost or not acquired: once more next reading */
         ((DiDeviceFn)DI_SLOT(di.device, 7))(di.device);
-        return 0;
+    } else {
+        *x = state.x, *y = state.y;
     }
-    return state.x;
+    InterlockedExchange(&di_busy, 0);
+}
+
+static LONG di_dx(void) {
+    LONG x, y;
+    di_read(&x, &y);
+    return x;
 }
 
 typedef struct { LONG x, y; } MousePoint;
@@ -823,6 +839,41 @@ static double mouse_steer(int focused, double dt) {
         mouse_card(mouse.out, returning);
     }
     return mouse.out;
+}
+
+/* V7.1 walking: mouse look. The mouse's counts since the last call (walking.c, camera thread), 0 when
+   the game window is not in front or the simulation is paused. The cursor stays parked in the middle of
+   the window like with mouse steering. Works whether mouse steering is on or not (mouse steering itself
+   is off while walking: mouse_steer only runs while noclip/freecam/walking is off). */
+int keyboard_walk_mouse(float *dx, float *dy) {
+    static int parked;
+    *dx = 0.0f, *dy = 0.0f;
+    if (!walk_mouse || !mouse_ready()) return 0;
+    HWND window = (game_has_focus() && !input_blocked && driving_now()) ? foreground() : NULL;
+    RECT rect;
+    MousePoint centre = {0, 0}, now;
+    if (window && mouse.client_rect(window, &rect) && rect.right > 0 && rect.bottom > 0) {
+        centre.x = rect.right / 2;
+        centre.y = rect.bottom / 2;
+        if (!mouse.to_screen(window, &centre)) window = NULL;
+    } else {
+        window = NULL;
+    }
+    if (window && !di_open(window)) window = NULL;
+    if (!window) {
+        parked = 0;
+        return 0;
+    }
+    LONG x, y;
+    di_read(&x, &y);
+    if (!parked) { /* first reading: forget older movement */
+        parked = 1;
+        x = y = 0;
+    }
+    if (mouse.get_pos(&now) && (now.x != centre.x || now.y != centre.y)) mouse.set_pos((int)centre.x, (int)centre.y);
+    float scale = (float)walk_mouse / 100.0f;
+    *dx = (float)x * scale, *dy = (float)y * scale;
+    return 1;
 }
 
 static struct {

@@ -53,7 +53,8 @@ int walking_car_hidden(float out[3]);
 /* Input of one step (noclip.c fills it from the keyboard and the controllers). */
 typedef struct {
     float ahead, side, yaw, pitch; /* -1..1 */
-    int run, jump;
+    int run, jump, crouch;
+    float mouse_x, mouse_y; /* mouse counts this step (already times WalkMouseLook %) */
 } WalkInput;
 void noclip_walk_input(WalkInput *input);
 

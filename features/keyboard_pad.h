@@ -85,6 +85,8 @@ void keyboard_set_mouse_steering(int sensitivity);
 /* [Keyboard] MouseDeadZone: 0..60 percent */
 int keyboard_mouse_dead_zone(void);
 void keyboard_set_mouse_dead_zone(int percent);
+/* V7.1 walking: mouse movement (counts * WalkMouseLook %) since the last call; 0 = no reading */
+int keyboard_walk_mouse(float *dx, float *dy);
 int keyboard_mouse_center(void);
 void keyboard_set_mouse_center(int seconds);
 
