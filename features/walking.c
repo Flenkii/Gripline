@@ -444,13 +444,15 @@ static void step(float dt) {
     test_mouse[0] = test_mouse[1] = 0.0f;
 #endif
     /* looking: arrows / stick turn at an eased rate, the mouse turn is handed out over a few frames */
-    float hand = handheld == 1 ? 0.5f : handheld == 2 ? 1.0f : handheld >= 3 ? 1.7f : 0.0f;
-    float kl = ease(dt, WALK_EASE_LOOK * (1.0f + 0.7f * hand)); /* the hand turns a little behind */
+    /* Marvin 07.11.2026: "strong feels light" - light is the former strong, medium and strong more */
+    float hand = handheld == 1 ? 1.7f : handheld == 2 ? 2.8f : handheld >= 3 ? 4.2f : 0.0f;
+    float lag = hand < 1.7f ? hand : 1.7f; /* the turning lag stays as before (more feels sluggish) */
+    float kl = ease(dt, WALK_EASE_LOOK * (1.0f + 0.7f * lag)); /* the hand turns a little behind */
     yaw_rate += (in.yaw * WALK_LOOK - yaw_rate) * kl;
     pitch_rate += (in.pitch * WALK_LOOK - pitch_rate) * kl;
     mouse_yaw = clampf(mouse_yaw - in.mouse_x * WALK_MOUSE_RAD, -1.5f, 1.5f);
     mouse_pitch = clampf(mouse_pitch - in.mouse_y * WALK_MOUSE_RAD, -1.5f, 1.5f);
-    float km = ease(dt, WALK_EASE_MOUSE * (1.0f + 1.2f * hand));
+    float km = ease(dt, WALK_EASE_MOUSE * (1.0f + 1.2f * lag));
     float myaw = mouse_yaw * km, mpitch = mouse_pitch * km;
     mouse_yaw -= myaw, mouse_pitch -= mpitch;
     float yaw_step = yaw_rate * dt + myaw;

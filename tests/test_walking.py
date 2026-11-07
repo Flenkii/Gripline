@@ -159,7 +159,7 @@ for i in range(150):
 dev = max(math.degrees(math.acos(max(-1.0, min(1.0, l[2] / math.hypot(*l))))) for l in looks)
 jump = max(math.degrees(math.acos(max(-1.0, min(1.0, sum(a * b for a, b in zip(p, q)) / (math.hypot(*p) * math.hypot(*q))))))
            for p, q in zip(looks, looks[1:]))
-check(0.05 < dev < 1.5, f'Handkamera Mittel: Blick wandert leicht (max {dev:.2f} Grad)')
+check(0.05 < dev < 2.5, f'Handkamera Mittel: Blick wandert leicht (max {dev:.2f} Grad)')
 check(jump < 0.1, f'Handkamera: ohne Ruckeln (max {jump:.3f} Grad pro Bild)')
 keys.add(ord('W'))
 step(1000)
@@ -171,7 +171,7 @@ lows = [ys[i] for i in range(1, len(ys) - 1) if ys[i] < ys[i - 1] and ys[i] <= y
 check(len(lows) >= 6 and max(lows) - min(lows) > 0.004, f'V7.1b Handkamera: jeder Schritt anders (Tiefpunkte {len(lows)}, Spanne {max(lows) - min(lows):.4f} m)')
 jump = max(math.degrees(math.acos(max(-1.0, min(1.0, sum(a * b for a, b in zip(p, q)) / (math.hypot(*p) * math.hypot(*q))))))
            for p, q in zip(looks, looks[1:]))
-check(jump < 0.15, f'Handkamera beim Gehen: ohne Ruckeln (max {jump:.3f} Grad pro Bild)')
+check(jump < 0.3, f'Handkamera beim Gehen: ohne Ruckeln (max {jump:.3f} Grad pro Bild)')
 keys.clear()
 e.call('Fh2TestWalkHandheld', 0)
 
