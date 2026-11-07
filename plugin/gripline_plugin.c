@@ -520,7 +520,7 @@ static void start_features(void) {
     noclip_install();
     gripline_set_output_root(media_dir);
     traffic_files_start(mount_dir, options.traffic_level);
-    world_files_start(mount_dir, options.speed_cameras, options.car_labels, options.event_icons);
+    world_files_start(mount_dir, options.speed_cameras, options.car_labels, options.event_icons, options.calm_drivatars);
     cockpit_start(game, mount_dir, options.steering_animation, azimuth_rotation(), 10 /* linear */);
     notify_set_enabled(options.notifications);
     notify_set_style(options.card_style);
@@ -538,7 +538,8 @@ static void start_features(void) {
     telemetry_set_show(options.telemetry_show);
     logbook_start(game, directory, mount_dir, options.news_seen);
     records_start(game, directory);
-    rig_settings_world(options.speed_cameras, options.car_labels, options.telemetry, options.event_icons);
+    rig_settings_world(options.speed_cameras, options.car_labels, options.telemetry, options.event_icons,
+                       options.calm_drivatars);
     rig_settings_start(directory);
     /* the platform may have loaded Gripline after Azimuth set up gamepads and swap chain */
     if (!keyboard_pad_late()) platform_log("keyboard: not active (off in FH2_Keyboard.ini, Mapper running, or no hook)");

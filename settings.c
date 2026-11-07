@@ -29,6 +29,7 @@ const SettingDefinition setting_definitions[] = {
     SETTING("Gripline", "TelemetryOpacity", telemetry_opacity, SETTING_MASK),
     SETTING("Gripline", "TelemetrySize", telemetry_size, SETTING_MASK),
     SETTING("Gripline", "WalkHandheld", walk_handheld, SETTING_MASK),
+    SETTING("Gripline", "CalmDrivatars", calm_drivatars, SETTING_BOOLEAN),
 };
 
 const size_t setting_count = ARRAY_COUNT(setting_definitions);

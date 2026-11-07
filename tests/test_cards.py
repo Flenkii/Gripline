@@ -81,7 +81,7 @@ for eo, platform, version, want, want_text in cases:
     check(r == want and t == want_text, f'{version}: {r} {t!r}')
 
 print('Confirmation cards (English: no game image)')
-RIG_TRAFFIC_LEVEL, RIG_KEY_STEER, RIG_GRIP_NOTIFICATIONS, RIG_GRIP_CARD_COLOR, RIG_TRAFFIC_PRESET = 0, 3, 6, 10, 15
+RIG_TRAFFIC_LEVEL, RIG_KEY_STEER, RIG_GRIP_NOTIFICATIONS, RIG_GRIP_CARD_COLOR, RIG_TRAFFIC_PRESET = 0, 3, 6, 10, 16
 for args, want in [((RIG_GRIP_CARD_COLOR, 3), 'Gripline: Card Colour\nPurple'),
                    ((RIG_GRIP_CARD_COLOR, 0), 'Gripline: Card Colour\nBlue (original)'),
                    ((RIG_TRAFFIC_LEVEL, 4), 'Traffic: Amount\n100 Cars - after a restart'),

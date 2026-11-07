@@ -292,8 +292,8 @@ check(tick() == LEVEL_CLOSED, 'Telemetrie/Totzone: zu')
 
 # world page: three on/off rows, restart note
 press(0x79)
-goto('World: cameras, names, icons')
-check(selected() == 'World: cameras, names, icons', selected())
+goto('World: cameras, icons, Drivatars')
+check(selected() == 'World: cameras, icons, Drivatars', selected())
 press(ENTER)
 rows = panel_rows()
 check(selected() == 'Speed cameras' and 'Names above cars' in rows and 'Event icons on the road' in rows

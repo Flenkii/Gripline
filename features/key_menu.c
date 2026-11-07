@@ -562,9 +562,13 @@ static void distance_text(double metres, wchar_t out[32]) {
 
 static int confirm_clear; /* records page: first Enter asks */
 
-static const unsigned world_ids[3] = {RIG_GRIP_SPEED_CAMERAS, RIG_GRIP_CAR_LABELS, RIG_GRIP_EVENT_ICONS};
-static const wchar_t *const world_german[3] = {L"Blitzer", L"Namen über Autos", L"Event-Symbole auf der Straße"};
-static const wchar_t *const world_english[3] = {L"Speed cameras", L"Names above cars", L"Event icons on the road"};
+#define WORLD_ROWS 4
+static const unsigned world_ids[WORLD_ROWS] = {RIG_GRIP_SPEED_CAMERAS, RIG_GRIP_CAR_LABELS, RIG_GRIP_EVENT_ICONS,
+                                               RIG_GRIP_CALM_DRIVATARS};
+static const wchar_t *const world_german[WORLD_ROWS] = {L"Blitzer", L"Namen über Autos", L"Event-Symbole auf der Straße",
+                                                        L"Drivatare fahren ruhig"};
+static const wchar_t *const world_english[WORLD_ROWS] = {L"Speed cameras", L"Names above cars", L"Event icons on the road",
+                                                         L"Calm Drivatars"};
 
 /* V7.1 walking: handheld camera levels (walking.h) */
 static const wchar_t *const hand_german[WALK_HANDHELD_COUNT] = {L"Aus (ruhig)", L"Leicht", L"Mittel", L"Stark"};
@@ -635,7 +639,7 @@ static void build_page(wchar_t *title) {
             }
             row_add(tr(L"Rekorde", L"Records"), L"›", 0, TOP_RECORDS);
             row_add(tr(L"Welt & Autos", L"World & cars"), L"", NOTIFY_ROW_SECTION, -1);
-            row_add(tr(L"Welt: Blitzer, Namen, Symbole", L"World: cameras, names, icons"), L"›", 0, TOP_WORLD);
+            row_add(tr(L"Welt: Blitzer, Symbole, Drivatare", L"World: cameras, icons, Drivatars"), L"›", 0, TOP_WORLD);
             row_add(tr(L"Verkehr", L"Traffic"), traffic_name(rig_setting_get(RIG_TRAFFIC_PRESET)), 0, TOP_TRAFFIC);
             row_add(tr(L"Kein Schaden an Autos", L"No damage on cars"),
                     tr(damage_short_german[no_damage_mode()], damage_short_english[no_damage_mode()]), 0, TOP_DAMAGE);
@@ -880,7 +884,7 @@ static void build_page(wchar_t *title) {
         }
         case LEVEL_WORLD:
             wcopy(title, 0, 64, tr(L"Welt", L"World"));
-            for (unsigned i = 0; i < 3; ++i)
+            for (unsigned i = 0; i < WORLD_ROWS; ++i)
                 row_add(tr(world_german[i], world_english[i]), rig_setting_get(world_ids[i]) ? tr(L"An", L"On") : tr(L"Aus", L"Off"), 0,
                         (int)i);
             row_add(tr(L"Wirkt nach Spiel-Neustart", L"Takes effect after a restart"), L"", NOTIFY_ROW_INFO, -1);
@@ -1149,7 +1153,7 @@ static void choose(void) {
             break;
         }
         case LEVEL_WORLD: {
-            if (action >= 0 && action < 3) {
+            if (action >= 0 && action < WORLD_ROWS) {
                 unsigned id = world_ids[action];
                 int on = !rig_setting_get(id);
                 rig_setting_set(id, on); /* saves Gripline.ini and shows the restart card */
