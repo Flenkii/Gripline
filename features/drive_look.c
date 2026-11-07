@@ -31,7 +31,12 @@ static float target_yaw, target_pitch, yaw, pitch;
 static ULONGLONG moved_at;
 static LARGE_INTEGER last;
 static int logged;
-static _Alignas(16) unsigned char saved_eye[24], saved_dir[16];
+#define SAVED_CAMERAS 8
+static struct {
+    void *camera;
+    unsigned char eye[24], dir[12];
+} saved[SAVED_CAMERAS];
+static int pivot_logged;
 
 static float root(float x) {
     return _mm_cvtss_f32(_mm_sqrt_ss(_mm_set_ss(x > 0.0f ? x : 0.0f)));
@@ -124,7 +129,9 @@ void drive_look_frame(void) {
     if (target_pitch == 0.0f && pitch > -0.0005f && pitch < 0.0005f) pitch = 0.0f;
 }
 
-int drive_look_apply(void *camera, unsigned family, unsigned eye_offset, unsigned dir_offset) {
+int drive_look_apply(void *camera, unsigned index, unsigned family, unsigned eye_offset, unsigned dir_offset) {
+    if (index >= SAVED_CAMERAS) return 0;
+    saved[index].camera = NULL;
     if (yaw == 0.0f && pitch == 0.0f) return 0;
     if (walking_active() || noclip_active()) return 0;
     unsigned char *c = (unsigned char *)camera;
@@ -136,8 +143,8 @@ int drive_look_apply(void *camera, unsigned family, unsigned eye_offset, unsigne
     float v[3] = {d[0] / length, d[1] / length, d[2] / length};
     float h = root(v[0] * v[0] + v[2] * v[2]);
     if (h < 0.05f) return 0; /* straight up / down: no heading to turn from */
-    memory_copy(saved_eye, e, sizeof(saved_eye));
-    memory_copy(saved_dir, d, sizeof(saved_dir));
+    memory_copy(saved[index].eye, e, sizeof(saved[index].eye));
+    memory_copy(saved[index].dir, d, sizeof(saved[index].dir));
     float p = family ? clampf(pitch, -LOOK_PITCH_DOWN_OUTSIDE, LOOK_PITCH_UP_OUTSIDE) : pitch;
     float up[3] = {0.0f, car_mirror, 0.0f};
     float right[3] = {car_mirror * v[2] / h, 0.0f, -car_mirror * v[0] / h};
@@ -149,10 +156,16 @@ int drive_look_apply(void *camera, unsigned family, unsigned eye_offset, unsigne
     } else {
         /* outside: the camera circles around the car (the point of the look nearest to it) */
         float car[3], t = PIVOT_DEFAULT;
-        if (car_place(car)) {
+        int known = car_place(car);
+        if (known) {
             float to[3] = {car[0] - (float)e[0], car[1] - (float)e[1], car[2] - (float)e[2]};
             float along = to[0] * v[0] + to[1] * v[1] + to[2] * v[2];
             if (along > 1.0f && along < 40.0f) t = along;
+        }
+        if (pivot_logged < 3) {
+            ++pivot_logged;
+            log_append_value(known ? "DRIVELOOK: outside camera circles the car, cm in front: "
+                                   : "DRIVELOOK: outside camera, car not known - cm in front: ", (int)(t * 100.0f));
         }
         float pivot[3] = {(float)e[0] + v[0] * t, (float)e[1] + v[1] * t, (float)e[2] + v[2] * t};
         float back[3] = {-v[0] * t, -v[1] * t, -v[2] * t};
@@ -165,13 +178,16 @@ int drive_look_apply(void *camera, unsigned family, unsigned eye_offset, unsigne
     d[0] = v[0] * length, d[1] = v[1] * length, d[2] = v[2] * length;
     memory_copy(c + eye_offset, e, sizeof(e));
     memory_copy(c + dir_offset, d, 12);
+    saved[index].camera = camera;
     return 1;
 }
 
-void drive_look_restore(void *camera, unsigned eye_offset, unsigned dir_offset) {
+void drive_look_restore(void *camera, unsigned index, unsigned eye_offset, unsigned dir_offset) {
+    if (index >= SAVED_CAMERAS || saved[index].camera != camera) return;
     unsigned char *c = (unsigned char *)camera;
-    memory_copy(c + eye_offset, saved_eye, sizeof(saved_eye));
-    memory_copy(c + dir_offset, saved_dir, 12);
+    memory_copy(c + eye_offset, saved[index].eye, sizeof(saved[index].eye));
+    memory_copy(c + dir_offset, saved[index].dir, 12);
+    saved[index].camera = NULL;
 }
 
 #ifdef FH2_TWEAKS_TEST
@@ -182,7 +198,7 @@ __declspec(dllexport) void Fh2TestDriveLookSet(int yaw_mrad, int pitch_mrad, int
     car_mirror = (float)mirror;
 }
 __declspec(dllexport) int Fh2TestDriveLookApply(void *camera, unsigned family) {
-    return drive_look_apply(camera, family, family ? 0x190u : 0x1a0u, family ? 0x1b0u : 0x1c0u);
+    return drive_look_apply(camera, family, family, family ? 0x190u : 0x1a0u, family ? 0x1b0u : 0x1c0u);
 }
 __declspec(dllexport) void Fh2TestDriveLookCar(const float *position) {
     drive_look_car(position, 0.0f);
