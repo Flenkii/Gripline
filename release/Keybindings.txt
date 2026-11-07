@@ -42,6 +42,11 @@ NOCLIP (wenn an / while on)
   Leertaste / Strg   Steigen / sinken             Space / Left Ctrl: up / down
   Linke Shift-Taste  Schneller (halten)           Left Shift: faster (hold)
 
+MAUS-BLICK IM AUTO (V7.1) / MOUSE LOOK IN THE CAR
+  Maus bewegen       Kamera drehen (jede Ansicht)  Move the mouse: turn the camera (every view)
+  Maus 2 s in Ruhe   beim Fahren zurück zur Mitte  Mouse left alone 2 s while driving: back
+  (Stillstand: Kamera bleibt / standing: it stays. Aus bei Maus-Lenkung / off with mouse steering)
+
 LAUFEN (wenn ausgestiegen) / WALKING (when out of the car)
   W A S D            Laufen                       Walk
   Maus / Pfeiltasten Umschauen                    Mouse / arrow keys: look around

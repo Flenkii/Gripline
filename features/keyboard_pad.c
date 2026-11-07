@@ -65,6 +65,7 @@ static int mouse_sensitivity; /* [Keyboard] MouseSteering, 0 = off */
 static int mouse_dead = 30;   /* [Keyboard] MouseDeadZone: percent of the game's stick dead zone the mouse skips */
 static int mouse_center;      /* [Keyboard] MouseCenter: seconds without mouse movement until the wheel turns back straight, 0 = never */
 static int walk_mouse = 100;  /* [Keyboard] WalkMouseLook: walking's mouse look in percent, 0 = off (V7.1) */
+static int drive_mouse = 100; /* [Keyboard] DriveMouseLook: mouse look in the car in percent, 0 = off (V7.1) */
 static volatile LONG values[KEY_SETTING_COUNT];
 static int loaded;
 static const wchar_t *const setting_keys[KEY_SETTING_COUNT] = {L"Enabled", L"SteerTime", L"ReturnTime",
@@ -458,6 +459,8 @@ static void settings_load(void) {
     if (mouse_center < 0 || mouse_center > 30) mouse_center = 0;
     walk_mouse = read_int(L"WalkMouseLook", 100);
     if (walk_mouse < 0 || walk_mouse > 300) walk_mouse = 100;
+    drive_mouse = read_int(L"DriveMouseLook", 100);
+    if (drive_mouse < 0 || drive_mouse > 300) drive_mouse = 100;
     for (unsigned i = 0; i < ARRAY_COUNT(bindings); ++i) {
         wchar_t text[96];
         GetPrivateProfileStringW(L"Keyboard", bindings[i].key, bindings[i].defaults, text, 96, ini_path);
@@ -841,14 +844,14 @@ static double mouse_steer(int focused, double dt) {
     return mouse.out;
 }
 
-/* V7.1 walking: mouse look. The mouse's counts since the last call (walking.c, camera thread), 0 when
-   the game window is not in front or the simulation is paused. The cursor stays parked in the middle of
-   the window like with mouse steering. Works whether mouse steering is on or not (mouse steering itself
-   is off while walking: mouse_steer only runs while noclip/freecam/walking is off). */
-int keyboard_walk_mouse(float *dx, float *dy) {
+/* V7.1 mouse look (walking and driving): the mouse's counts since the last call, 0 when the game
+   window is not in front or the simulation is paused. The cursor stays parked in the middle of the
+   window like with mouse steering. Only one caller per frame (walking.c or drive_look.c, both on the
+   camera thread, never both: walking takes it while walking, driving otherwise). */
+static int mouse_look_read(float *dx, float *dy) {
     static int parked;
     *dx = 0.0f, *dy = 0.0f;
-    if (!walk_mouse || !mouse_ready()) return 0;
+    if (!mouse_ready()) return 0;
     HWND window = (game_has_focus() && !input_blocked && driving_now()) ? foreground() : NULL;
     RECT rect;
     MousePoint centre = {0, 0}, now;
@@ -871,8 +874,23 @@ int keyboard_walk_mouse(float *dx, float *dy) {
         x = y = 0;
     }
     if (mouse.get_pos(&now) && (now.x != centre.x || now.y != centre.y)) mouse.set_pos((int)centre.x, (int)centre.y);
-    float scale = (float)walk_mouse / 100.0f;
-    *dx = (float)x * scale, *dy = (float)y * scale;
+    *dx = (float)x, *dy = (float)y;
+    return 1;
+}
+
+/* walking: works whether mouse steering is on or not (mouse_steer only runs while noclip/freecam/walking is off) */
+int keyboard_walk_mouse(float *dx, float *dy) {
+    *dx = 0.0f, *dy = 0.0f;
+    if (!walk_mouse || !mouse_look_read(dx, dy)) return 0;
+    *dx *= (float)walk_mouse / 100.0f, *dy *= (float)walk_mouse / 100.0f;
+    return 1;
+}
+
+/* driving: not while mouse steering is on (the mouse steers then) */
+int keyboard_drive_mouse(float *dx, float *dy) {
+    *dx = 0.0f, *dy = 0.0f;
+    if (!drive_mouse || mouse_sensitivity || !mouse_look_read(dx, dy)) return 0;
+    *dx *= (float)drive_mouse / 100.0f, *dy *= (float)drive_mouse / 100.0f;
     return 1;
 }
 

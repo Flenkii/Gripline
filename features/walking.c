@@ -5,6 +5,7 @@
 #include "support.h"
 #include "walking.h"
 #include "keyboard_pad.h"
+#include "drive_look.h"
 
 /* ------------------------------------------------------------------ game addresses */
 
@@ -625,6 +626,8 @@ static void *camera_update(void *camera, float dt, uintptr_t a, uintptr_t b) {
     if (active) {
         walk_frame();
         put_eye(camera, cameras[i].family);
+    } else {
+        drive_look_frame(); /* V7.1 mouse look in the car */
     }
     return result;
 }
@@ -633,7 +636,11 @@ static void *camera_view(void *camera, void *out) {
     int i = camera_index(camera);
     if (i < 0) return out;
     if (active) put_eye(camera, cameras[i].family);
-    return ((CameraViewFn)previous_view[i])(camera, out);
+    unsigned family = cameras[i].family;
+    int turned = !active && drive_look_apply(camera, family, eye_field[family], dir_field[family]);
+    void *result = ((CameraViewFn)previous_view[i])(camera, out);
+    if (turned) drive_look_restore(camera, eye_field[family], dir_field[family]);
+    return result;
 }
 
 /* The game's multi camera (game+0xfe61c0) moves a follow camera towards its car when something is

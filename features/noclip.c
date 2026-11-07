@@ -29,6 +29,7 @@
 #include "traffic_files.h"
 #include "wheel_buttons.h"
 #include "walking.h"
+#include "drive_look.h"
 
 #define RVA_DYNAMICS_VTABLE 0x2eb4bb8u
 #define RVA_DYNAMICS_REF_VTABLE 0x2eb5e18u
@@ -695,8 +696,10 @@ static void sample_trip(void *car, float dt) {
     {
         _Alignas(16) float p[4];
         _mm_store_ps(p, state.position);
-        if (float_is_finite(p[0]) && float_is_finite(p[1]) && float_is_finite(p[2]))
+        if (float_is_finite(p[0]) && float_is_finite(p[1]) && float_is_finite(p[2])) {
             records_sample(dt, p, root(v[0] * v[0] + v[1] * v[1] + v[2] * v[2]));
+            drive_look_car(p, root(v[0] * v[0] + v[1] * v[1] + v[2] * v[2])); /* V7.1 mouse look: pivot, speed */
+        }
     }
     _Alignas(16) float r[4], f[4], w[4];
     _mm_store_ps(r, state.right);
@@ -706,6 +709,7 @@ static void sample_trip(void *car, float dt) {
         float_is_finite(f[2]) && float_is_finite(w[1]))
         telemetry_sample(dt, v, r, f, w);
     if (float_is_finite(f[0]) && float_is_finite(f[1]) && float_is_finite(f[2])) cruise_sample(dt, v, f);
+    if (float_is_finite(r[0]) && float_is_finite(r[2]) && float_is_finite(f[0]) && float_is_finite(f[2])) drive_look_mirror(r, f);
 }
 
 void noclip_car_update(void *car, float dt, float frame_dt, unsigned frame) {
