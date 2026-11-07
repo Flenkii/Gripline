@@ -7,6 +7,8 @@ Works offline and online with [FH2MP](https://github.com/Charelene/FH2MP).
 > Press **F** (controller: hold **LS + Y**) and walk around Forza Horizon 2 on foot – **with real collision** (trees, walls, buildings, ground).
 > Walk, run and jump, fade to black with **car door sounds**, your car stays parked until you get back in. Offline only.
 
+**One mod, everything works together.** Walking mode, live telemetry, freecam, noclip, cruise control, traffic, cockpit, wheel and keyboard – all in one DLL, all set up in one menu (**F8**), no conflicts between different mods.
+
 **[⬇ Download the latest version](../../releases/latest)** · current version: **V7 – The Big Update**
 
 **[Join the Gripline Discord](https://discord.gg/g83eBcrq)** · problems, questions, ideas for V8 and showcase. Join to always stay up to date with every new version.
