@@ -161,6 +161,18 @@ jump = max(math.degrees(math.acos(max(-1.0, min(1.0, sum(a * b for a, b in zip(p
            for p, q in zip(looks, looks[1:]))
 check(0.05 < dev < 1.5, f'Handkamera Mittel: Blick wandert leicht (max {dev:.2f} Grad)')
 check(jump < 0.1, f'Handkamera: ohne Ruckeln (max {jump:.3f} Grad pro Bild)')
+keys.add(ord('W'))
+step(1000)
+ys, looks = [], []
+for i in range(250):
+    eye, d, dist, kmh = step(20)
+    ys.append(eye[1]); looks.append(d)
+lows = [ys[i] for i in range(1, len(ys) - 1) if ys[i] < ys[i - 1] and ys[i] <= ys[i + 1]]
+check(len(lows) >= 6 and max(lows) - min(lows) > 0.004, f'V7.1b Handkamera: jeder Schritt anders (Tiefpunkte {len(lows)}, Spanne {max(lows) - min(lows):.4f} m)')
+jump = max(math.degrees(math.acos(max(-1.0, min(1.0, sum(a * b for a, b in zip(p, q)) / (math.hypot(*p) * math.hypot(*q))))))
+           for p, q in zip(looks, looks[1:]))
+check(jump < 0.15, f'Handkamera beim Gehen: ohne Ruckeln (max {jump:.3f} Grad pro Bild)')
+keys.clear()
 e.call('Fh2TestWalkHandheld', 0)
 
 # controller (XINPUT_GAMEPAD as the game's controller hook gives it)

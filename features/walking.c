@@ -72,7 +72,14 @@ static int eye_y_set;
 static float look[3] = {0, 0, 1};
 /* V7.1 handheld camera: level (any thread), wave phases (camera thread) */
 static volatile LONG handheld = 2;
-static float hand_phase[7];
+/* V7.1b (Marvin 07.11.2026: "not natural yet - too even, every step the same"): random, never
+   repeating movement (smooth noise) and steps that each differ, pushed into a small spring */
+typedef struct { float from, to, t; } HandNoise;
+static HandNoise hand_noise[6];
+static unsigned hand_seed = 0x9e3779b9u;
+static float step_gain = 1.0f, step_gain_to = 1.0f; /* this step's strength, eased */
+static int step_half = -1;
+static float spring_pitch, spring_pitch_v, spring_yaw, spring_yaw_v, spring_up, spring_up_v;
 #ifdef FH2_TWEAKS_TEST
 static float test_mouse[2]; /* tests: mouse counts for the next step */
 #endif  /* the direction given to the camera (with the stride's small sway) */
@@ -234,14 +241,26 @@ int walking_handheld(void) {
     return (int)handheld;
 }
 
-/* the hand: slow waves of different lengths that never quite repeat (0.6..1.2 s for the shake,
-   ~4 s breathing, 7-11 s drift); each one -1..1 */
-static const float hand_hz[7] = {0.093f, 0.137f, 0.21f, 0.26f, 0.83f, 1.31f, 1.67f};
-static float hand_wave(unsigned a, unsigned b, float wa) {
-    float s1, c1, s2, c2;
-    sin_cos_wide(hand_phase[a], &s1, &c1);
-    sin_cos_wide(hand_phase[b], &s2, &c2);
-    return s1 * wa + s2 * (1.0f - wa);
+/* -1..1, a new number each call (xorshift) */
+static float hand_random(void) {
+    hand_seed ^= hand_seed << 13, hand_seed ^= hand_seed >> 17, hand_seed ^= hand_seed << 5;
+    return (float)(hand_seed & 0xffffu) / 32767.5f - 1.0f;
+}
+
+/* smooth noise: from one random value to the next in 1/rate s, eased (no corners), never the same */
+static float hand_noise_step(HandNoise *n, float dt, float rate) {
+    if (n->from == 0.0f && n->to == 0.0f) n->from = hand_random(), n->to = hand_random(); /* first use */
+    n->t += dt * rate;
+    while (n->t >= 1.0f) n->t -= 1.0f, n->from = n->to, n->to = hand_random();
+    float t = n->t, e = t * t * t * (t * (t * 6.0f - 15.0f) + 10.0f);
+    return n->from + (n->to - n->from) * e;
+}
+
+/* a small spring (the hand holding the phone): pushed by the steps, swings back softly */
+static void hand_spring(float *x, float *v, float dt, float hz, float damping) {
+    float w = 6.2831853f * hz;
+    *v += (-w * w * *x - 2.0f * damping * w * *v) * dt;
+    *x += *v * dt;
 }
 
 void walking_enter(const float position[3], const float right[3], const float forward[3]) {
@@ -593,22 +612,38 @@ static void step(float dt) {
     eye_y = clampf(eye_y, eye_want - WALK_EYE_BELOW, eye_want + WALK_EYE_ABOVE);
     /* handheld camera: drift and breathing standing still, a hand that bounces with the steps */
     float hand_yaw = 0.0f, hand_pitch = 0.0f, hand_side = 0.0f, hand_up = 0.0f;
-    if (hand > 0.0f) {
-        for (unsigned i = 0; i < 7; ++i) {
-            hand_phase[i] += dt * 6.2831853f * hand_hz[i];
-            if (hand_phase[i] > 6.2831853f) hand_phase[i] -= 6.2831853f;
+    if (hand > 0.0f && dt > 0.0f) {
+        float moving = bob_amount, run_share = clampf((hs - WALK_SPEED) / (WALK_RUN - WALK_SPEED), 0.0f, 1.0f);
+        float calm = 1.0f - 0.45f * crouch; /* crouched the hands are steadier */
+        /* standing: slow drift and breathing; walking and running: faster, stronger shake */
+        float slow = 0.35f + 0.25f * moving, fast = 1.4f + 1.6f * moving + 1.5f * run_share;
+        float shake = hand * calm * (0.4f + 0.6f * moving + 0.8f * run_share);
+        hand_yaw = hand * calm * 0.011f * hand_noise_step(&hand_noise[0], dt, slow) +
+                   shake * 0.0022f * hand_noise_step(&hand_noise[1], dt, fast);
+        hand_pitch = hand * calm * 0.007f * hand_noise_step(&hand_noise[2], dt, slow * 1.3f) +
+                     shake * 0.0018f * hand_noise_step(&hand_noise[3], dt, fast * 1.2f);
+        hand_side = hand * calm * 0.008f * hand_noise_step(&hand_noise[4], dt, slow * 0.8f);
+        hand_up = hand * calm * 0.005f * hand_noise_step(&hand_noise[5], dt, slow * 1.1f);
+        /* every footfall pushes the spring a little differently: strength, side, timing feel */
+        int half = bob_on ? (bob_phase >= 3.14159265f) : -1;
+        if (half >= 0 && step_half >= 0 && half != step_half) {
+            step_gain_to = 1.0f + 0.35f * hand_random();
+            float kick = hand * calm * moving * (0.7f + 0.5f * run_share) * (0.75f + 0.25f * hand_random());
+            spring_pitch_v -= kick * 0.09f;                              /* the phone dips at the footfall */
+            spring_yaw_v += kick * 0.05f * (half ? 1.0f : -1.0f) * (0.6f + 0.4f * hand_random()); /* to the foot's side */
+            spring_up_v -= kick * 0.12f;
         }
-        float moving = bob_amount;
-        hand_yaw = hand * (0.0075f * hand_wave(0, 2, 0.6f) + 0.0018f * hand_wave(4, 6, 0.5f));
-        hand_pitch = hand * (0.0045f * hand_wave(1, 3, 0.5f) + 0.0015f * hand_wave(5, 4, 0.6f));
-        hand_side = hand * 0.008f * hand_wave(2, 5, 0.7f);
-        hand_up = hand * 0.006f * hand_wave(3, 6, 0.6f);
-        if (bob_on) { /* each step jolts the hand a little: down, then back */
-            float s2, c2;
-            sin_cos_wide(2.0f * bob_phase + 0.6f, &s2, &c2);
-            hand_pitch -= hand * 0.006f * moving * c2;
-            hand_yaw += hand * 0.004f * moving * s2 * 0.5f;
-        }
+        step_half = half;
+        hand_spring(&spring_pitch, &spring_pitch_v, dt, 2.6f, 0.45f);
+        hand_spring(&spring_yaw, &spring_yaw_v, dt, 1.9f, 0.5f);
+        hand_spring(&spring_up, &spring_up_v, dt, 2.2f, 0.5f);
+        hand_pitch += spring_pitch, hand_yaw += spring_yaw, hand_up += spring_up;
+        /* the regular bob gets this step's strength too */
+        step_gain += (step_gain_to - step_gain) * ease(dt, 0.12f);
+        bob *= step_gain, side_sway *= step_gain, look_sway *= step_gain;
+    } else if (hand == 0.0f) {
+        step_gain = step_gain_to = 1.0f, step_half = -1;
+        spring_pitch = spring_pitch_v = spring_yaw = spring_yaw_v = spring_up = spring_up_v = 0.0f;
     }
     eye[0] = head[0] + rx * (side_sway + hand_side), eye[1] = eye_y + bob + hand_up,
     eye[2] = head[2] + rz * (side_sway + hand_side);
