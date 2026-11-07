@@ -34,6 +34,7 @@ mod. Since V6 Gripline only does what the others don't:
 | **Logbook & records** *(V7)* | Distance per car, driving time, top 5 cars, milestone cards (`Gripline_Logbook.txt`); best times kept for ever with a NEW RECORD card (`Gripline_Records.txt`). |
 | **No damage on cars** *(V7)* | Visible damage off for other cars (Drivatars, traffic) or all cars. Physics unchanged. |
 | **World** *(V7)* | Speed cameras off, names over cars off, event icons on the road off (F8, after a restart). |
+| **Calm Drivatars** *(V7.1, test)* | F8 > World > Calm Drivatars: every Drivatar in the open world cruises in the game's calmest style and no longer speeds up when you get close (after a restart). Races stay as they are. Lanes and right of way are not changed (the Drivatar AI has no traffic rules). Idea: MRAlexis99. |
 | **Card designs** *(V7)* | Classic, Enhanced and Overdrive; colours incl. black and rainbow; each card group can be hidden (presets All / Few / Warnings only). |
 | **Update notice** *(V7)* | At start Gripline asks GitHub once for the latest release and shows an orange card when a newer version is out. Nothing else is sent; switch it off in F8 › Settings. |
 | **Mouse in the menus** *(V7.1)* | Press Esc: move the mouse over a tile to select it, left click opens it, the wheel switches the tabs at the top and scrolls lists, right click goes back. Uses the normal Windows mouse. `MenuMouse` in FH2_Keyboard.ini (1 = on, 0 = off). |

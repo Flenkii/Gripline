@@ -29,6 +29,7 @@ typedef struct {
     int card_style; /* NOTIFY_STYLE_*: 0 Classic, 1 Enhanced, 2 Overdrive (V7) */
     int update_check; /* [Gripline] UpdateCheck: ask GitHub for a newer release at start (V7) */
     int speed_cameras, car_labels, telemetry, event_icons;
+    int calm_drivatars; /* [Gripline] CalmDrivatars: 1 = open-world Drivatars cruise calmly (V7.1, world_files.c) */
     int news_seen; /* [Gripline] NewsSeen: version whose what's-new cards were shown (71 = V7.1), logbook.c */
     int no_damage; /* [Gripline] NoDamage: 0 off, 1 other cars, 2 all cars (V7, no_damage.h) */
     int telemetry_pos, telemetry_opacity, telemetry_size; /* [Gripline] TelemetryPosition 0..5, TelemetryOpacity %, TelemetrySize % (V7, notify.h) */
