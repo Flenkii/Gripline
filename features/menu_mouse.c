@@ -153,6 +153,59 @@ static void dump_fields(const char *label, unsigned char *device, int which) {
     }
 }
 
+/* menumouse3 diagnostics: on each change of the pad focus, the focused element and its parents (+0x70)
+   with their plausible float fields (layout offsets / sizes) - to find where a tile sits */
+#define ELEMENT_PARENT 0x70u
+static void *focus_before;
+static int focus_logs;
+
+static void put_float(char *out, unsigned *n, unsigned cap, float v) {
+    if (v < 0) { put_text(out, n, cap, "-"); v = -v; }
+    unsigned whole = (unsigned)v, tenth = (unsigned)((v - (float)whole) * 10.0f);
+    char digits[12];
+    int d = 0;
+    do digits[d++] = (char)('0' + whole % 10); while ((whole /= 10) && d < 10);
+    while (d && *n + 1 < cap) out[(*n)++] = digits[--d];
+    out[*n] = 0;
+    char t[3] = {'.', (char)('0' + tenth), 0};
+    put_text(out, n, cap, t);
+}
+
+static void log_focus_chain(unsigned char *keyboard) {
+    if (!keyboard || focus_logs >= 40) return;
+    unsigned char *element = read_pointer(keyboard + 0x40);
+    if (element == focus_before) return;
+    focus_before = element;
+    ++focus_logs;
+    log_append("MENUMOUSE: --- pad focus changed ---\r\n");
+    for (int depth = 0; element && depth < 14; ++depth) {
+        const char *name = class_name(element);
+        if (!name) break;
+        static char line[1400];
+        unsigned n = 0;
+        line[0] = 0;
+        put_text(line, &n, sizeof(line), "MENUMOUSE: ^");
+        put_hex(line, &n, sizeof(line), (unsigned)depth);
+        put_text(line, &n, sizeof(line), " ");
+        put_text(line, &n, sizeof(line), name);
+        for (unsigned off = 0x78; off < 0x240; off += 4) {
+            float v = 0.0f;
+            if (!memory_read(element + off, &v, 4)) break;
+            unsigned bits;
+            memory_copy(&bits, &v, 4);
+            if (!bits || (bits & 0x7f800000) == 0x7f800000) continue;
+            if (!(v > 0.5f && v < 4000.0f) && !(v < -0.5f && v > -4000.0f)) continue;
+            put_text(line, &n, sizeof(line), " ");
+            put_hex(line, &n, sizeof(line), off);
+            put_text(line, &n, sizeof(line), "=");
+            put_float(line, &n, sizeof(line), v);
+        }
+        put_text(line, &n, sizeof(line), "\r\n");
+        log_append(line);
+        element = read_pointer(element + ELEMENT_PARENT);
+    }
+}
+
 static unsigned char report(void *provider, unsigned actions, const float point[2], int wheel) {
     return ((ReportInputFn)(game + RVA_REPORT_INPUT))(provider, 0, (unsigned)GetTickCount64(), actions, point, wheel);
 }
@@ -192,7 +245,7 @@ static void feed(int moved, int buttons, int wheel) {
     if (moved) {
         report(provider, RAW_MOVE, point, 0);
         unsigned char *input = read_pointer((unsigned char *)context + CONTEXT_INPUT_MANAGER);
-        dump_fields("mouse", read_pointer(input + INPUT_MOUSE_DEVICE), 0);
+        (void)input;
     }
     int changed = buttons ^ buttons_before;
     unsigned actions = 0;
@@ -219,6 +272,12 @@ static void feed(int moved, int buttons, int wheel) {
 
 static void frame(void) {
     int x, y, buttons, wheel, w, h, system_shown;
+    { /* diagnostics: the pad focus, on the UI thread */
+        unsigned char *context = ((ContextFn)(game + RVA_UI_CONTEXT))();
+        unsigned char *input = context ? read_pointer(context + CONTEXT_INPUT_MANAGER) : NULL;
+        if (input && has_vtable(read_pointer(game + RVA_WINDOW_MANAGER), RVA_WINDOW_MANAGER_VT))
+            log_focus_chain(read_pointer(input + INPUT_KEYBOARD_DEVICE));
+    }
     if (!keyboard_menu_mouse(&x, &y, &buttons, &wheel, &w, &h, &system_shown)) {
         if (shown) notify_cursor(0, 0, 0);
         shown = 0;
