@@ -105,6 +105,11 @@ static _Alignas(16) unsigned char params_free[0x40], params_floor[0x40];
    hidden on purpose (WALK_HIDE_FROM); why the camera rises is not known yet. Gripline.log gets, for
    the first switches of a session: the walker's floor and eye height at the switch and one second
    later, the camera the game looks through, sudden floor jumps and what the floor was. */
+typedef float (*FovFn)(void *);
+static _Alignas(16) float walk_view[16]; /* the camera's own picture this frame (camera_view) */
+static float walk_fov;
+static void *walk_view_camera;
+static int walk_view_ok;
 static volatile LONG diag_switch; /* 1 = the car was just hidden, 2 = put back (car thread -> walker) */
 static void *floor_hit;           /* what the last floor check hit */
 static unsigned diag_count;
@@ -879,7 +884,60 @@ static void *camera_view(void *camera, void *out) {
     InterlockedExchange(&view_index, i);
     InterlockedExchange64(&view_tick, (LONG64)GetTickCount64());
     if (active) put_eye(camera, cameras[i].family);
-    return ((CameraViewFn)previous_view[i])(camera, out);
+    void *result = ((CameraViewFn)previous_view[i])(camera, out);
+    if (active && entered && stepped && result) { /* the picture Gripline wants (multicam_update below) */
+        memory_copy(walk_view, result, sizeof(walk_view));
+        FovFn fov = (FovFn)slot_function(camera, 0x70);
+        walk_fov = fov ? fov(camera) : 0.0f;
+        walk_view_camera = camera;
+        walk_view_ok = 1;
+    }
+    return result;
+}
+
+/* Marvin 08.11.2026 (video + log): beyond 45 m, with the car hidden under the walker, the picture sat
+   higher and the horizon leaned - in every camera - while the eye Gripline gives the camera stayed
+   the same. So the game's multi camera (CMultiCam, vtable 0x2e70080, update slot 0x28) changes the
+   camera's picture after it (game+0xfe2230 rebuilds it under some condition, 0x1410314b0 ...). While
+   walking its picture (+0x260 matrix, +0x2a0 field of view, +0x240/+0x250 copies) is put back to the
+   camera's own, and the first differences are logged. */
+#define RVA_MULTICAM_VT 0x2e70080u
+#define SLOT_MULTICAM_UPDATE 0x28u
+typedef void (*MultiCamUpdateFn)(void *, float, uintptr_t, uintptr_t);
+static void *previous_multicam;
+static void multicam_update(void *self, float dt, uintptr_t a, uintptr_t b) {
+    walk_view_ok = 0;
+    ((MultiCamUpdateFn)previous_multicam)(self, dt, a, b);
+    if (!active || !entered || !walk_view_ok) return;
+    unsigned char *m = (unsigned char *)self;
+    void *current = NULL;
+    if (!memory_read_pointer(m + 0x208, &current) || current != walk_view_camera) return;
+    _Alignas(16) float have[16], fov = 0.0f;
+    if (!memory_read(m + 0x260, have, sizeof(have)) || !memory_read(m + 0x2a0, &fov, 4)) return;
+    float most = 0.0f;
+    for (unsigned i = 0; i < 16; ++i) {
+        float x = have[i] - walk_view[i];
+        if (x < 0.0f) x = -x;
+        if (x > most) most = x;
+    }
+    float fov_off = fov - walk_fov;
+    if (fov_off < 0.0f) fov_off = -fov_off;
+    static unsigned logged;
+    static float logged_most;
+    if ((most > 0.001f || fov_off > 0.001f) && logged < 6 && (most > logged_most * 2.0f || fov_off > 0.001f)) {
+        ++logged, logged_most = most;
+        log_append_value("WALKING DIAG: the multi camera changed the picture, matrix (x1000): ", (int)(most * 1000.0f));
+        log_append_value("WALKING DIAG: ... field of view (x1000): ", (int)((fov - walk_fov) * 1000.0f));
+        log_append_value("WALKING DIAG: ... car hidden: ", (int)hiding);
+    }
+    if (most > 0.0f) {
+        memory_copy(m + 0x260, walk_view, sizeof(walk_view));
+        /* as the multi camera itself: +0x240 one column, +0x250 another */
+        float c0[3] = {walk_view[2], walk_view[6], walk_view[10]}, c1[3] = {walk_view[1], walk_view[5], walk_view[9]};
+        memory_copy(m + 0x240, c0, 12);
+        memory_copy(m + 0x250, c1, 12);
+    }
+    if (fov_off > 0.0f && walk_fov > 0.0f) memory_copy(m + 0x2a0, &walk_fov, 4);
 }
 
 /* The game's multi camera (game+0xfe61c0) moves a follow camera towards its car when something is
@@ -1031,6 +1089,14 @@ int walking_start(unsigned char *game_image) {
         if (chain(ui_slots[i], ui_hooks[i], &previous_ui[i])) ++ui_hooked;
     }
     if (ui_hooked != 6) log_append_value("WALKING: UI draws hooked (of 6, HUD may stay): ", (int)ui_hooked);
+    {
+        void *current = NULL;
+        if (memory_read_pointer(game + RVA_MULTICAM_VT + SLOT_MULTICAM_UPDATE, &current) && current) {
+            if (current != game + 0xfe26f0u) log_append_module("WALKING: multi camera update already hooked by ", current);
+            if (!chain(RVA_MULTICAM_VT + SLOT_MULTICAM_UPDATE, (void *)(uintptr_t)multicam_update, &previous_multicam))
+                log_append("WALKING: multi camera not hooked - the picture may rise far from the car.\r\n");
+        }
+    }
     ready = 1;
     log_append("WALKING: ready - key Walk (F) / LS + Y, offline only.\r\n");
     return 1;
