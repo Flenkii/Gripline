@@ -76,15 +76,22 @@ else:
     check(e.call('Fh2TestSummonPhase') == 4, 'Rangieren an')
     e.call('Fh2TestNoclipCreep', GAME, I, 100)
     v, w = get(-0x350), get(-0x340)
-    check(0.24 < v[2] < 0.26 and abs(v[0]) < 1e-4 and abs(v[1] + 1.0) < 1e-4, f'faehrt sanft an (2,5 m/s^2, Ziel seitlich: hoechstens 2 m/s), entlang der Nase, Fallen bleibt: {v}')
-    check(abs(w[1] - 0.24) < 1e-3 and abs(w[0] - 0.1) < 1e-4 and abs(w[2] - 0.2) < 1e-4, f'dreht nach +x, langsam beim Anfahren, Kippen bleibt der Physik: {w}')
+    check(0.24 < v[2] < 0.26 and 0 <= v[0] < 0.01 and abs(v[1] + 1.0) < 1e-4, f'faehrt sanft an (2,5 m/s^2, Ziel seitlich: hoechstens 2 m/s), entlang der Nase, Fallen bleibt: {v}')
+    fw = get(-0x360)
+    check(abs(fw[0] - 0.024) < 1e-3 and fw[0] > 0 and abs(w[1]) < 1e-6 and abs(w[0] - 0.1) < 1e-4 and abs(w[2] - 0.2) < 1e-4,
+          f'lenkt nach +x (Auto selbst gedreht, langsam beim Anfahren), Kippen bleibt der Physik: {fw} {w}')
+    r = get(-0x380)
+    check(abs(r[0] - 0.9997) < 1e-3 and abs(r[2] + 0.024) < 1e-3, f'rechts-Achse dreht mit: {r}')
+    def level():
+        vec(-0x380, 1.0, 0.0, 0.0); vec(-0x370, 0.0, 1.0, 0.0); vec(-0x360, 0.0, 0.0, 1.0)
+    level()
     e.mu.reg_write(__import__('unicorn').x86_const.UC_X86_REG_XMM0, 0)
     e.mu.reg_write(__import__('unicorn').x86_const.UC_X86_REG_XMM2, struct.unpack('<I', struct.pack('<f', 100.0))[0])
     e.call('Fh2TestSummonCreepSet', 0, 0, 0, 0)  # straight ahead, 100 m
     for _ in range(40):
         e.call('Fh2TestNoclipCreep', GAME, I, 100)
     v, w = get(-0x350), get(-0x340)
-    check(abs(v[2] - 6.0) < 1e-3 and abs(w[1]) < 1e-4, f'geradeaus nach 4 s etwa 22 km/h, keine Drehung: {v} {w}')
+    check(abs(v[2] - 6.0) < 1e-3 and abs(get(-0x360)[0]) < 1e-4, f'geradeaus nach 4 s etwa 22 km/h, keine Drehung: {v} {get(-0x360)}')
     # braking: target now 4 m ahead (road): slows with at most 6 m/s^2 along the planned stop
     e.mu.reg_write(__import__('unicorn').x86_const.UC_X86_REG_XMM0, 0)
     e.mu.reg_write(__import__('unicorn').x86_const.UC_X86_REG_XMM2, struct.unpack('<I', struct.pack('<f', 4.0))[0])
@@ -98,7 +105,9 @@ else:
     e.call('Fh2TestSummonCreepSet', 0, 0, 0, 1)
     e.call('Fh2TestNoclipCreep', GAME, I, 100)
     v, w = get(-0x350), get(-0x340)
-    check(v[2] > 4.0 and abs(w[1]) > 0.3, f'zum Spieler: faehrt neben ihn (dreht seitlich weg): {v} {w}')
+    fw = get(-0x360)
+    check(v[2] > 4.0 and abs(fw[0]) > 0.03, f'zum Spieler: faehrt neben ihn (dreht seitlich weg): {v} {fw}')
+    level()
     # the walker 2 m ahead: never nearer than 2.6 m - stops
     e.mu.reg_write(__import__('unicorn').x86_const.UC_X86_REG_XMM0, 0)
     e.mu.reg_write(__import__('unicorn').x86_const.UC_X86_REG_XMM2, struct.unpack('<I', struct.pack('<f', 2.0))[0])

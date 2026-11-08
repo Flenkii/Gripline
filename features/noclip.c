@@ -511,10 +511,23 @@ static void summon_creep(void *dynamics, float dt) {
     if (want > along) along = along + up < want ? along + up : want;
     else along = along - down > want ? along - down : want;
     creep_command = along;
-    state.velocity = _mm_setr_ps(fx * along, v[1], fz * along, 0.0f); /* no sliding sideways */
     float turn_scale = along < 1.0f ? (along > 0.3f ? along : 0.3f) : 1.0f;
     if (want == 0.0f && along < 0.3f) turn_scale = 0.0f; /* standing: no turning on the spot */
-    state.spin = _mm_setr_ps(w[0], yaw * (along >= 0.0f ? 1.0f : -1.0f) * turn_scale, w[2], 0.0f);
+    /* Steering: the car is turned directly (its whole orientation about the world's up axis), not through
+       its spin - the parked car's tyres took a set spin away at once (Marvin 08.11.2026: "it only goes
+       straight ahead and does not steer"). A small angle each frame; + turns the nose from +z towards +x. */
+    float turn = yaw * (along >= 0.0f ? 1.0f : -1.0f) * turn_scale * dt;
+    if (turn > 0.2f) turn = 0.2f;
+    if (turn < -0.2f) turn = -0.2f;
+    float ts = turn * (1.0f - turn * turn / 6.0f), tc = 1.0f - turn * turn / 2.0f;
+    _Alignas(16) float r4[4], u4[4];
+    _mm_store_ps(r4, state.right), _mm_store_ps(u4, state.up);
+#define CREEP_YAW(q) _mm_setr_ps(q[0] * tc + q[2] * ts, q[1], q[2] * tc - q[0] * ts, 0.0f)
+    state.right = CREEP_YAW(r4), state.up = CREEP_YAW(u4), state.forward = CREEP_YAW(f);
+#undef CREEP_YAW
+    float nfx = fx * tc + fz * ts, nfz = fz * tc - fx * ts;
+    state.velocity = _mm_setr_ps(nfx * along, v[1], nfz * along, 0.0f); /* along the nose, no sliding sideways */
+    state.spin = _mm_setr_ps(w[0], 0.0f, w[2], 0.0f); /* the turn is ours; tilting stays the physics' */
     set(dynamics, &state);
 }
 
