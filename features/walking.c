@@ -905,7 +905,7 @@ static void *camera_view(void *camera, void *out) {
    camera's picture after it (game+0xfe2230 rebuilds it under some condition, 0x1410314b0 ...). While
    walking its picture (+0x260 matrix, +0x2a0 field of view, +0x240/+0x250 copies) is put back to the
    camera's own, and the first differences are logged. */
-#define RVA_MULTICAM_VT 0x2e70080u
+#define RVA_MULTICAM_VT 0x2c6c840u /* ForzaMultiCam (its slot 0x28 0x392a00 jumps into CMultiCam 0xfe26f0) */
 #define SLOT_MULTICAM_UPDATE 0x28u
 typedef void (*MultiCamUpdateFn)(void *, float, uintptr_t, uintptr_t);
 static void *previous_multicam;
@@ -1134,7 +1134,7 @@ int walking_start(unsigned char *game_image) {
     {
         void *current = NULL;
         if (memory_read_pointer(game + RVA_MULTICAM_VT + SLOT_MULTICAM_UPDATE, &current) && current) {
-            if (current != game + 0xfe26f0u) log_append_module("WALKING: multi camera update already hooked by ", current);
+            if (current != game + 0x392a00u) log_append_module("WALKING: multi camera update already hooked by ", current);
             if (!chain(RVA_MULTICAM_VT + SLOT_MULTICAM_UPDATE, (void *)(uintptr_t)multicam_update, &previous_multicam))
                 log_append("WALKING: multi camera not hooked - the picture may rise far from the car.\r\n");
         }
