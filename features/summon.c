@@ -41,7 +41,10 @@
 #define DRIVE_LIMIT_MS 300000u /* at most 5 minutes */
 #define STUCK_SPEED 1.0f       /* m/s */
 #define STUCK_MS 20000u
-#define START_STALL_MS 7000u   /* the AI has not got going at all (car off the road?) */
+#define START_STALL_MS 10000u  /* the AI has not got going at all (car off the road?) */
+#define NEAR_END 30.0f         /* the GPS drops its route some 10-15 m before the end (Marvin's log 08.11.):
+                                  a route gone this near the walker means the car has come */
+#define SHORT_START 30.0f      /* nearer than this the GPS route is too short for the AI to set off */
 #define ROAD_SNAP 3.0f         /* metres from the nearest road: farther, the car is put onto it first */
 #define BRAKE_LIMIT_MS 5000u
 
@@ -420,9 +423,10 @@ static void tick(void *satnav) {
     float gap = seen_ok && walker_ok ? distance_xz(seen, walker) : -1.0f;
     InterlockedExchange(&frozen, gap > SUMMON_FREEZE);
     if (p == SUMMON_HOLD) {
-        if (gap >= 0.0f && gap < SUMMON_STOP_DISTANCE) { /* already here */
+        if (gap >= 0.0f && gap < SHORT_START) { /* already here, or too near for a route */
+            log_append_value("SUMMON: the car is already near, metres: ", (int)gap);
             stop(0);
-            card("Auto ist schon da", "The car is already here");
+            card("Dein Auto ist schon nah\nGeh die paar Meter hin (Auto rufen ab 30 m)", "Your car is already close\nWalk over (summon works from 30 m)");
             return;
         }
         if (now < hold_until) return;
@@ -504,6 +508,12 @@ static void tick(void *satnav) {
         log_append("SUMMON: the car is here.\r\n");
         stop(1);
         tinted("Dein Auto ist da\nF/Y = einsteigen", "Your car is here\nF/Y = get in", NOTIFY_COLOR_GREEN);
+        return;
+    }
+    if (!route && gap >= 0.0f && gap < NEAR_END) {
+        log_append_value("SUMMON: the GPS ended the route near the walker - the car is here, metres: ", (int)gap);
+        stop(1);
+        tinted("Dein Auto ist da\nF/Y = einsteigen (n\xc3\xa4her gehen)", "Your car is here\nF/Y = get in (walk closer)", NOTIFY_COLOR_GREEN);
         return;
     }
     if (arrived || !route) {
