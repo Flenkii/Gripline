@@ -10,6 +10,7 @@
 #include "game_language.h"
 #include "game_units.h"
 #include "summon.h"
+#include "notify.h"
 
 /* ------------------------------------------------------------------ game addresses */
 
@@ -460,6 +461,14 @@ static int diag_cm(float metres) {
 static void diag_frame(float dt, float before_y) {
     static unsigned jumps;
     LONG sw = InterlockedExchange(&diag_switch, 0);
+    if (sw == 1) { /* Marvin 08.11.2026: say why the car is gone (and why the picture sits a little higher) */
+        int de = game_language_is_german(game);
+        notify_show_tinted(de ? "Auto au\xc3\x9f""er Sicht\nAb 45 m wird dein Auto versteckt, damit der Boden geladen bleibt. Das Bild "
+                                "wirkt dabei etwas h\xc3\xb6""her. Unter 40 m steht es wieder da."
+                              : "Car out of sight\nBeyond 45 m your car is hidden so the ground stays loaded. The picture "
+                                "looks a little higher then. Within 40 m it is back.",
+                           NOTIFY_COLOR_ORANGE, de ? "HINWEIS" : "NOTE", 0);
+    }
     char line[240];
     unsigned n = 0;
     if (sw && diag_count < 6) {
@@ -1131,14 +1140,9 @@ int walking_start(unsigned char *game_image) {
         if (chain(ui_slots[i], ui_hooks[i], &previous_ui[i])) ++ui_hooked;
     }
     if (ui_hooked != 6) log_append_value("WALKING: UI draws hooked (of 6, HUD may stay): ", (int)ui_hooked);
-    {
-        void *current = NULL;
-        if (memory_read_pointer(game + RVA_MULTICAM_VT + SLOT_MULTICAM_UPDATE, &current) && current) {
-            if (current != game + 0x392a00u) log_append_module("WALKING: multi camera update already hooked by ", current);
-            if (!chain(RVA_MULTICAM_VT + SLOT_MULTICAM_UPDATE, (void *)(uintptr_t)multicam_update, &previous_multicam))
-                log_append("WALKING: multi camera not hooked - the picture may rise far from the car.\r\n");
-        }
-    }
+    /* The multi camera hook (multicam_update) is off: putting its picture back did not stop the rise
+       beyond 45 m (Marvin 08.11.2026), it only changed the field of view. Kept for later research. */
+    (void)multicam_update;
     ready = 1;
     log_append("WALKING: ready - key Walk (F) / LS + Y, offline only.\r\n");
     return 1;
