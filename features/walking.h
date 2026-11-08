@@ -70,6 +70,11 @@ int walking_view_outside(void);
 void walking_set_handheld(int level);
 int walking_handheld(void);
 
+/* V7.1 walking gauge (walk_gauge.h): 1 while it is to be shown (walking, the game running, not in
+   a menu), with what it shows. Any thread. */
+#include "walk_gauge.h"
+int walking_gauge_data(WalkGaugeData *out);
+
 /* Door sounds of the fade when getting out / in (Marvin 06.11.2026, his own sound file, cut in two,
    built into the DLL): 0 = door opens, 1 = door shuts. Played through Windows (winmm PlaySoundW,
    loaded only when needed), so at the Windows volume, not the game's. Silent when winmm is missing. */

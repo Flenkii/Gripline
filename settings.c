@@ -30,6 +30,7 @@ const SettingDefinition setting_definitions[] = {
     SETTING("Gripline", "TelemetrySize", telemetry_size, SETTING_MASK),
     SETTING("Gripline", "WalkHandheld", walk_handheld, SETTING_MASK),
     SETTING("Gripline", "CalmDrivatars", calm_drivatars, SETTING_BOOLEAN),
+    SETTING("Gripline", "WalkGauge", walk_gauge, SETTING_MASK),
 };
 
 const size_t setting_count = ARRAY_COUNT(setting_definitions);
@@ -50,6 +51,7 @@ void settings_defaults(ModOptions *options) {
         .event_icons = 1,
         .telemetry_show = -1, /* telemetry.c default */
         .walk_handheld = 2, /* medium (V7.1) */
+        .walk_gauge = 3, /* step pulse (V7.1, Marvin 08.11.2026) */
         .cruise_crash_off = 1,
         .cruise_min_speed = 20,
         .cruise_slow_off = 1,

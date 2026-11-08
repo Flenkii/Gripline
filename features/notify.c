@@ -20,6 +20,8 @@
 #include "notify.h"
 #include "gripline_logo.h"
 #include "gripline_symbol.h"
+#include "walk_gauge.h"
+#include "walking.h"
 
 #define MAX_CARDS 3
 #define CARD_MS 5000u
@@ -2632,6 +2634,7 @@ static DWORD WINAPI overlay_thread(void *unused) {
     static unsigned char scratch_cards[1200 * 110 * 3 * 4 * 3]; /* up to 2.5x scale (with the glow), see layout_for */
     static unsigned char scratch_panel[1200 * 1200 * 4];
     static unsigned char scratch_tele[1200 * 1200 * 4]; /* V7: telemetry has its own panel */
+    static unsigned char scratch_gauge[330 * 380 * 4 * 25 / 4 + 64]; /* V7.1 walking gauge, up to 2.5x */
     unsigned char *frame = NULL;
     size_t frame_bytes = 0;
     HDC dc = gdi.CreateCompatibleDC(NULL);
@@ -2674,7 +2677,22 @@ static DWORD WINAPI overlay_thread(void *unused) {
         if (!enabled) count = 0, panel = 0, tele_n = 0;
         int pointer = cursor_on != 0; /* V7.1 menu pointer, shown even with cards off */
         int pointer_x = (int)cursor_x, pointer_y = (int)cursor_y;
-        if ((!count && !panel && !tele_n && !dark && !pointer) || !focused /* black shows even with cards off */ || win.IsIconic(game_window)) {
+        /* V7.1 walking gauge at the bottom right (walk_gauge.h): its own switch, so also with cards off;
+           fades in after the black of getting out and goes with the black of getting in */
+        static WalkGaugeData gauge_data;
+        static float gauge_alpha;
+        static ULONGLONG gauge_tick;
+        int gauge_style = walk_gauge_style();
+        WalkGaugeData fresh;
+        int gauge_want = gauge_style != WALK_GAUGE_OFF && !dark && walking_gauge_data(&fresh);
+        if (gauge_want) gauge_data = fresh;
+        float gauge_dt = gauge_tick && now > gauge_tick ? (float)(now - gauge_tick) / 1000.0f : 0.0f;
+        gauge_tick = now;
+        gauge_alpha += (gauge_want ? gauge_dt / 0.35f : -gauge_dt / 0.2f);
+        gauge_alpha = gauge_alpha < 0.0f ? 0.0f : gauge_alpha > 1.0f ? 1.0f : gauge_alpha;
+        if (gauge_style == WALK_GAUGE_OFF) gauge_alpha = 0.0f;
+        int gauge = gauge_alpha > 0.0f;
+        if ((!count && !panel && !tele_n && !dark && !pointer && !gauge) || !focused /* black shows even with cards off */ || win.IsIconic(game_window)) {
             if (visible) win.ShowWindow(window, SW_HIDE);
             visible = 0;
             continue;
@@ -2685,7 +2703,7 @@ static DWORD WINAPI overlay_thread(void *unused) {
         int screen_w = client.right - client.left, screen_h = client.bottom - client.top;
         if (screen_w < 320 || screen_h < 240) continue;
         if (pointer) make_cursor(screen_h);
-        if (pointer && !count && !panel && !tele_n && !dark) { /* only the pointer: a small window at the pointer */
+        if (pointer && !count && !panel && !tele_n && !dark && !gauge) { /* only the pointer: a small window at the pointer */
             static unsigned char *small_bits;
             static HBITMAP small_bitmap;
             static HDC small_dc;
@@ -2735,6 +2753,12 @@ static DWORD WINAPI overlay_thread(void *unused) {
         }
         int want_w = l.margin + 2 * l.width + l.gap + (int)(40.0f * l.scale) + 4;
         if (tele && (tele_pos >= NOTIFY_TELE_LEFT_TOP || pl.width + l.margin + 4 > want_w)) want_w = screen_w;
+        int gauge_w = 0, gauge_h = 0, gauge_margin = walk_gauge_margin(screen_h);
+        if (gauge) {
+            walk_gauge_size(gauge_style, screen_h, &gauge_w, &gauge_h);
+            if ((size_t)gauge_w * gauge_h * 4 > sizeof(scratch_gauge)) gauge = 0;
+            else if (gauge_w + gauge_margin + 4 > want_w) want_w = gauge_w + gauge_margin + 4;
+        }
         if (dark || pointer || want_w > screen_w) want_w = screen_w;
         if (want_w != frame_w || screen_h != frame_h) {
             if (bitmap) gdi.DeleteObject(bitmap);
@@ -2812,6 +2836,33 @@ static DWORD WINAPI overlay_thread(void *unused) {
                 blend_block(frame, frame_w, frame_h, x0, y, scratch_cards + (size_t)i * l.height * l.width * 4,
                             l.width * 4, l.width, l.height, a);
             y += l.height + l.gap;
+        }
+        if (gauge) {
+            /* drawn again when what it shows changed, and every frame while something moves on it */
+            static int drawn_style = -1, drawn_h, drawn_value = -1, drawn_mode = -1, drawn_dist = -1, drawn_dir = 99999,
+                       drawn_colour = -1;
+            static ULONGLONG moved_at;
+            int value = (int)(gauge_data.speed * 36.0f + 0.5f);
+            int dist = (int)(gauge_data.distance * 10.0f);
+            int dir = (int)(gauge_data.car_ahead * 60.0f) * 1000 + (int)(gauge_data.car_right * 60.0f);
+            if (gauge_data.speed > 0.05f) moved_at = now;
+            int animated = (gauge_style == WALK_GAUGE_PULSE && now - moved_at < 3000) ||
+                           (gauge_style == WALK_GAUGE_BAR && gauge_data.speed > 3.0f) || color == NOTIFY_COLOR_RAINBOW;
+            if (animated || drawn_style != gauge_style || drawn_h != screen_h || drawn_value != value ||
+                drawn_mode != gauge_data.mode || drawn_dist != dist || drawn_dir != dir || drawn_colour != (int)color) {
+                const unsigned char(*tone)[3] = palette[color];
+                if (!walk_gauge_draw(gauge_style, &gauge_data, now, screen_h, tone[1], tone[0], second_colour(tone),
+                                     scratch_gauge)) {
+                    log_append("NOTIFY: could not draw the walking gauge; it stays off.\r\n");
+                    walk_gauge_set_style(WALK_GAUGE_OFF);
+                    gauge = 0;
+                }
+                drawn_style = gauge_style, drawn_h = screen_h, drawn_value = value, drawn_mode = gauge_data.mode;
+                drawn_dist = dist, drawn_dir = dir, drawn_colour = (int)color;
+            }
+            if (gauge)
+                blend_block(frame, frame_w, frame_h, frame_w - gauge_margin - gauge_w, screen_h - gauge_margin - gauge_h,
+                            scratch_gauge, gauge_w * 4, gauge_w, gauge_h, gauge_alpha);
         }
         if (pointer) /* the frame spans the whole width here */
             blend_block(frame, frame_w, frame_h, pointer_x - (screen_w - frame_w), pointer_y, cursor_pixels,

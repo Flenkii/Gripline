@@ -514,6 +514,7 @@ static void start_features(void) {
     cockpit_view_start(game);
     walking_start(game);
     walking_set_handheld(options.walk_handheld);
+    walk_gauge_set_style(options.walk_gauge);
     menu_mouse_start(game); /* after walking: both chain the UI frame */
     no_damage_bind(game);
     no_damage_set_mode(options.no_damage);

@@ -36,6 +36,7 @@ typedef struct {
     int cruise_crash_off, cruise_min_speed, cruise_slow_off; /* [Gripline] CruiseCrashOff 0/1, CruiseMinSpeed km/h (V7, cruise.h) */
     int cards_hidden; /* [Gripline] CardsHidden: bits of notify.h NOTIFY_KIND_* that are not shown (V7) */
     int telemetry_show; /* [Gripline] TelemetryShow: bits of telemetry.h TELEMETRY_SHOW_*, -1 = default */ /* [Gripline] SpeedCameras / CarLabels: 0 = off (V7, world_files.c) */
+    int walk_gauge; /* [Gripline] WalkGauge: walking gauge at the bottom right, 0 off, 1 ring, 2 racing bar, 3 step pulse (V7.1, walk_gauge.h) */
     int walk_handheld; /* [Gripline] WalkHandheld: walking camera like a phone in the hand, 0 off .. 3 strong (V7.1, walking.h) */
 } ModOptions;
 #endif

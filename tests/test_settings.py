@@ -18,7 +18,7 @@ e = Emu(DLL, root)
 KEYS = ['TrafficLevel', 'RushHourAllDay', 'Notifications', 'SteeringAnimation', 'CockpitViewForward',
         'CockpitViewUp', 'CardColor', 'CardStyle', 'UpdateCheck', 'SpeedCameras', 'CarLabels', 'Telemetry',
         'TelemetryShow', 'EventIcons', 'NewsSeen', 'NoDamage', 'CardsHidden', 'CruiseCrashOff', 'CruiseMinSpeed', 'CruiseSlowOff',
-        'TelemetryPosition', 'TelemetryOpacity', 'TelemetrySize', 'WalkHandheld', 'CalmDrivatars']
+        'TelemetryPosition', 'TelemetryOpacity', 'TelemetrySize', 'WalkHandheld', 'CalmDrivatars', 'WalkGauge']
 
 
 def read(text):
@@ -63,6 +63,10 @@ check(ok == 1 and v['CardsHidden'] == 117, 'CardsHidden gelesen')
 
 ok, v, n, s = read('[Gripline]\r\nWalkHandheld=3\r\n')
 check(ok == 1 and v['WalkHandheld'] == 3, 'V7.1 WalkHandheld gelesen')
+ok, v, n, s = read(None)
+check(v['WalkGauge'] == 3, 'V7.1 Lauf-Tacho Standard: Schritt-Puls (3)')
+ok, v, n, s = read('[Gripline]\r\nWalkGauge=1\r\n')
+check(ok == 1 and v['WalkGauge'] == 1, 'V7.1 WalkGauge gelesen')
 ok, v, n, s = read('[Gripline]\r\nCalmDrivatars=1\r\n')
 check(ok == 1 and v['CalmDrivatars'] == 1, 'V7.1 CalmDrivatars gelesen')
 ok, v, n, s = read(None)

@@ -44,7 +44,16 @@ def step(ms, reset=0):
 
 
 EYE = 0.5 + 1.12
+def gauge():
+    g = e.alloc(32)
+    e.call('Fh2TestWalkGaugeRaw', g)
+    return struct.unpack('<6f', bytes(e.mu.mem_read(g, 24)))
+
+
 eye, d, dist, kmh = step(20, reset=1)
+g = gauge()
+check(g[1] == 0 and abs(g[2] - 2.0) < 0.02 and g[4] > 0.95 and abs(g[3]) < 0.1,
+      f'V7.1 Tacho: steht, Auto 2 m rechts (Pfeil nach rechts): {g}')
 check(near((eye[0], eye[2]), (8.0, 20.0)) and abs(eye[1] - (5 + EYE)) < 1e-3,
       f'aussteigen: 2 m links neben dem Auto, Augen ~1,6 m hoch: {eye}')
 check(near(d, (0, 0, 1)) and abs(dist - 2.0) < 0.02, f'schaut wie das Auto, 2 m vom Auto: {d} {dist}')
@@ -58,6 +67,9 @@ eye0 = eye
 eye, d, dist, kmh = step(500)
 check(abs(eye[2] - eye0[2] - 1.0) < 0.03, f'dann gleichmaessig 2 m/s: {eye[2] - eye0[2]}')
 check(6 <= kmh <= 8, f'Karte: Gehen ~7 km/h: {kmh}')
+g = gauge()
+check(g[1] == 1 and abs(g[0] - 2.0) < 0.1 and g[3] < -0.8 and g[4] > 0.1,
+      f'V7.1 Tacho: geht 2 m/s, Auto hinten rechts: {g}')
 check(abs(eye[1] - (5 + EYE)) < 0.06, f'Kopf wippt nur wenig: {eye[1]}')
 keys.add(0xa0)
 eye0 = eye
@@ -68,6 +80,12 @@ eye0 = eye
 eye, d, dist, kmh = step(1000)
 check(abs(eye[2] - eye0[2] - 6.0) < 0.05, f'Shift: rennen 6 m/s: {eye[2] - eye0[2]}')
 check(19 <= kmh <= 23, f'Karte: rennen ~22 km/h: {kmh}')
+pulse = []
+for i in range(40):
+    eye, d, dist, kmh = step(20)
+    pulse.append(gauge()[5])
+check(gauge()[1] == 2 and max(pulse) > 0.4 and min(pulse) < 0.05,
+      f'V7.1 Tacho: rennt, Schritt-Puls schlaegt aus: {gauge()[1]} {min(pulse):.2f}..{max(pulse):.2f}')
 keys.clear()
 eye0 = eye
 eye, d, dist, kmh = step(500)
@@ -98,6 +116,7 @@ eye, d, dist, kmh = step(1000)
 eye0 = eye
 eye, d, dist, kmh = step(1000)
 check(abs(eye[2] - eye0[2] - 1.1) < 0.05, f'Hocke: langsam (1,1 m/s), kein Rennen: {eye[2] - eye0[2]}')
+check(gauge()[1] == 3, f'V7.1 Tacho: geduckt (auch mit Shift): {gauge()}')
 check(abs(eye[1] - (5 + 0.97)) < 0.03, f'Hocke: wippt nur wenig: {eye[1]}')
 keys.clear()
 step(1500)
