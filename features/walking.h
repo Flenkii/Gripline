@@ -83,5 +83,7 @@ int walking_gauge_data(WalkGaugeData *out);
    built into the DLL): 0 = door opens, 1 = door shuts. Played through Windows (winmm PlaySoundW,
    loaded only when needed), so at the Windows volume, not the game's. Silent when winmm is missing. */
 void walking_door_sound(int shut);
+/* a whole WAV file in memory, once, at Windows volume (any thread; a new sound ends the one playing) */
+void walking_play_wav(const void *wav);
 
 #endif

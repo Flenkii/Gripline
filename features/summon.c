@@ -10,6 +10,7 @@
 #include "notify.h"
 #include "game_language.h"
 #include "game_units.h"
+#include "summon_sounds.h"
 
 /* ------------------------------------------------------------------ game addresses */
 
@@ -385,6 +386,7 @@ static void creep_begin(const float at[3], int to_walker, ULONGLONG now) {
 
 /* AI off, route off, GPS destination off; then the car brakes (still walking) or nothing */
 static void stop(int brake) {
+    walking_play_wav(summon_end_wav); /* Marvin 08.11.2026: "autopilot off" when the summon ends, however */
     release_ai();
     reset();
     if (brake && walking_active()) {
@@ -426,6 +428,7 @@ static void begin(void *satnav, ULONGLONG now) {
     hold_until = now + (away < 0.0f || away > HOLD_FAR ? HOLD_MS : HOLD_NEAR_MS);
     live_next = now + 1500u; /* the start card first */
     InterlockedExchange(&phase, SUMMON_HOLD);
+    walking_play_wav(summon_start_wav); /* Marvin 08.11.2026: "autopilot on" when the summon starts */
     log_append_value("SUMMON: started - the car waits at its place a moment, metres to the walker: ", (int)(away + 0.5f));
     card("Auto wird gerufen\nGPS plant die Route zu dir... (G/X = abbrechen)",
          "Summoning the car\nThe GPS plans the route to you... (G/X = cancel)");
@@ -576,7 +579,7 @@ static void tick(void *satnav) {
         return;
     }
     if (p == SUMMON_CREEP) {
-        live_card(gap, speed, creep_to_walker && gap < SUMMON_HANDOVER, now);
+        live_card(gap, speed, creep_to_walker && gap < SUMMON_HANDOVER + 10.0f, now);
         if (creep_to_walker) {
             if (walker_ok) creep_set(walker, 1, 0); /* follows the walker */
             /* here = it stands beside the walker (noclip.c stops it there), or it is very near anyway */
@@ -617,10 +620,15 @@ static void tick(void *satnav) {
     int arrived = 0;
     void *route = route_of(satnav, &arrived);
     live_card(gap, speed, 0, now);
-    if (gap >= 0.0f && gap < SUMMON_HANDOVER && walker_ok) {
+    /* the hand-over comes earlier the faster the AI drives: Gripline brakes with at most 6 m/s^2 and
+       must come to a stand beside the walker, not past him (25 m/s -> about 75 m) */
+    float handover = 12.0f + speed * speed / (2.0f * 5.0f);
+    if (handover < SUMMON_HANDOVER) handover = SUMMON_HANDOVER;
+    if (gap >= 0.0f && gap < handover && walker_ok) {
         /* near: the AI would stop hard 9 m away; Gripline slows the car down softly and parks it
            beside the walker, near enough to get in (Marvin 08.11.2026: "make it cooler") */
         log_append_value("SUMMON: near the walker - the AI hands over, the car parks beside him, metres: ", (int)gap);
+        log_append_value("SUMMON: speed at the hand-over, km/h: ", (int)(speed * 3.6f + 0.5f));
         release_ai();
         creep_begin(walker, 1, now);
         return;

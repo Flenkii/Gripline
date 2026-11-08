@@ -2,3 +2,7 @@ Car door sounds (door_open.wav, door_close.wav): cut from "Car Door Opening And 
 by Sounds From The Lab (https://soundsfromthelab.com, https://youtu.be/bvEcUGSPzdg).
 The source says: "No copyright!", "Perfect for use in your video creation, game design or other creative
 endeavour", royalty-free sound effects for free.
+
+Summon sounds (summon_start.wav, summon_end.wav): cut from "Tesla_Autopilot_Sound_Effect.wav" and
+"Tesla_Autopilot_Off_Sound.wav", given by Marvin (08.11.2026). Source and licence not checked yet:
+clear them before publishing.

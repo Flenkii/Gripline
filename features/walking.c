@@ -173,7 +173,7 @@ int walking_ready(void) {
 typedef int(WINAPI *PlaySoundWFn)(const void *, void *, unsigned long);
 typedef unsigned(WINAPI *GetSystemDirectoryWFn)(wchar_t *, unsigned);
 
-void walking_door_sound(int shut) {
+void walking_play_wav(const void *wav) {
     static PlaySoundWFn play;
     static int tried;
     if (!tried) {
@@ -190,9 +190,13 @@ void walking_door_sound(int shut) {
             HMODULE winmm = LoadLibraryExW(path, NULL, 0);
             if (winmm) play = (PlaySoundWFn)(uintptr_t)GetProcAddress(winmm, "PlaySoundW");
         }
-        log_append(play ? "WALKING: door sounds ready.\r\n" : "WALKING: winmm PlaySoundW not found - no door sounds.\r\n");
+        log_append(play ? "WALKING: sounds ready.\r\n" : "WALKING: winmm PlaySoundW not found - no sounds.\r\n");
     }
-    if (play) play(shut ? door_close_wav : door_open_wav, NULL, SND_ASYNC_ | SND_NODEFAULT_ | SND_MEMORY_);
+    if (play && wav) play(wav, NULL, SND_ASYNC_ | SND_NODEFAULT_ | SND_MEMORY_); /* a new sound ends the one playing */
+}
+
+void walking_door_sound(int shut) {
+    walking_play_wav(shut ? door_close_wav : door_open_wav);
 }
 
 int walking_active(void) {
