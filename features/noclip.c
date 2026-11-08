@@ -436,6 +436,10 @@ static void summon_follow(void *dynamics, float dt, int phase) {
 #define CREEP_PARK_FIX 12.0f   /* metres to the walker: the parking side and direction stay */
 #define CREEP_CLEAR 2.6f       /* metres car centre -> walker: never nearer */
 static unsigned creep_seen;    /* the creep the parking side belongs to */
+/* The speed Gripline wants the car at, kept here and not read back from the car: the parked car's own
+   brakes take most of each frame's speed away again (Marvin's log 08.11.2026: the car never got going,
+   "stuck" in the open), so the speed is set anew every frame from this. */
+static float creep_command;
 static float park_offset[2];
 static int park_side, park_fixed;
 static void summon_creep(void *dynamics, float dt) {
@@ -443,7 +447,8 @@ static void summon_creep(void *dynamics, float dt) {
     int to_walker;
     unsigned serial = summon_creep_target(at, &to_walker);
     if (!serial || !(dt > 0.0f)) return;
-    if (serial != creep_seen) creep_seen = serial, park_side = 0, park_fixed = 0;
+    int fresh = serial != creep_seen;
+    if (fresh) creep_seen = serial, park_side = 0, park_fixed = 0;
     GetStateFn get = (GetStateFn)slot(dynamics, SLOT_GET_STATE);
     SetStateFn set = (SetStateFn)slot(dynamics, SLOT_SET_STATE);
     if (!get || !set) return;
@@ -474,7 +479,9 @@ static void summon_creep(void *dynamics, float dt) {
         at[0] += park_offset[0], at[2] += park_offset[1];
     }
     float tx = at[0] - p[0], tz = at[2] - p[2], dist = root(tx * tx + tz * tz);
-    float along = v[0] * fx + v[2] * fz;
+    float along = v[0] * fx + v[2] * fz; /* a new creep starts from the car's own speed (the AI's hand-over) */
+    if (fresh || !float_is_finite(creep_command)) creep_command = along;
+    else along = creep_command;
     float want = 0.0f, yaw = 0.0f;
     if (dist > 0.01f) {
         float s = (fz * tx - fx * tz) / dist, c = (fx * tx + fz * tz) / dist; /* turn: + means spin +y */
@@ -503,6 +510,7 @@ static void summon_creep(void *dynamics, float dt) {
     float up = summon_creep_accel() * dt, down = CREEP_DECEL * dt;
     if (want > along) along = along + up < want ? along + up : want;
     else along = along - down > want ? along - down : want;
+    creep_command = along;
     state.velocity = _mm_setr_ps(fx * along, v[1], fz * along, 0.0f); /* no sliding sideways */
     float turn_scale = along < 1.0f ? (along > 0.3f ? along : 0.3f) : 1.0f;
     if (want == 0.0f && along < 0.3f) turn_scale = 0.0f; /* standing: no turning on the spot */

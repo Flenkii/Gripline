@@ -107,9 +107,21 @@ else:
         e.call('Fh2TestNoclipCreep', GAME, I, 100)
     v = get(-0x350)
     check(abs(v[2]) < 0.1, f'Spieler zu nah: Auto bleibt stehen, faehrt ihn nie an: {v}')
+    # the parked car's own brakes take speed away every frame (Marvin's log 08.11.2026): the car still gets going
+    e.mu.reg_write(__import__('unicorn').x86_const.UC_X86_REG_XMM0, 0)
+    e.mu.reg_write(__import__('unicorn').x86_const.UC_X86_REG_XMM2, struct.unpack('<I', struct.pack('<f', 100.0))[0])
+    vec(-0x350, 0.0, 0.0, 0.0)
+    e.call('Fh2TestSummonCreepSet', 0, 0, 0, 0)
+    for _ in range(30):
+        e.call('Fh2TestNoclipCreep', GAME, I, 100)
+        v = get(-0x350)
+        vec(-0x350, v[0] * 0.3, v[1], v[2] * 0.3)  # the brakes after the game's update
+    e.call('Fh2TestNoclipCreep', GAME, I, 100)
+    v = get(-0x350)
+    check(abs(v[2] - 6.0) < 1e-3, f'Bremsen des geparkten Autos halten es nicht auf (Tempo kommt von Gripline): {v}')
     # stuck: backs up straight (summon.c drives round next)
     e.call('Fh2TestSummonReverse', 1)
-    for _ in range(10):
+    for _ in range(20):  # from 6 m/s forward: braking 6 m/s^2, then back
         e.call('Fh2TestNoclipCreep', GAME, I, 100)
     v, w = get(-0x350), get(-0x340)
     check(abs(v[2] + 2.0) < 1e-3 and abs(w[1]) < 1e-4, f'festgefahren: setzt gerade zurueck (2 m/s): {v} {w}')
