@@ -911,7 +911,19 @@ static void multicam_update(void *self, float dt, uintptr_t a, uintptr_t b) {
     if (!active || !entered || !walk_view_ok) return;
     unsigned char *m = (unsigned char *)self;
     void *current = NULL;
-    if (!memory_read_pointer(m + 0x208, &current) || current != walk_view_camera) return;
+    if (!memory_read_pointer(m + 0x208, &current)) return;
+    if (current != walk_view_camera) {
+        /* Marvin 08.11.2026: beyond 45 m the picture looked like the car's outside camera: the game may
+           look through another camera then - which one? */
+        static unsigned other_logged;
+        static void *last_other;
+        if (current != last_other && other_logged < 6) {
+            ++other_logged, last_other = current;
+            log_class("WALKING DIAG: the multi camera looks through another camera: ", current);
+            log_append_value("WALKING DIAG: ... car hidden: ", (int)hiding);
+        }
+        return;
+    }
     _Alignas(16) float have[16], fov = 0.0f;
     if (!memory_read(m + 0x260, have, sizeof(have)) || !memory_read(m + 0x2a0, &fov, 4)) return;
     float most = 0.0f;
