@@ -45,7 +45,12 @@
 #define NEAR_END 30.0f         /* the GPS drops its route some 10-15 m before the end (Marvin's log 08.11.):
                                   a route gone this near the walker means the car has come */
 #define SHORT_START 30.0f      /* nearer than this the GPS route is too short for the AI to set off */
-#define ROAD_SNAP 3.0f         /* metres from the nearest road: farther, the car is put onto it first */
+#define ROAD_SNAP 3.0f         /* metres from the nearest road: farther, the car first creeps onto it */
+#define CREEP_RANGE 120.0f     /* the car creeps (Gripline drives it) at most this far off the road */
+#define CREEP_ROAD_REACHED 3.0f
+#define CREEP_STUCK_SPEED 0.7f
+#define CREEP_STUCK_MS 4000u
+#define CREEP_LIMIT_MS 90000u
 #define BRAKE_LIMIT_MS 5000u
 
 typedef struct {
@@ -86,6 +91,11 @@ static volatile LONG place_pending;
 static int got_going; /* the car has moved since the AI took it */
 static int road_checked;
 static int road_ok; /* the nearest-road query is the game's code as found */
+/* SUMMON_CREEP: game thread sets, car update thread reads */
+static SRWLOCK creep_lock = SRWLOCK_INIT;
+static float creep_at[3];
+static int creep_to_walker;
+static ULONGLONG creep_from, creep_slow_since;
 
 int summon_ready(void) {
     return ready;
@@ -318,6 +328,20 @@ int summon_take_place(float position[3], float forward[3]) {
     return 1;
 }
 
+int summon_creep_target(float out[3], int *slow_down) {
+    if (phase != SUMMON_CREEP) return 0;
+    AcquireSRWLockShared(&creep_lock);
+    out[0] = creep_at[0], out[1] = creep_at[1], out[2] = creep_at[2], *slow_down = creep_to_walker;
+    ReleaseSRWLockShared(&creep_lock);
+    return 1;
+}
+
+static void creep_set(const float at[3], int to_walker) {
+    AcquireSRWLockExclusive(&creep_lock);
+    creep_at[0] = at[0], creep_at[1] = at[1], creep_at[2] = at[2], creep_to_walker = to_walker;
+    ReleaseSRWLockExclusive(&creep_lock);
+}
+
 /* ------------------------------------------------------------------ the summon */
 
 static void reset(void) {
@@ -331,8 +355,8 @@ static void reset(void) {
     ReleaseSRWLockExclusive(&seen_lock);
 }
 
-/* AI off, route off, GPS destination off; then the car brakes (still walking) or nothing */
-static void stop(int brake) {
+/* AI off, route off, GPS destination off (the car stays where it is) */
+static void release_ai(void) {
     if (driving_ai && drive_car) {
         if (!set_ai(drive_car, 0)) log_append("SUMMON: the AI driver could not be switched off again.\r\n");
     }
@@ -340,6 +364,19 @@ static void stop(int brake) {
     if (routed && drive_satnav && has_vtable(drive_satnav, RVA_SATNAV_VTABLE))
         ((ActionFn)(game + RVA_CLEAR_DESTINATION))(drive_satnav);
     if (driving_ai) clear_rewind(); /* the AI's drive is not the player's to rewind */
+    driving_ai = route_begun = routed = 0;
+}
+
+/* Gripline drives the car itself to at (the road, or the walker) */
+static void creep_begin(const float at[3], int to_walker, ULONGLONG now) {
+    creep_set(at, to_walker);
+    creep_from = creep_slow_since = now;
+    InterlockedExchange(&phase, SUMMON_CREEP);
+}
+
+/* AI off, route off, GPS destination off; then the car brakes (still walking) or nothing */
+static void stop(int brake) {
+    release_ai();
     reset();
     if (brake && walking_active()) {
         brake_from = GetTickCount64();
@@ -423,30 +460,31 @@ static void tick(void *satnav) {
     float gap = seen_ok && walker_ok ? distance_xz(seen, walker) : -1.0f;
     InterlockedExchange(&frozen, gap > SUMMON_FREEZE);
     if (p == SUMMON_HOLD) {
-        if (gap >= 0.0f && gap < SHORT_START) { /* already here, or too near for a route */
-            log_append_value("SUMMON: the car is already near, metres: ", (int)gap);
+        if (gap >= 0.0f && gap < SUMMON_STOP_DISTANCE) {
             stop(0);
-            card("Dein Auto ist schon nah\nGeh die paar Meter hin (Auto rufen ab 30 m)", "Your car is already close\nWalk over (summon works from 30 m)");
+            card("Dein Auto ist schon da", "Your car is already here");
             return;
         }
         if (now < hold_until) return;
+        if (gap >= 0.0f && gap < SHORT_START && walker_ok) { /* too near for a GPS route: Gripline drives it */
+            log_append_value("SUMMON: near - the car creeps to the walker itself, metres: ", (int)gap);
+            creep_begin(walker, 1, now);
+            tinted("Dein Auto kommt\nEs rangiert zu dir (G/X = abbrechen)", "Your car is on its way\nIt is manoeuvring to you (G/X = cancel)",
+                   NOTIFY_COLOR_GREEN);
+            return;
+        }
         if (!road_checked) {
             road_checked = 1;
             float road[3], heading[3];
             if (road_ok && seen_ok && nearest_road(drive_car, road, heading)) {
                 float off = distance_xz(seen, road);
-                if (off > ROAD_SNAP) {
+                if (off > ROAD_SNAP && off <= CREEP_RANGE) {
                     /* the AI only drives along the route: off the road the car would not get going
-                       (Marvin 08.11.2026, car parked a few metres next to the road) */
-                    float tx = target[0] - road[0], tz = target[2] - road[2];
-                    if (heading[0] * tx + heading[2] * tz < 0.0f) heading[0] = -heading[0], heading[1] = -heading[1], heading[2] = -heading[2];
-                    AcquireSRWLockExclusive(&place_lock);
-                    place_at[0] = road[0], place_at[1] = road[1] + 0.6f, place_at[2] = road[2];
-                    place_forward[0] = heading[0], place_forward[1] = heading[1], place_forward[2] = heading[2];
-                    ReleaseSRWLockExclusive(&place_lock);
-                    InterlockedExchange(&place_pending, 1);
-                    log_append_value("SUMMON: the car stood off the road - put onto the nearest road, metres: ", (int)(off + 0.5f));
-                    hold_until = now + 600; /* it settles there, the GPS starts from there */
+                       (Marvin 08.11.2026, car parked a few metres next to the road). It is not put
+                       there (Marvin: "appearing out of nothing on the road is not nice"): Gripline
+                       drives it there slowly, then the AI takes over. */
+                    log_append_value("SUMMON: the car stands off the road - it creeps onto the nearest road, metres: ", (int)(off + 0.5f));
+                    creep_begin(road, 0, now);
                     return;
                 }
             } else {
@@ -495,6 +533,34 @@ static void tick(void *satnav) {
                NOTIFY_COLOR_GREEN);
         return;
     }
+    if (p == SUMMON_CREEP) {
+        if (creep_to_walker) {
+            if (walker_ok) creep_set(walker, 1); /* follows the walker */
+            if (gap >= 0.0f && gap < SUMMON_STOP_DISTANCE) {
+                log_append("SUMMON: the car is here (crept the last metres).\r\n");
+                stop(1);
+                tinted("Dein Auto ist da\nF/Y = einsteigen", "Your car is here\nF/Y = get in", NOTIFY_COLOR_GREEN);
+                return;
+            }
+        } else {
+            float at[3];
+            int slow;
+            summon_creep_target(at, &slow);
+            if (seen_ok && distance_xz(seen, at) < CREEP_ROAD_REACHED) {
+                log_append("SUMMON: the car is on the road - the GPS and the AI take over.\r\n");
+                InterlockedExchange(&phase, SUMMON_HOLD);
+                hold_until = now; /* road_checked stays: straight to the route */
+                return;
+            }
+        }
+        if (speed >= CREEP_STUCK_SPEED) creep_slow_since = now;
+        if ((now - creep_from > 2000u && now - creep_slow_since > CREEP_STUCK_MS) || now - creep_from > CREEP_LIMIT_MS) {
+            log_append_value("SUMMON: the car does not get on while creeping (something in the way?), metres to the walker: ", (int)gap);
+            stop(1);
+            card("Auto rufen abgebrochen\nDas Auto kommt nicht weiter (Hindernis?)", "Summon stopped\nThe car can't get through (something in the way?)");
+        }
+        return;
+    }
     /* SUMMON_DRIVE */
     if (driver_mode(drive_car) != 0) {
         log_append("SUMMON: the game took the car back from the AI - summon stopped.\r\n");
@@ -510,10 +576,12 @@ static void tick(void *satnav) {
         tinted("Dein Auto ist da\nF/Y = einsteigen", "Your car is here\nF/Y = get in", NOTIFY_COLOR_GREEN);
         return;
     }
-    if (!route && gap >= 0.0f && gap < NEAR_END) {
-        log_append_value("SUMMON: the GPS ended the route near the walker - the car is here, metres: ", (int)gap);
-        stop(1);
-        tinted("Dein Auto ist da\nF/Y = einsteigen (n\xc3\xa4her gehen)", "Your car is here\nF/Y = get in (walk closer)", NOTIFY_COLOR_GREEN);
+    if ((arrived || !route) && gap >= 0.0f && gap < CREEP_RANGE && walker_ok) {
+        /* the GPS ends its route 10-15 m before the walker or at the road nearest to him: the last
+           metres Gripline drives the car itself */
+        log_append_value("SUMMON: end of the GPS route - the car creeps the last metres, metres: ", (int)gap);
+        release_ai();
+        creep_begin(walker, 1, now);
         return;
     }
     if (arrived || !route) {
@@ -562,7 +630,7 @@ static void *satnav_update(void *self, float dt) {
 }
 
 static void satnav_deactivate(void *self) {
-    if (self == drive_satnav && (phase == SUMMON_HOLD || phase == SUMMON_DRIVE)) {
+    if (self == drive_satnav && (phase == SUMMON_HOLD || phase == SUMMON_DRIVE || phase == SUMMON_CREEP)) {
         log_append("SUMMON: the GPS was switched off - summon stopped.\r\n");
         stop(1);
     }
@@ -641,6 +709,11 @@ __declspec(dllexport) int Fh2TestSummonStart(unsigned char *game_image) {
 }
 __declspec(dllexport) void Fh2TestSummonRequest(void) {
     summon_request();
+}
+__declspec(dllexport) void Fh2TestSummonCreepSet(float x, float y, float z, int to_walker) {
+    float at[3] = {x, y, z};
+    creep_set(at, to_walker);
+    InterlockedExchange(&phase, to_walker >= 0 ? SUMMON_CREEP : SUMMON_IDLE);
 }
 __declspec(dllexport) int Fh2TestSummonPhase(void) {
     return (int)phase;

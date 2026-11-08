@@ -36,7 +36,9 @@ enum {
     SUMMON_IDLE,  /* normal walking: the car is held at its place */
     SUMMON_HOLD,  /* held at its place, the route is being planned */
     SUMMON_DRIVE, /* the AI drives: the car is let go, its place follows it */
-    SUMMON_BRAKE  /* the AI is off: noclip.c brakes the car softly, then summon_braked() */
+    SUMMON_BRAKE, /* the AI is off: noclip.c brakes the car softly, then summon_braked() */
+    SUMMON_CREEP  /* Gripline itself drives the car slowly to a point (summon_creep_target): off the
+                     road to the road, and the last metres to the walker (Marvin 08.11.2026) */
 };
 int summon_phase(void);
 /* noclip.c, car update thread, while summoning: where the car is and how fast (m/s) */
@@ -44,6 +46,8 @@ void summon_car_seen(const float position[3], float speed);
 /* noclip.c, car update thread, while held: 1 once when the car is to be put onto the road first
    (position a little above it, the road's heading towards the walker) */
 int summon_take_place(float position[3], float forward[3]);
+/* noclip.c, car update thread, SUMMON_CREEP: where to go; slow_down = 1 near the end (the walker) */
+int summon_creep_target(float out[3], int *slow_down);
 /* noclip.c: the car stands (brake phase over) */
 void summon_braked(void);
 /* walking.c: 1 = the walker stands still (car far away and moving). */
