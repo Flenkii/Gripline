@@ -56,7 +56,11 @@
 #define CREEP_RANGE 120.0f     /* the car creeps (Gripline drives it) at most this far off the road */
 #define CREEP_ROAD_REACHED 3.0f
 #define CREEP_STUCK_SPEED 0.7f
-#define CREEP_STUCK_MS 4000u
+#define CREEP_STUCK_MS 3000u
+#define CREEP_TRIES 3          /* stuck while creeping: back up and drive round, at most this often */
+#define CREEP_BACK_MS 1600u    /* backing up */
+#define CREEP_DETOUR 10.0f     /* metres: the way round, 55 degrees to the side */
+#define CREEP_DETOUR_MS 6000u
 #define CREEP_LIMIT_MS 90000u
 #define BRAKE_LIMIT_MS 5000u
 
@@ -104,6 +108,37 @@ static float creep_at[3];
 static int creep_to_walker;
 static unsigned creep_serial;
 static ULONGLONG creep_from, creep_slow_since, live_next;
+/* stuck while creeping: back up, then a way round to one side, then on to the goal (game thread) */
+static float creep_goal[3];
+static int creep_goal_walker, creep_tries, creep_step, creep_side; /* step: 0 to the goal, 1 back, 2 round */
+static ULONGLONG creep_step_until;
+static volatile LONG creep_reverse;
+static float eta_speed; /* smoothed speed for the arrival time on the live card */
+
+static volatile LONG style = SUMMON_STYLE_NORMAL, sounds_on = 1;
+
+void summon_set_style(int value) {
+    InterlockedExchange(&style, value >= 0 && value < SUMMON_STYLE_COUNT ? value : SUMMON_STYLE_NORMAL);
+}
+int summon_style(void) {
+    return (int)style;
+}
+void summon_set_sounds(int on) {
+    InterlockedExchange(&sounds_on, on != 0);
+}
+int summon_sounds(void) {
+    return sounds_on != 0;
+}
+float summon_creep_speed(void) {
+    return style == SUMMON_STYLE_CALM ? 4.5f : style == SUMMON_STYLE_SPORTY ? 8.5f : 6.0f;
+}
+float summon_creep_accel(void) {
+    return style == SUMMON_STYLE_CALM ? 1.8f : style == SUMMON_STYLE_SPORTY ? 3.5f : 2.5f;
+}
+
+static void sound(const void *wav) {
+    if (sounds_on) walking_play_wav(wav);
+}
 
 int summon_ready(void) {
     return ready;
@@ -360,6 +395,8 @@ static void reset(void) {
     routed = route_begun = driving_ai = got_going = road_checked = 0;
     InterlockedExchange(&place_pending, 0);
     InterlockedExchange(&frozen, 0);
+    InterlockedExchange(&creep_reverse, 0);
+    creep_step = 0;
     AcquireSRWLockExclusive(&seen_lock);
     car_seen_ok = 0;
     ReleaseSRWLockExclusive(&seen_lock);
@@ -378,15 +415,22 @@ static void release_ai(void) {
 }
 
 /* Gripline drives the car itself to at (the road, or the walker) */
+int summon_creep_reverse(void) {
+    return creep_reverse != 0;
+}
+
 static void creep_begin(const float at[3], int to_walker, ULONGLONG now) {
     creep_set(at, to_walker, 1);
+    creep_goal[0] = at[0], creep_goal[1] = at[1], creep_goal[2] = at[2], creep_goal_walker = to_walker;
+    creep_tries = creep_step = 0;
+    InterlockedExchange(&creep_reverse, 0);
     creep_from = creep_slow_since = now;
     InterlockedExchange(&phase, SUMMON_CREEP);
 }
 
 /* AI off, route off, GPS destination off; then the car brakes (still walking) or nothing */
 static void stop(int brake) {
-    walking_play_wav(summon_end_wav); /* Marvin 08.11.2026: "autopilot off" when the summon ends, however */
+    sound(summon_end_wav); /* Marvin 08.11.2026: "autopilot off" when the summon ends, however */
     release_ai();
     reset();
     if (brake && walking_active()) {
@@ -428,7 +472,7 @@ static void begin(void *satnav, ULONGLONG now) {
     hold_until = now + (away < 0.0f || away > HOLD_FAR ? HOLD_MS : HOLD_NEAR_MS);
     live_next = now + 1500u; /* the start card first */
     InterlockedExchange(&phase, SUMMON_HOLD);
-    walking_play_wav(summon_start_wav); /* Marvin 08.11.2026: "autopilot on" when the summon starts */
+    sound(summon_start_wav); /* Marvin 08.11.2026: "autopilot on" when the summon starts */
     log_append_value("SUMMON: started - the car waits at its place a moment, metres to the walker: ", (int)(away + 0.5f));
     card("Auto wird gerufen\nGPS plant die Route zu dir... (G/X = abbrechen)",
          "Summoning the car\nThe GPS plans the route to you... (G/X = cancel)");
@@ -451,6 +495,7 @@ static void put_words(char *out, unsigned *n, const char *text) {
 static void live_card(float gap, float speed, int parking, ULONGLONG now) {
     if (gap < 0.0f || now < live_next || !notify_kind_on(NOTIFY_KIND_LIVE)) return;
     live_next = now + LIVE_MS;
+    eta_speed += (speed - eta_speed) * 0.15f; /* about 2 s of smoothing at 4 updates a second */
     int de = game_language_is_german(game), imperial = game_units_imperial(game);
     char text[128];
     unsigned n = 0;
@@ -461,8 +506,35 @@ static void live_card(float gap, float speed, int parking, ULONGLONG now) {
     put_words(text, &n, imperial ? " ft\n" : " m\n");
     put_number(text, &n, (int)(speed * (imperial ? 2.23694f : 3.6f) + 0.5f));
     put_words(text, &n, imperial ? " mph" : " km/h");
+    if (!parking && eta_speed > 2.0f && gap > 40.0f) { /* about when (the road is longer than the line) */
+        int seconds = (int)(gap * 1.3f / eta_speed + 0.5f);
+        put_words(text, &n, de ? " - ca. " : " - about ");
+        if (seconds >= 60) {
+            put_number(text, &n, seconds / 60);
+            put_words(text, &n, ":");
+            if (seconds % 60 < 10) put_words(text, &n, "0");
+            put_number(text, &n, seconds % 60);
+            put_words(text, &n, " min");
+        } else {
+            put_number(text, &n, seconds);
+            put_words(text, &n, " s");
+        }
+    }
     put_words(text, &n, de ? "   G/X = abbrechen" : "   G/X = cancel");
     notify_show_live(text, LIVE_TAG, 1200);
+}
+
+/* the GPS / the AI cannot bring the car: when it is near enough, Gripline drives it to the walker
+   itself, straight across (Marvin 08.11.2026: "make it really good") */
+static int creep_instead(float gap, int walker_ok, const float walker[3], ULONGLONG now, const char *why) {
+    if (!(gap >= 0.0f && gap < CREEP_RANGE) || !walker_ok) return 0;
+    log_append(why);
+    log_append_value("SUMMON: Gripline drives the car to the walker itself, metres: ", (int)gap);
+    release_ai();
+    creep_begin(walker, 1, now);
+    tinted("Dein Auto kommt\nEs f\xc3\xa4hrt querfeldein zu dir (G/X = abbrechen)",
+           "Your car is on its way\nIt drives cross-country to you (G/X = cancel)", NOTIFY_COLOR_GREEN);
+    return 1;
 }
 
 static void tick(void *satnav) {
@@ -547,8 +619,10 @@ static void tick(void *satnav) {
         void *route = route_of(satnav, &arrived);
         if (!route || arrived) {
             if (now >= route_until) {
-                log_append(route ? "SUMMON: the GPS says the walker is already reached.\r\n"
-                                 : "SUMMON: the GPS found no route to the walker.\r\n");
+                const char *why = route ? "SUMMON: the GPS says the walker is already reached.\r\n"
+                                        : "SUMMON: the GPS found no route to the walker.\r\n";
+                if (creep_instead(gap, walker_ok, walker, now, why)) return;
+                log_append(why);
                 stop(0);
                 card("Auto rufen geht hier nicht\nKeine Route zu dir gefunden (Gripline.log)",
                      "Can't summon the car here\nNo route to you found (Gripline.log)");
@@ -556,6 +630,8 @@ static void tick(void *satnav) {
             return;
         }
         if (!begin_route(drive_tracker)) {
+            if (creep_instead(gap, walker_ok, walker, now, "SUMMON: the route tracker could not start (autodrive running?).\r\n"))
+                return;
             log_append("SUMMON: the route tracker could not start (autodrive running?).\r\n");
             stop(0);
             card("Auto rufen geht gerade nicht\nRoute nicht startbar (Gripline.log)", "Can't summon the car now\nRoute could not start (Gripline.log)");
@@ -563,6 +639,7 @@ static void tick(void *satnav) {
         }
         route_begun = 1;
         if (!set_ai(drive_car, 1)) {
+            if (creep_instead(gap, walker_ok, walker, now, "SUMMON: the AI driver could not take the car.\r\n")) return;
             log_append("SUMMON: the AI driver could not take the car.\r\n");
             stop(0);
             card("Auto rufen geht gerade nicht\nKI-Fahrer nicht verf\xc3\xbc""gbar (Gripline.log)",
@@ -580,8 +657,10 @@ static void tick(void *satnav) {
     }
     if (p == SUMMON_CREEP) {
         live_card(gap, speed, creep_to_walker && gap < SUMMON_HANDOVER + 10.0f, now);
-        if (creep_to_walker) {
-            if (walker_ok) creep_set(walker, 1, 0); /* follows the walker */
+        if (creep_step != 0) {
+            /* backing up / driving round: no arrival checks */
+        } else if (creep_to_walker) {
+            if (walker_ok && creep_step == 0) creep_set(walker, 1, 0); /* follows the walker */
             /* here = it stands beside the walker (noclip.c stops it there), or it is very near anyway */
             if (gap >= 0.0f && ((gap < SUMMON_STOP_DISTANCE && speed < ARRIVED_SPEED && now - creep_from > 1000u) ||
                                 gap < SUMMON_PARK_SIDE - 0.7f)) {
@@ -602,7 +681,44 @@ static void tick(void *satnav) {
                 return;
             }
         }
-        if (speed >= CREEP_STUCK_SPEED) creep_slow_since = now;
+        if (creep_step == 1 && now >= creep_step_until) { /* backed up: now a way round, to one side */
+            InterlockedExchange(&creep_reverse, 0);
+            float dx = creep_goal[0] - seen[0], dz = creep_goal[2] - seen[2], d = dx * dx + dz * dz;
+            if (seen_ok && d > 1.0f) {
+                d = _mm_cvtss_f32(_mm_sqrt_ss(_mm_set_ss(d)));
+                dx /= d, dz /= d;
+                float c = 0.574f, sn = 0.819f * (float)creep_side; /* 55 degrees */
+                float round[3] = {seen[0] + (dx * c - dz * sn) * CREEP_DETOUR, seen[1], seen[2] + (dz * c + dx * sn) * CREEP_DETOUR};
+                creep_set(round, 0, 0);
+                creep_step = 2, creep_step_until = now + CREEP_DETOUR_MS;
+            } else {
+                creep_step = 0;
+            }
+            creep_slow_since = now;
+        } else if (creep_step == 2) {
+            float at[3];
+            int w;
+            summon_creep_target(at, &w);
+            if (now >= creep_step_until || (seen_ok && distance_xz(seen, at) < 2.5f)) { /* round: on to the goal */
+                if (creep_goal_walker && walker_ok) creep_goal[0] = walker[0], creep_goal[1] = walker[1], creep_goal[2] = walker[2];
+                creep_set(creep_goal, creep_goal_walker, 0);
+                creep_step = 0;
+                creep_slow_since = now;
+            }
+        }
+        if (speed >= CREEP_STUCK_SPEED || creep_step == 1) creep_slow_since = now;
+        if (now - creep_from > 2000u && now - creep_slow_since > CREEP_STUCK_MS && creep_tries < CREEP_TRIES &&
+            now - creep_from <= CREEP_LIMIT_MS) {
+            /* something in the way: back up a little and drive round it, every other time the other side */
+            ++creep_tries;
+            creep_side = creep_tries & 1 ? 1 : -1;
+            creep_step = 1, creep_step_until = now + CREEP_BACK_MS;
+            InterlockedExchange(&creep_reverse, 1);
+            log_append_value("SUMMON: the car is stuck - it backs up and drives round, try: ", creep_tries);
+            if (creep_tries == 1)
+                card("Dein Auto steckt kurz fest\nEs setzt zur\xc3\xbc""ck und f\xc3\xa4hrt drum herum", "Your car got stuck\nIt backs up and drives round");
+            return;
+        }
         if ((now - creep_from > 2000u && now - creep_slow_since > CREEP_STUCK_MS) || now - creep_from > CREEP_LIMIT_MS) {
             log_append_value("SUMMON: the car does not get on while creeping (something in the way?), metres to the walker: ", (int)gap);
             stop(1);
@@ -653,12 +769,14 @@ static void tick(void *satnav) {
     }
     if (speed >= STUCK_SPEED) slow_since = now, got_going = 1;
     if (!got_going && now - drive_from > START_STALL_MS) {
+        if (creep_instead(gap, walker_ok, walker, now, "SUMMON: the AI did not get the car going.\r\n")) return;
         log_append_value("SUMMON: the AI did not get the car going, metres to the walker: ", (int)gap);
         stop(1);
         card("Auto rufen abgebrochen\nDas Auto kommt nicht los - park es n\xc3\xa4her an einer Stra\xc3\x9f""e",
              "Summon stopped\nThe car can't get going - park it closer to a road");
         return;
     }
+    if (now - slow_since > STUCK_MS && creep_instead(gap, walker_ok, walker, now, "SUMMON: the AI is stuck.\r\n")) return;
     if (now - slow_since > STUCK_MS || now - drive_from > DRIVE_LIMIT_MS) {
         log_append_value(now - drive_from > DRIVE_LIMIT_MS ? "SUMMON: took too long, metres to the walker: "
                                                            : "SUMMON: the car is stuck, metres to the walker: ",
@@ -771,6 +889,12 @@ __declspec(dllexport) void Fh2TestSummonCreepSet(float x, float y, float z, int 
     float at[3] = {x, y, z};
     creep_set(at, to_walker, 1);
     InterlockedExchange(&phase, to_walker >= 0 ? SUMMON_CREEP : SUMMON_IDLE);
+}
+__declspec(dllexport) void Fh2TestSummonReverse(int on) {
+    InterlockedExchange(&creep_reverse, on != 0);
+}
+__declspec(dllexport) void Fh2TestSummonStyle(int value) {
+    summon_set_style(value);
 }
 __declspec(dllexport) int Fh2TestSummonPhase(void) {
     return (int)phase;

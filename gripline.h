@@ -37,6 +37,8 @@ typedef struct {
     int cards_hidden; /* [Gripline] CardsHidden: bits of notify.h NOTIFY_KIND_* that are not shown (V7) */
     int telemetry_show; /* [Gripline] TelemetryShow: bits of telemetry.h TELEMETRY_SHOW_*, -1 = default */ /* [Gripline] SpeedCameras / CarLabels: 0 = off (V7, world_files.c) */
     int walk_gauge; /* [Gripline] WalkGauge: walking gauge at the bottom right, 0 off, 1 ring, 2 racing bar, 3 step pulse (V7.1, walk_gauge.h) */
+    int summon_style; /* [Gripline] SummonStyle: how the summoned car drives itself, 0 calm, 1 normal, 2 sporty (V7.1, summon.h) */
+    int summon_sounds; /* [Gripline] SummonSounds: autopilot sounds at the start / end of a summon, 0 off, 1 on (V7.1) */
     int walk_handheld; /* [Gripline] WalkHandheld: walking camera like a phone in the hand, 0 off .. 3 strong (V7.1, walking.h) */
 } ModOptions;
 #endif

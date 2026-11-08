@@ -107,6 +107,23 @@ else:
         e.call('Fh2TestNoclipCreep', GAME, I, 100)
     v = get(-0x350)
     check(abs(v[2]) < 0.1, f'Spieler zu nah: Auto bleibt stehen, faehrt ihn nie an: {v}')
+    # stuck: backs up straight (summon.c drives round next)
+    e.call('Fh2TestSummonReverse', 1)
+    for _ in range(10):
+        e.call('Fh2TestNoclipCreep', GAME, I, 100)
+    v, w = get(-0x350), get(-0x340)
+    check(abs(v[2] + 2.0) < 1e-3 and abs(w[1]) < 1e-4, f'festgefahren: setzt gerade zurueck (2 m/s): {v} {w}')
+    e.call('Fh2TestSummonReverse', 0)
+    # sporty: straight ahead 100 m, top speed 8.5 m/s
+    e.call('Fh2TestSummonStyle', 2)
+    e.mu.reg_write(__import__('unicorn').x86_const.UC_X86_REG_XMM0, 0)
+    e.mu.reg_write(__import__('unicorn').x86_const.UC_X86_REG_XMM2, struct.unpack('<I', struct.pack('<f', 100.0))[0])
+    e.call('Fh2TestSummonCreepSet', 0, 0, 0, 0)
+    for _ in range(60):
+        e.call('Fh2TestNoclipCreep', GAME, I, 100)
+    v = get(-0x350)
+    check(abs(v[2] - 8.5) < 1e-3, f'Fahrstil Sportlich: bis 31 km/h: {v}')
+    e.call('Fh2TestSummonStyle', 1)
     e.call('Fh2TestSummonCreepSet', 0, 0, 0, -1)
     check(e.call('Fh2TestSummonPhase') == 0, 'Rangieren aus')
     # the code bytes checked in summon_start, changed: summon stays off

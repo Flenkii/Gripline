@@ -426,13 +426,11 @@ static void summon_follow(void *dynamics, float dt, int phase) {
    not appear on the road; then "make it cooler"): before the game's update the car gets a speed along
    its own nose and a turn towards the target, like a car driven at a calm pace; the game's physics does
    the rest (ground, slopes, wheels, collisions). Up / down speed stays the physics'.
-   Speed: speeds up and brakes with limited force, slows in turns, and plans its stop (brake curve) so
+   Speed (F8 style: calm 16 / normal 22 / sporty 31 km/h): speeds up and brakes with limited force, slows in turns, and plans its stop (brake curve) so
    it comes to a stand at the target instead of braking at the last moment.
    To the walker it parks beside him: the target is SUMMON_PARK_SIDE m beside him, on the side that
    needs the least turning, fixed once the car is near, so it ends next to him with its side to him. */
-#define CREEP_SPEED 6.0f       /* m/s, about 22 km/h */
 #define CREEP_TURN 0.8f        /* rad/s at most */
-#define CREEP_ACCEL 2.5f       /* m/s^2 speeding up */
 #define CREEP_DECEL 6.0f       /* m/s^2 at most braking (from the AI's speed after the hand-over) */
 #define CREEP_PLAN 2.0f        /* m/s^2 the planned soft stop */
 #define CREEP_PARK_FIX 12.0f   /* metres to the walker: the parking side and direction stay */
@@ -486,15 +484,23 @@ static void summon_creep(void *dynamics, float dt) {
         if (yaw < -CREEP_TURN) yaw = -CREEP_TURN;
         float stop_left = dist - (to_walker ? 0.3f : 0.0f);
         want = stop_left > 0.0f ? root(2.0f * CREEP_PLAN * stop_left) : 0.0f; /* the planned stop */
-        if (want > CREEP_SPEED) want = CREEP_SPEED;
-        float turning = 2.0f + 4.0f * (c > 0.0f ? c : 0.0f); /* slower in turns, 2 m/s turning round */
+        if (want > summon_creep_speed()) want = summon_creep_speed();
+        float turning = 2.0f + (summon_creep_speed() - 2.0f) * (c > 0.0f ? c : 0.0f); /* slower in turns, 2 m/s turning round */
         if (want > turning) want = turning;
         if (!to_walker && want < 1.2f) want = 1.2f; /* onto the road: keeps rolling, summon.c takes over */
         if (to_walker && dist < 0.6f) want = 0.0f;
         if (to_walker && want > 0.0f && want < 0.8f) want = 0.8f;
     }
     if (to_walker && walker_dist >= 0.0f && walker_dist < CREEP_CLEAR) want = 0.0f; /* never onto the walker */
-    float up = CREEP_ACCEL * dt, down = CREEP_DECEL * dt;
+    { /* never onto the walker, whatever the target (also the way round an obstacle) */
+        float wp[3];
+        if (walking_walker_position(wp)) {
+            float wx = wp[0] - p[0], wz = wp[2] - p[2], wd = root(wx * wx + wz * wz);
+            if (wd < CREEP_CLEAR || (wd < CREEP_CLEAR + 2.0f && (fx * wx + fz * wz) > 0.0f && !to_walker)) want = 0.0f;
+        }
+    }
+    if (summon_creep_reverse()) want = -2.0f, yaw = 0.0f; /* stuck: back up straight, summon.c then drives round */
+    float up = summon_creep_accel() * dt, down = CREEP_DECEL * dt;
     if (want > along) along = along + up < want ? along + up : want;
     else along = along - down > want ? along - down : want;
     state.velocity = _mm_setr_ps(fx * along, v[1], fz * along, 0.0f); /* no sliding sideways */

@@ -43,6 +43,16 @@ enum {
                      road to the road, and the last metres to the walker (Marvin 08.11.2026) */
 };
 int summon_phase(void);
+
+/* F8 > Einstellungen (V7.1): how the car drives where Gripline drives it, and the autopilot sounds */
+enum { SUMMON_STYLE_CALM, SUMMON_STYLE_NORMAL, SUMMON_STYLE_SPORTY, SUMMON_STYLE_COUNT };
+void summon_set_style(int style);
+int summon_style(void);
+void summon_set_sounds(int on);
+int summon_sounds(void);
+/* noclip.c: top speed (m/s) and speeding up (m/s^2) for the style */
+float summon_creep_speed(void);
+float summon_creep_accel(void);
 /* noclip.c, car update thread, while summoning: where the car is and how fast (m/s) */
 void summon_car_seen(const float position[3], float speed);
 /* noclip.c, car update thread, while held: 1 once when the car is to be put onto the road first
@@ -51,6 +61,8 @@ int summon_take_place(float position[3], float forward[3]);
 /* noclip.c, car update thread, SUMMON_CREEP: where to go; to_walker = 1: to the walker (the car parks
    beside him). Returns a number that changes with each new creep (0 = not creeping). */
 unsigned summon_creep_target(float out[3], int *to_walker);
+/* noclip.c, SUMMON_CREEP: 1 = back up straight (the car got stuck, summon.c drives round next) */
+int summon_creep_reverse(void);
 /* noclip.c: the car stands (brake phase over) */
 void summon_braked(void);
 /* walking.c: 1 = the walker stands still (car far away and moving). */

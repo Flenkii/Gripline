@@ -516,6 +516,8 @@ static void start_features(void) {
     cockpit_view_start(game);
     walking_start(game);
     summon_start(game); /* V7.1 test: the car drives to the walker (GPS + the game's AI) */
+    summon_set_style(options.summon_style);
+    summon_set_sounds(options.summon_sounds);
     walking_set_handheld(options.walk_handheld);
     walk_gauge_set_style(options.walk_gauge);
     menu_mouse_start(game); /* after walking: both chain the UI frame */
