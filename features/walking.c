@@ -9,6 +9,7 @@
 #include "walk_gauge.h"
 #include "game_language.h"
 #include "game_units.h"
+#include "summon.h"
 
 /* ------------------------------------------------------------------ game addresses */
 
@@ -198,12 +199,28 @@ static volatile LONG hiding;
 static float hide_at[3];
 int walking_car_hidden(float out[3]) {
     if (!active || !entered || !stepped) return 0;
+    if (summon_phase() != SUMMON_IDLE) { /* summoned: the car drives from its place (summon.h) */
+        InterlockedExchange(&hiding, 0);
+        return 0;
+    }
     float d = walking_car_distance();
     if (d > WALK_HIDE_FROM) InterlockedExchange(&hiding, 1);
     else if (d >= 0.0f && d < WALK_HIDE_BACK) InterlockedExchange(&hiding, 0);
     if (!hiding) return 0;
     out[0] = hide_at[0], out[1] = hide_at[1], out[2] = hide_at[2];
     return 1;
+}
+
+/* V7.1 summon (summon.h): the walker's place (sphere centre), any thread */
+int walking_walker_position(float out[3]) {
+    if (!active || !entered || !stepped) return 0;
+    out[0] = centre[0], out[1] = centre[1], out[2] = centre[2];
+    return float_is_finite(out[0]) && float_is_finite(out[1]) && float_is_finite(out[2]);
+}
+
+/* V7.1 summon: the car stands somewhere else now (noclip.c, car update thread) */
+void walking_move_car(const float position[3], const float right[3], const float forward[3]) {
+    for (unsigned i = 0; i < 3; ++i) car_place[i] = position[i], car_right[i] = right[i], car_forward[i] = forward[i];
 }
 
 int walking_no_floor(void) {
@@ -444,6 +461,10 @@ static void spawn(void) {
 static void step(float dt) {
     WalkInput in = {0};
     noclip_walk_input(&in);
+    /* V7.1 summon: while the car is far away and coming, the walker stands (floor collision is only
+       loaded around the car); looking around still works */
+    int freeze = summon_walker_frozen();
+    if (freeze) in.ahead = in.side = 0.0f, in.jump = 0, vel[0] = vel[1] = 0.0f;
 #ifdef FH2_TWEAKS_TEST
     in.mouse_x += test_mouse[0], in.mouse_y += test_mouse[1];
     test_mouse[0] = test_mouse[1] = 0.0f;
@@ -514,7 +535,9 @@ static void step(float dt) {
     if (in.jump && grounded && !crouching) fall = WALK_JUMP, grounded = 0, lifted = 0.0f;
     fall -= WALK_GRAVITY * dt;
     if (fall < -50.0f) fall = -50.0f;
-    if (world) {
+    if (freeze) {
+        fall = 0.0f, grounded = 1; /* stays exactly where he is */
+    } else if (world) {
         float dy = fall * dt - lifted;
         if (grounded && dy > -(lifted + WALK_SNAP)) dy = -(lifted + WALK_SNAP); /* down a slope or a step */
         float to[3] = {centre[0], centre[1] + dy, centre[2]}, end[3];

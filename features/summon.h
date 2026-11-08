@@ -1,0 +1,49 @@
+#ifndef FH2_SUMMON_H
+#define FH2_SUMMON_H
+
+/* V7.1 test: summon the car while walking (Marvin 08.11.2026, "like Tesla's summon").
+   Key Summon (FH2_Keyboard.ini, default G; controller X while walking): the game's own AI driver
+   drives the parked car along a GPS route to the walker and stops next to him. Again = stop.
+   Offline only, only while walking.
+
+   How (own code, found in forza_durango_release_final.exe, 08.11.2026):
+   - GPS: the player's SatNavComponent (vtable game+0x2cc3188, the same object Extra Options'
+     autodrive uses) has the reflected method "NavigateToPosition" (game+0x6b58b0 (component,
+     const std::vector<__m128> *points)): the game plans its own route to the points (each one
+     snapped to the road network). "ClearSatNavDestination" (game+0x6b4400 (component)) removes it.
+     Gripline calls both on the game's thread, from the component's own update (slot 0x10, chained).
+   - Driving: as Extra Options' autodrive (F2): the route tracker (vtable game+0x2cc3278) starts
+     following the route (game+0x6bec10), then the car's driver is switched to the AI
+     (game+0xf79f10 (car, 1)). At the end both are undone and the rewind history is cleared.
+   - The car: noclip.c holds it at its place while walking. For the summon it holds it there 2 s
+     (the world around it loads, it may have been under the walker), then lets it go and follows it;
+     at the end it brakes it softly and takes the place where it stopped as its new place.
+   - The walker stands still while the car is farther than SUMMON_FREEZE m (the game has floor
+     collision only around the car), looking around works. */
+
+#define SUMMON_STOP_DISTANCE 9.0f /* metres car -> walker: the AI stops, the car brakes */
+#define SUMMON_FREEZE 50.0f       /* walker stands still while the car is farther */
+
+/* Game start (plugin): checks the game code and chains the GPS hooks. 1 = summon can work. */
+int summon_start(unsigned char *game_image);
+int summon_ready(void);
+
+/* Key / controller X while walking (watch thread / input thread): start, or stop a running summon. */
+void summon_request(void);
+
+/* What noclip.c does with the car while walking (car update thread). */
+enum {
+    SUMMON_IDLE,  /* normal walking: the car is held at its place */
+    SUMMON_HOLD,  /* held at its place, the route is being planned */
+    SUMMON_DRIVE, /* the AI drives: the car is let go, its place follows it */
+    SUMMON_BRAKE  /* the AI is off: noclip.c brakes the car softly, then summon_braked() */
+};
+int summon_phase(void);
+/* noclip.c, car update thread, while summoning: where the car is and how fast (m/s) */
+void summon_car_seen(const float position[3], float speed);
+/* noclip.c: the car stands (brake phase over) */
+void summon_braked(void);
+/* walking.c: 1 = the walker stands still (car far away and moving). */
+int summon_walker_frozen(void);
+
+#endif

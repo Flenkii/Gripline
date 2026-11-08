@@ -30,6 +30,7 @@
 #include "wheel_buttons.h"
 #include "walking.h"
 #include "drive_look.h"
+#include "summon.h"
 
 #define RVA_DYNAMICS_VTABLE 0x2eb4bb8u
 #define RVA_DYNAMICS_REF_VTABLE 0x2eb5e18u
@@ -118,6 +119,7 @@ int noclip_own_look(void) {
 #define XI_LS 0x0040u
 #define XI_A 0x1000u
 #define XI_B 0x2000u
+#define XI_X 0x4000u
 #define XI_Y 0x8000u
 #define PAD_FRESH_MS 250u
 #define STICK_DEAD 0.24f
@@ -185,6 +187,7 @@ void noclip_pad_input(unsigned user, unsigned char *gamepad) {
     if (on == MODE_WALK) {
         /* on foot: Y gets back in; the game only keeps Start and Back (pause, map), the car stands */
         if (pressed & XI_Y) InterlockedExchange(&pad_request, MODE_WALK);
+        if (pressed & XI_X) summon_request(); /* V7.1 summon the car */
         unsigned short keep = (unsigned short)(buttons & (XI_START | XI_BACK));
         memory_copy(gamepad, &keep, sizeof(keep));
         for (unsigned i = 2; i < 12; ++i) gamepad[i] = 0; /* triggers and sticks */
@@ -350,6 +353,37 @@ static void hold_walking(void *dynamics) {
     _Alignas(16) BodyState state = parked;
     state.position = _mm_setr_ps(at[0], at[1], at[2], 0.0f);
     set(dynamics, &state);
+}
+
+/* V7.1 summon (summon.h), after the game's update: where the summoned car is now becomes its place
+   (getting in, walking off and the brake all use it); while braking its speed is taken away softly */
+#define SUMMON_BRAKE_TAU 0.45f /* s until about two thirds of the speed is gone */
+static void summon_follow(void *dynamics, float dt, int phase) {
+    GetStateFn get = (GetStateFn)slot(dynamics, SLOT_GET_STATE);
+    SetStateFn set = (SetStateFn)slot(dynamics, SLOT_SET_STATE);
+    if (!get || !set) return;
+    _Alignas(16) BodyState state;
+    get(dynamics, &state);
+    _Alignas(16) float p[4], v[4], r[4], f[4];
+    _mm_store_ps(p, state.position), _mm_store_ps(v, state.velocity);
+    _mm_store_ps(r, state.right), _mm_store_ps(f, state.forward);
+    for (unsigned i = 0; i < 3; ++i)
+        if (!float_is_finite(p[i]) || !float_is_finite(v[i])) return;
+    float speed = root(v[0] * v[0] + v[1] * v[1] + v[2] * v[2]);
+    if (phase == SUMMON_BRAKE) {
+        float x = dt > 0.0f ? dt / SUMMON_BRAKE_TAU : 0.0f, keep = 1.0f / (1.0f + x + x * x / 2.0f);
+        if (speed * keep < 0.3f) keep = 0.0f;
+        state.velocity = _mm_mul_ps(state.velocity, _mm_set1_ps(keep));
+        state.spin = _mm_mul_ps(state.spin, _mm_set1_ps(keep));
+        set(dynamics, &state);
+        if (keep == 0.0f) summon_braked();
+        speed *= keep;
+    }
+    parked = state;
+    parked.velocity = _mm_setzero_ps();
+    parked.spin = _mm_setzero_ps();
+    walking_move_car(p, r, f);
+    summon_car_seen(p, speed);
 }
 
 static void sin_cos(float a, float *s, float *c) {
@@ -631,6 +665,15 @@ static void handle_toggle(void) {
     }
     int held = keyboard_held(KEYBOARD_HOLD_NOCLIP), free_held = keyboard_held(KEYBOARD_HOLD_FREECAM);
     int walk_held = keyboard_held(KEYBOARD_HOLD_WALK);
+    { /* V7.1 summon key, only while walking (summon.h) */
+        static int summon_held;
+        int held_now = keyboard_held(KEYBOARD_HOLD_SUMMON);
+        if (held_now && !summon_held && on == MODE_WALK && !fade_stage) {
+            if (summon_ready()) summon_request();
+            else card("Auto rufen geht nicht\nSpiel-Code anders (Gripline.log)", "Summon not working\nGame code differs (Gripline.log)");
+        }
+        summon_held = held_now;
+    }
     int pressed = held && !key_held, free_pressed = free_held && !free_key_held, walk_pressed = walk_held && !walk_key_held;
     key_held = held, free_key_held = free_held, walk_key_held = walk_held;
     LONG request = InterlockedExchange(&pad_request, 0); /* controller: LS + D-pad up / down / right, Y */
@@ -773,13 +816,18 @@ void noclip_car_update(void *car, float dt, float frame_dt, unsigned frame) {
     void *dynamics = NULL;
     int local = game && car && is_local_car(car);
     if (local) traffic_load_reached(dt); /* the start reached the road (load guard, traffic_files.c) */
-    void *park = NULL;
+    void *park = NULL, *follow = NULL;
+    int summon = SUMMON_IDLE;
     if (local && (on == MODE_WALK || driver_hidden_car == car)) walk_driver(car, on == MODE_WALK && walking_active());
     if (on == MODE_WALK && local) {
         /* on foot: the car stands where it was; the walker is moved in the camera (walking.c) */
         void *walk_body = car_body(car);
         if (walk_body && walk_body != body && !begin(walk_body)) walk_body = NULL;
-        if (walk_body && walk_body == parked_body) park = walk_body, hold_walking(park);
+        if (walk_body && walk_body == parked_body) {
+            summon = summon_phase();
+            if (summon == SUMMON_DRIVE || summon == SUMMON_BRAKE) follow = walk_body; /* the car drives itself */
+            else park = walk_body, hold_walking(park);
+        }
     } else if (on && local) {
         dynamics = car_body(car);
         if (dynamics && dynamics != body && !begin(dynamics)) dynamics = NULL;
@@ -804,7 +852,15 @@ void noclip_car_update(void *car, float dt, float frame_dt, unsigned frame) {
     }
     original(car, dt, frame_dt, frame);
     if (dynamics && on) place(dynamics); /* ... and what the game moved in it is taken back */
-    else if (park && on == MODE_WALK) hold_walking(park);
+    else if (follow) summon_follow(follow, dt, summon);
+    else if (park && on == MODE_WALK) {
+        hold_walking(park);
+        if (summon == SUMMON_HOLD) { /* the route is planned: the car waits at its place */
+            _Alignas(16) float p[4];
+            _mm_store_ps(p, parked.position);
+            summon_car_seen(p, 0.0f);
+        }
+    }
     else if (park) put_back(park);
     else if (local && !on) sample_trip(car, dt);
     no_damage_after_update(car, local, local_car != NULL);

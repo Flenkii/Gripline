@@ -83,7 +83,7 @@ int notify_kind_on(int kind);
 /* Key list panel (keyboard_pad.c, key Keybinds): a tall card at the right edge of the picture,
    one row per key, shown until it is switched off; cards move to its left meanwhile. It is only
    drawn, the game keeps every input. count 0 hides it. Safe from any thread. */
-#define NOTIFY_PANEL_ROWS 46
+#define NOTIFY_PANEL_ROWS 47
 enum {
     NOTIFY_ROW_NORMAL,   /* label left, keys right */
     NOTIFY_ROW_SELECTED, /* key menu: the row the arrows stand on (highlighted) */

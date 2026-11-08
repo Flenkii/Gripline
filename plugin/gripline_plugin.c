@@ -37,6 +37,7 @@
 #include "features/game_language.h"
 #include "features/noclip.h"
 #include "features/walking.h"
+#include "features/summon.h"
 #include "features/menu_mouse.h"
 #include "features/focus_guard.h"
 #include "features/no_damage.h"
@@ -514,6 +515,7 @@ static void start_features(void) {
     nitro_link_start(game);
     cockpit_view_start(game);
     walking_start(game);
+    summon_start(game); /* V7.1 test: the car drives to the walker (GPS + the game's AI) */
     walking_set_handheld(options.walk_handheld);
     walk_gauge_set_style(options.walk_gauge);
     menu_mouse_start(game); /* after walking: both chain the UI frame */

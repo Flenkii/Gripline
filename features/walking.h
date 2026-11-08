@@ -44,6 +44,10 @@ int walking_speed_kmh(void);
 int walking_has_collision(void);
 /* 1 while the walker is where the game has no floor collision loaded (walks on flat, no falling) */
 int walking_no_floor(void);
+/* V7.1 summon (summon.h): the walker's place (sphere centre, 0 = not walking yet) and the car's new
+   place after it drove (noclip.c, car update thread). */
+int walking_walker_position(float out[3]);
+void walking_move_car(const float position[3], const float right[3], const float forward[3]);
 /* The game loads floor collision only around the car (~65 m, Gripline.log 06.11.2026). Farther
    than WALK_HIDE_FROM m from the car, noclip.c holds the car under the ground below the walker, so
    the collision comes along; nearer than WALK_HIDE_BACK m it stands at its place again.
