@@ -3,5 +3,5 @@ by Sounds From The Lab (https://soundsfromthelab.com, https://youtu.be/bvEcUGSPz
 The source says: "No copyright!", "Perfect for use in your video creation, game design or other creative
 endeavour", royalty-free sound effects for free.
 
-Summon sounds (summon_start.wav, summon_end.wav, summon_warning.wav): Gripline's own tones, made from sine
+Summon sounds (summon_start.wav, summon_end.wav, summon_warning.wav): Gripline's own tones (made with Claude), from sine
 waves by tools/make_summon_tones.py (no outside rights).
