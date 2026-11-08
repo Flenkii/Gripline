@@ -372,6 +372,21 @@ static void hold_walking(void *dynamics) {
     }
     _Alignas(16) BodyState state = parked;
     state.position = _mm_setr_ps(at[0], at[1], at[2], 0.0f);
+    { /* Marvin 08.11.2026: the picture leaned with the hidden car's own lean (it depended on the way
+         one looked relative to the car) - hidden, the car is held level, only its heading kept */
+        _Alignas(16) float f[4];
+        _mm_store_ps(f, parked.forward);
+        float l = root(f[0] * f[0] + f[2] * f[2]);
+        if (l > 0.1f) {
+            float fx = f[0] / l, fz = f[2] / l;
+            _Alignas(16) float r[4];
+            _mm_store_ps(r, parked.right);
+            float side = r[0] * fz - r[2] * fx >= 0.0f ? 1.0f : -1.0f; /* the right row's handedness */
+            state.forward = _mm_setr_ps(fx, 0.0f, fz, 0.0f);
+            state.up = _mm_setr_ps(0.0f, 1.0f, 0.0f, 0.0f);
+            state.right = _mm_setr_ps(side * fz, 0.0f, -side * fx, 0.0f);
+        }
+    }
     set(dynamics, &state);
 }
 
