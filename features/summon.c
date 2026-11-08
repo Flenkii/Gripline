@@ -416,6 +416,10 @@ static void release_ai(void) {
 }
 
 /* Gripline drives the car itself to at (the road, or the walker) */
+int summon_ai_waiting(void) {
+    return phase == SUMMON_DRIVE && !got_going;
+}
+
 int summon_creep_reverse(void) {
     return creep_reverse != 0;
 }

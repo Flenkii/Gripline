@@ -561,6 +561,23 @@ static void summon_creep(void *dynamics, float dt) {
     set(dynamics, &state);
 }
 
+/* V7.1 summon, the AI has the car but it does not move (Marvin's log 08.11.2026: driver = AI, route valid
+   and followed, speed exactly 0): the parked car's physics seems to rest. A slow roll along its nose
+   (0.8 m/s, below what counts as 'got going') each frame until the AI drives. */
+static void summon_nudge(void *dynamics) {
+    GetStateFn get = (GetStateFn)slot(dynamics, SLOT_GET_STATE);
+    SetStateFn set = (SetStateFn)slot(dynamics, SLOT_SET_STATE);
+    if (!get || !set) return;
+    _Alignas(16) BodyState state;
+    get(dynamics, &state);
+    _Alignas(16) float v[4], f[4];
+    _mm_store_ps(v, state.velocity), _mm_store_ps(f, state.forward);
+    float fl = root(f[0] * f[0] + f[2] * f[2]);
+    if (!(fl > 0.2f) || !float_is_finite(v[0]) || v[0] * v[0] + v[2] * v[2] > 0.25f) return;
+    state.velocity = _mm_setr_ps(f[0] / fl * 0.8f, v[1], f[2] / fl * 0.8f, 0.0f);
+    set(dynamics, &state);
+}
+
 /* V7.1 summon: the held car onto the road next to it (summon.c found it), level, along the road */
 static void summon_onto_road(void *dynamics, const float at[3], const float ahead[3]) {
     float length = root(ahead[0] * ahead[0] + ahead[2] * ahead[2]);
@@ -1020,6 +1037,7 @@ void noclip_car_update(void *car, float dt, float frame_dt, unsigned frame) {
             summon = summon_phase();
             if (summon == SUMMON_DRIVE || summon == SUMMON_BRAKE || summon == SUMMON_CREEP) follow = walk_body; /* the car drives itself */
             if (summon == SUMMON_CREEP) summon_creep(walk_body, dt);
+            if (summon == SUMMON_DRIVE && summon_ai_waiting()) summon_nudge(walk_body);
             else park = walk_body, hold_walking(park);
         }
     } else if (on && local) {

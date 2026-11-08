@@ -65,6 +65,8 @@ int summon_take_place(float position[3], float forward[3]);
 unsigned summon_creep_target(float out[3], int *to_walker);
 /* noclip.c, SUMMON_CREEP: 1 = back up straight (the car got stuck, summon.c drives round next) */
 int summon_creep_reverse(void);
+/* noclip.c, SUMMON_DRIVE: 1 while the AI has not got the car going yet (the car gets a slow nudge) */
+int summon_ai_waiting(void);
 /* noclip.c: the car stands (brake phase over) */
 void summon_braked(void);
 /* walking.c: 1 = the walker stands still (car far away and moving). */
