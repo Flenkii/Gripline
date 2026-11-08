@@ -52,9 +52,9 @@
 #define NEAR_END 30.0f         /* the GPS drops its route some 10-15 m before the end (Marvin's log 08.11.):
                                   a route gone this near the walker means the car has come */
 #define SHORT_START 30.0f      /* nearer than this the GPS route is too short for the AI to set off */
-#define ROAD_SNAP 3.0f         /* metres from the nearest road: farther, the car first creeps onto it */
 #define CREEP_RANGE 120.0f     /* the car creeps (Gripline drives it) at most this far off the road */
 #define CREEP_ROAD_REACHED 3.0f
+#define TURN_AHEAD 14.0f       /* metres along the road towards the walker the car first drives (it turns round) */
 #define CREEP_STUCK_SPEED 0.7f
 #define CREEP_STUCK_MS 3000u
 #define CREEP_TRIES 3          /* stuck while creeping: back up and drive round, at most this often */
@@ -546,19 +546,31 @@ static void live_card(float gap, float speed, int parking, ULONGLONG now) {
    node, often several metres away also for a car on the road - Marvin's log 08.11.: 8-10 m on the road);
    only when it does not get going Gripline drives the car to the road itself (not put there: "appearing
    out of nothing on the road is not nice"), then the AI tries again. Once per summon. */
-static int creep_to_road(const float seen[3], int seen_ok, ULONGLONG now) {
-    if (road_checked) return 0;
+static int creep_to_road(const float seen[3], int seen_ok, const float walker[3], int walker_ok, ULONGLONG now) {
+    if (road_checked || !seen_ok || !walker_ok) return 0;
     road_checked = 1;
-    float road[3], heading[3];
-    if (!road_ok || !seen_ok || !nearest_road(drive_car, road, heading)) {
-        log_append("SUMMON: no nearest road found for the car.\r\n");
-        return 0;
+    /* Also for a car on the road facing away from the walker (Marvin 08.11.2026: the AI cannot reverse
+       and turn, the car did not get away): Gripline drives it onto the road a little way in the walker's
+       direction, so it ends there with its nose the right way; then the AI tries again. */
+    float road[3], heading[3], target[3];
+    float wx = walker[0] - seen[0], wz = walker[2] - seen[2], wd = distance_xz(seen, walker);
+    if (!(wd > 1.0f)) return 0;
+    wx /= wd, wz /= wd;
+    if (road_ok && nearest_road(drive_car, road, heading) && distance_xz(seen, road) <= CREEP_RANGE) {
+        float hl = _mm_cvtss_f32(_mm_sqrt_ss(_mm_set_ss(heading[0] * heading[0] + heading[2] * heading[2])));
+        float hx = heading[0] / hl, hz = heading[2] / hl;
+        if (hx * (walker[0] - road[0]) + hz * (walker[2] - road[2]) < 0.0f) hx = -hx, hz = -hz; /* towards him */
+        target[0] = road[0] + hx * TURN_AHEAD, target[1] = road[1], target[2] = road[2] + hz * TURN_AHEAD;
+        log_append_value("SUMMON: the AI does not get going - the car drives onto the road towards the walker first, metres off: ",
+                         (int)(distance_xz(seen, road) + 0.5f));
+    } else {
+        target[0] = seen[0] + wx * TURN_AHEAD, target[1] = seen[1], target[2] = seen[2] + wz * TURN_AHEAD;
+        log_append("SUMMON: the AI does not get going - the car turns towards the walker first (no road found).\r\n");
     }
-    float off = distance_xz(seen, road);
-    if (off <= ROAD_SNAP || off > CREEP_RANGE) return 0;
-    log_append_value("SUMMON: the AI does not get going - the car creeps onto the nearest road first, metres: ", (int)(off + 0.5f));
     release_ai();
-    creep_begin(road, 0, now);
+    creep_begin(target, 0, now);
+    tinted("Dein Auto wendet\nDann f\xc3\xa4hrt es zu dir (G/X = abbrechen)", "Your car is turning round\nThen it drives to you (G/X = cancel)",
+           NOTIFY_COLOR_GREEN);
     return 1;
 }
 
@@ -793,7 +805,7 @@ static void tick(void *satnav) {
     if (speed >= STUCK_SPEED) slow_since = now, got_going = 1;
     if (!got_going && now - drive_from > START_STALL_MS) {
         if (creep_instead(gap, walker_ok, walker, now, "SUMMON: the AI did not get the car going.\r\n")) return;
-        if (creep_to_road(seen, seen_ok, now)) return;
+        if (creep_to_road(seen, seen_ok, walker, walker_ok, now)) return;
         log_append_value("SUMMON: the AI did not get the car going, metres to the walker: ", (int)gap);
         fail(1);
         card("Auto rufen abgebrochen\nDas Auto kommt nicht los - park es n\xc3\xa4her an einer Stra\xc3\x9f""e",
