@@ -39,6 +39,7 @@ PLUGIN_SOURCES = [
     "features/nitro_link.c",
     "features/noclip.c",
     "features/walking.c",
+    "features/summon.c",
     "features/walk_gauge.c",
     "features/drive_look.c",
     "features/menu_mouse.c",

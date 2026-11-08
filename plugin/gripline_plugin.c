@@ -37,6 +37,7 @@
 #include "features/game_language.h"
 #include "features/noclip.h"
 #include "features/walking.h"
+#include "features/summon.h"
 #include "features/menu_mouse.h"
 #include "features/focus_guard.h"
 #include "features/no_damage.h"
@@ -514,6 +515,9 @@ static void start_features(void) {
     nitro_link_start(game);
     cockpit_view_start(game);
     walking_start(game);
+    summon_start(game); /* V7.1 test: the car drives to the walker (GPS + the game's AI) */
+    summon_set_style(options.summon_style);
+    summon_set_sounds(options.summon_sounds);
     walking_set_handheld(options.walk_handheld);
     walk_gauge_set_style(options.walk_gauge);
     menu_mouse_start(game); /* after walking: both chain the UI frame */
@@ -599,6 +603,7 @@ FH2MOD_EXPORT int fh2mod_init(const FH2ModApi *platform) {
     unsigned char *host = (unsigned char *)GetModuleHandleW(NULL);
     if (host) {
         int keys = keyboard_pad_arm(host, directory); /* before Azimuth sets up its gamepads */
+        notify_prefer_window();                       /* the window has the walking gauge and the fade */
         int cards = notify_install(host);             /* game picture cards */
         platform_log(keys ? "early keyboard hook: yes" : "early keyboard hook: no");
         platform_log(cards ? "early card hook: yes" : "early card hook: no");

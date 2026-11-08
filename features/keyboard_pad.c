@@ -148,6 +148,7 @@ static Binding bindings[] = {
     {L"KeyMenu", KIND_MENU, 0, L"F8", {0}},
     {L"CruiseControl", KIND_NOCLIP, 0, L"K", {0}}, /* cruise.c reads it through keyboard_held */
     {L"Walk", KIND_NOCLIP, 0, L"F", {0}},          /* walking.h: out of / into the car (V7 test) */
+    {L"Summon", KIND_NOCLIP, 0, L"G", {0}},        /* summon.h: while walking the car drives to you (V7.1 test) */
 };
 
 static const struct {
@@ -261,7 +262,8 @@ static const char default_ini[] =
     ";   It saves its changes into this file.\r\n"
     "; CruiseControl: keeps the speed of the moment, again/brake = off (controller: LS + D-pad left; settings: F8).\r\n"
     "; Walk: get out and walk (offline only, controller: LS + Y), again near the car = get in (or Y).\r\n"
-    ";   Throttle/Brake/SteerLeft/SteerRight walk, arrow keys look, NoclipFast runs, NoclipUp jumps.\r\n";
+    ";   Throttle/Brake/SteerLeft/SteerRight walk, arrow keys look, NoclipFast runs, NoclipUp jumps.\r\n"
+    "; Summon: while walking your car drives to you by itself (controller: X), again = stop.\r\n";
 
 /* Default file text including the key bindings (also used by ini_migrate.c). Returns the
    length, 0 if it does not fit. */
@@ -305,7 +307,7 @@ static const wchar_t *const labels_german[ARRAY_COUNT(bindings)] = {
     L"Menü/Kamera hoch", L"Menü/Kamera runter", L"Menü/Kamera links", L"Menü/Kamera rechts",
     L"Steuerkreuz hoch", L"Steuerkreuz runter", L"Steuerkreuz links", L"Steuerkreuz rechts",
     L"Noclip ein/aus", L"Noclip: steigen", L"Noclip: sinken", L"Noclip: schneller (halten)", L"Freecam ein/aus",
-    L"Tastenmenü öffnen", L"Tempomat ein/aus", L"Walking: aus-/einsteigen"};
+    L"Tastenmenü öffnen", L"Tempomat ein/aus", L"Walking: aus-/einsteigen", L"Walking: Auto rufen"};
 static const wchar_t *const labels_english[ARRAY_COUNT(bindings)] = {
     L"Throttle", L"Brake", L"Steer left", L"Steer right", L"Handbrake", L"Shift up", L"Shift down",
     L"Clutch", L"Change camera", L"Rewind", L"Telemetry (hold)", L"Photo mode (hold)", L"Radio: previous",
@@ -315,7 +317,7 @@ static const wchar_t *const labels_english[ARRAY_COUNT(bindings)] = {
     L"Menu/camera up", L"Menu/camera down", L"Menu/camera left", L"Menu/camera right",
     L"D-pad up", L"D-pad down", L"D-pad left", L"D-pad right",
     L"Noclip on/off", L"Noclip: rise", L"Noclip: sink", L"Noclip: faster (hold)", L"Freecam on/off",
-    L"Open key menu", L"Cruise control on/off", L"Walking: get out / in"};
+    L"Open key menu", L"Cruise control on/off", L"Walking: get out / in", L"Walking: summon car"};
 _Static_assert(ARRAY_COUNT(bindings) + 1 <= NOTIFY_PANEL_ROWS, "key list rows");
 
 static unsigned char *game_base;
@@ -1569,7 +1571,8 @@ int keyboard_held(unsigned which) {
                                                               L"SteerRight", L"NoclipUp", L"NoclipDown",
                                                               L"NoclipFast", L"Noclip", L"Freecam",
                                                               L"ArrowUp", L"ArrowDown", L"ArrowLeft",
-                                                              L"ArrowRight", L"CruiseControl", L"Walk"};
+                                                              L"ArrowRight", L"CruiseControl", L"Walk",
+                                                              L"Summon"};
     static int index[KEYBOARD_HOLD_COUNT];
     if (which >= KEYBOARD_HOLD_COUNT || !loaded || !user32_ready()) return 0;
     if (!index[which]) {

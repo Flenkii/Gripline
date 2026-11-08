@@ -15,6 +15,7 @@
 #include "no_damage.h"
 #include "update_check.h"
 #include "cruise.h"
+#include "summon.h"
 #include "walking.h"
 
 #define VK_UP_ 0x26
@@ -37,7 +38,7 @@ enum { TOP_STYLE = 100, TOP_RESET = 101, TOP_MOUSE = 102, TOP_TELEMETRY = 103, T
        TOP_SETTINGS = 110, TOP_CARDS = 111, TOP_TRAFFIC = 112, TOP_CRUISE = 113, TOP_HANDHELD = 114, TOP_LOOK = 115, TOP_GAUGE = 116 };
 
 /* settings page (V7): rows */
-enum { SET_COLOR, SET_STEERING, SET_VIEW_FORWARD, SET_VIEW_UP, SET_UPDATE };
+enum { SET_COLOR, SET_STEERING, SET_VIEW_FORWARD, SET_VIEW_UP, SET_UPDATE, SET_SUMMON_STYLE, SET_SUMMON_SOUNDS };
 /* cockpit view 2 choices in cm (rig_settings.c ranges -20..80 and -20..30) */
 #define VIEW_STEP 5
 #define VIEW_FORWARD_MIN (-20)
@@ -90,7 +91,7 @@ static const wchar_t *const group_driving[] = {L"Throttle", L"Brake", L"SteerLef
 static const wchar_t *const group_camera[] = {L"Camera", L"LookBack", L"LookLeft", L"LookRight", L"CockpitView",
                                               L"ArrowUp", L"ArrowDown", L"ArrowLeft", L"ArrowRight", NULL};
 static const wchar_t *const group_gripline[] = {L"Nitro", L"Noclip", L"NoclipUp", L"NoclipDown", L"NoclipFast",
-                                                L"Freecam", L"Keybinds", L"KeyMenu", L"CruiseControl", L"Walk", NULL};
+                                                L"Freecam", L"Keybinds", L"KeyMenu", L"CruiseControl", L"Walk", L"Summon", NULL};
 static const wchar_t *const group_menu[] = {L"Pause", L"Confirm", L"Back", L"ButtonX", L"ButtonY", L"TabLeft",
                                             L"TabRight", L"DpadUp", L"DpadDown", L"DpadLeft", L"DpadRight", NULL};
 static const struct {
@@ -633,6 +634,9 @@ static const wchar_t *const world_german[WORLD_ROWS] = {L"Blitzer", L"Namen übe
 static const wchar_t *const world_english[WORLD_ROWS] = {L"Speed cameras", L"Names above cars", L"Event icons on the road",
                                                          L"Calm Drivatars"};
 
+/* V7.1 summon: how the car drives itself (summon.h) */
+static const wchar_t *const summon_german[SUMMON_STYLE_COUNT] = {L"Gemütlich", L"Normal", L"Sportlich"};
+static const wchar_t *const summon_english[SUMMON_STYLE_COUNT] = {L"Calm", L"Normal", L"Sporty"};
 /* V7.1 walking: handheld camera levels (walking.h) */
 static const wchar_t *const hand_german[WALK_HANDHELD_COUNT] = {L"Aus (ruhig)", L"Leicht", L"Mittel", L"Stark"};
 static const wchar_t *const hand_english[WALK_HANDHELD_COUNT] = {L"Off (steady)", L"Light", L"Medium", L"Strong"};
@@ -734,6 +738,10 @@ static void build_page(wchar_t *title) {
             row_add(tr(L"Cockpit-Ansicht 2: Höhe", L"Cockpit view 2: height"), cm, 0, SET_VIEW_UP);
             row_add(tr(L"Update-Hinweis beim Start", L"Update notice at start"), update_check_enabled() ? tr(L"An", L"On") : tr(L"Aus", L"Off"), 0,
                     SET_UPDATE);
+            row_add(tr(L"Auto rufen: Fahrstil", L"Summon car: driving style"),
+                    tr(summon_german[summon_style()], summon_english[summon_style()]), 0, SET_SUMMON_STYLE);
+            row_add(tr(L"Auto rufen: Autopilot-Sounds", L"Summon car: autopilot sounds"), summon_sounds() ? tr(L"An", L"On") : tr(L"Aus", L"Off"), 0,
+                    SET_SUMMON_SOUNDS);
             row_add(tr(L"Lenkrad-Animation, Update:", L"Steering animation, update:"), L"", NOTIFY_ROW_INFO, -1);
             row_add(tr(L"wirken nach Spiel-Neustart", L"take effect after a restart"), L"", NOTIFY_ROW_INFO, -1);
             hint(0);
@@ -1373,6 +1381,27 @@ static void choose(void) {
                                         : (m.german ? "Update-Hinweis aus\nGripline fragt GitHub nicht mehr" : "Update notice off\nGripline no longer asks GitHub"))
                                   : (m.german ? "Update-Hinweis\nNicht gespeichert" : "Update notice\nNot saved"));
                 log_append(on ? "KEYMENU: update check on\r\n" : "KEYMENU: update check off\r\n");
+            } else if (action == SET_SUMMON_STYLE) { /* Enter: the next style, at once */
+                int next = (summon_style() + 1) % SUMMON_STYLE_COUNT;
+                summon_set_style(next);
+                int saved = save_gripline_digit("SummonStyle", next);
+                char text[192];
+                unsigned t = 0;
+                wchar_t line[128];
+                unsigned n = wcopy(line, 0, 128, tr(L"Auto rufen: Fahrstil ", L"Summon car: driving style "));
+                n = wcopy(line, n, 128, tr(summon_german[next], summon_english[next]));
+                if (!saved) wcopy(line, n, 128, tr(L"\nNur bis zum Spielende (nicht gespeichert)", L"\nUntil the game closes (not saved)"));
+                utf8(line, text, sizeof(text), &t);
+                text[t] = 0;
+                notify_show(text);
+                log_append_value("KEYMENU: summon style ", next);
+            } else if (action == SET_SUMMON_SOUNDS) {
+                int on = !summon_sounds();
+                summon_set_sounds(on);
+                int saved = save_gripline_digit("SummonSounds", on);
+                notify_show(on ? (m.german ? "Autopilot-Sounds an" : "Autopilot sounds on") : (m.german ? "Autopilot-Sounds aus" : "Autopilot sounds off"));
+                if (!saved) log_append("KEYMENU: summon sounds not saved\r\n");
+                log_append(on ? "KEYMENU: summon sounds on\r\n" : "KEYMENU: summon sounds off\r\n");
             }
             break;
         case LEVEL_COLOR:

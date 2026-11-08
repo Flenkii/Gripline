@@ -44,6 +44,10 @@ int walking_speed_kmh(void);
 int walking_has_collision(void);
 /* 1 while the walker is where the game has no floor collision loaded (walks on flat, no falling) */
 int walking_no_floor(void);
+/* V7.1 summon (summon.h): the walker's place (sphere centre, 0 = not walking yet) and the car's new
+   place after it drove (noclip.c, car update thread). */
+int walking_walker_position(float out[3]);
+void walking_move_car(const float position[3], const float right[3], const float forward[3]);
 /* The game loads floor collision only around the car (~65 m, Gripline.log 06.11.2026). Farther
    than WALK_HIDE_FROM m from the car, noclip.c holds the car under the ground below the walker, so
    the collision comes along; nearer than WALK_HIDE_BACK m it stands at its place again.
@@ -74,10 +78,14 @@ int walking_handheld(void);
    a menu), with what it shows. Any thread. */
 #include "walk_gauge.h"
 int walking_gauge_data(WalkGaugeData *out);
+/* V7.1: blue arrow over the hidden car's place (see walking.c) */
+int walking_car_marker(float *tx, float *ty, float *ahead, float *fov, float *distance);
 
 /* Door sounds of the fade when getting out / in (Marvin 06.11.2026, his own sound file, cut in two,
    built into the DLL): 0 = door opens, 1 = door shuts. Played through Windows (winmm PlaySoundW,
    loaded only when needed), so at the Windows volume, not the game's. Silent when winmm is missing. */
 void walking_door_sound(int shut);
+/* a whole WAV file in memory, once, at Windows volume (any thread; a new sound ends the one playing) */
+void walking_play_wav(const void *wav);
 
 #endif
