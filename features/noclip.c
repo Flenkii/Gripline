@@ -406,6 +406,53 @@ static void summon_follow(void *dynamics, float dt, int phase) {
     summon_car_seen(p, speed);
 }
 
+/* V7.1 summon, SUMMON_CREEP (Marvin 08.11.2026: the car should come to him also from off the road,
+   not appear on the road): before the game's update the car gets a slow speed along its own nose and a
+   turn towards the target, like a car rolling at walking pace; the game's physics does the rest
+   (ground, slopes, wheels, collisions). Up / down speed stays the physics'. */
+#define CREEP_SPEED 4.5f    /* m/s, about 16 km/h */
+#define CREEP_TURN 0.8f     /* rad/s at most */
+#define CREEP_EASE 0.7f     /* s: speeding up / slowing down */
+#define CREEP_STOP_AT 6.0f  /* to the walker: slows down to stand this far before him */
+static void summon_creep(void *dynamics, float dt) {
+    float at[3];
+    int to_walker;
+    if (!summon_creep_target(at, &to_walker) || !(dt > 0.0f)) return;
+    GetStateFn get = (GetStateFn)slot(dynamics, SLOT_GET_STATE);
+    SetStateFn set = (SetStateFn)slot(dynamics, SLOT_SET_STATE);
+    if (!get || !set) return;
+    _Alignas(16) BodyState state;
+    get(dynamics, &state);
+    _Alignas(16) float p[4], v[4], f[4], w[4];
+    _mm_store_ps(p, state.position), _mm_store_ps(v, state.velocity), _mm_store_ps(f, state.forward), _mm_store_ps(w, state.spin);
+    for (unsigned i = 0; i < 3; ++i)
+        if (!float_is_finite(p[i]) || !float_is_finite(v[i]) || !float_is_finite(f[i])) return;
+    float fl = root(f[0] * f[0] + f[2] * f[2]);
+    if (!(fl > 0.2f)) return; /* nose up or down: leave it to the physics */
+    float fx = f[0] / fl, fz = f[2] / fl;
+    float tx = at[0] - p[0], tz = at[2] - p[2], dist = root(tx * tx + tz * tz);
+    if (!(dist > 0.01f)) return;
+    float s = (fz * tx - fx * tz) / dist, c = (fx * tx + fz * tz) / dist; /* turn: + means spin +y */
+    float a = c >= 0.0f ? s : s >= 0.0f ? 2.0f - s : -2.0f - s;       /* about the angle, -2..2 */
+    float yaw = a * 1.5f;
+    if (yaw > CREEP_TURN) yaw = CREEP_TURN;
+    if (yaw < -CREEP_TURN) yaw = -CREEP_TURN;
+    float want = CREEP_SPEED;
+    if (to_walker) {
+        float left = (dist - CREEP_STOP_AT) * 0.8f;
+        want = left < want ? left : want;
+    } else if (dist * 0.8f < want) {
+        want = dist * 0.8f;
+    }
+    if (want < 1.2f) want = to_walker && dist <= CREEP_STOP_AT ? 0.0f : 1.2f;
+    if (c < 0.3f && want > 2.0f) want = 2.0f; /* turning round: slowly */
+    float along = v[0] * fx + v[2] * fz, x = dt / CREEP_EASE;
+    along += (want - along) * (x >= 1.0f ? 1.0f : x);
+    state.velocity = _mm_setr_ps(fx * along, v[1], fz * along, 0.0f); /* no sliding sideways */
+    state.spin = _mm_setr_ps(w[0], yaw * (along >= 0.0f ? 1.0f : -1.0f) * (along < 1.0f ? (along > 0.3f ? along : 0.3f) : 1.0f), w[2], 0.0f);
+    set(dynamics, &state);
+}
+
 /* V7.1 summon: the held car onto the road next to it (summon.c found it), level, along the road */
 static void summon_onto_road(void *dynamics, const float at[3], const float ahead[3]) {
     float length = root(ahead[0] * ahead[0] + ahead[2] * ahead[2]);
@@ -863,7 +910,8 @@ void noclip_car_update(void *car, float dt, float frame_dt, unsigned frame) {
         if (walk_body && walk_body != body && !begin(walk_body)) walk_body = NULL;
         if (walk_body && walk_body == parked_body) {
             summon = summon_phase();
-            if (summon == SUMMON_DRIVE || summon == SUMMON_BRAKE) follow = walk_body; /* the car drives itself */
+            if (summon == SUMMON_DRIVE || summon == SUMMON_BRAKE || summon == SUMMON_CREEP) follow = walk_body; /* the car drives itself */
+            if (summon == SUMMON_CREEP) summon_creep(walk_body, dt);
             else park = walk_body, hold_walking(park);
         }
     } else if (on && local) {
@@ -1037,6 +1085,11 @@ __declspec(dllexport) int Fh2TestNoclipFly(unsigned char *game_image, void *dyna
     fly((float)dt_ms / 1000.0f);
     place(dynamics);
     return 1;
+}
+/* one summon creep step on a body (tests/test_summon.py) */
+__declspec(dllexport) void Fh2TestNoclipCreep(unsigned char *game_image, void *dynamics, unsigned dt_ms) {
+    game = game_image;
+    summon_creep(dynamics, (float)dt_ms / 1000.0f);
 }
 /* sets the mode directly (tests/test_walking.py) */
 __declspec(dllexport) void Fh2TestNoclipMode(int mode) {

@@ -58,6 +58,43 @@ else:
     e.call('Fh2TestSummonTick', satnav)
     check(e.call('Fh2TestSummonPhase') == 0, 'GPS nicht aktiv: bleibt aus')
     e.call('Fh2TestNoclipMode', 0)
+    # creep (Gripline drives the car itself): a body facing +z at the origin, target 10 m to +x
+    block = e.alloc(0x5000)
+    I = block + 0x3a0
+    e.wq(I, GAME + 0x2eb4bb8)
+    def vec(off, *v):
+        e.mu.mem_write(I + off, struct.pack('<4f', *v, 0.0))
+    def get(off):
+        return struct.unpack('<3f', bytes(e.mu.mem_read(I + off, 12)))
+    vec(-0x390, 0.0, 0.0, 0.0); vec(-0x350, 0.0, -1.0, 0.0); vec(-0x340, 0.1, 0.0, 0.2)
+    vec(-0x380, 1.0, 0.0, 0.0); vec(-0x370, 0.0, 1.0, 0.0); vec(-0x360, 0.0, 0.0, 1.0)
+    e.call('Fh2TestSummonCreepSet', 0, 0, 0, 0)  # a float call needs xmm args: set through memory below
+    e.mu.reg_write(__import__('unicorn').x86_const.UC_X86_REG_XMM0, struct.unpack('<I', struct.pack('<f', 10.0))[0])
+    e.mu.reg_write(__import__('unicorn').x86_const.UC_X86_REG_XMM1, 0)
+    e.mu.reg_write(__import__('unicorn').x86_const.UC_X86_REG_XMM2, 0)
+    e.call('Fh2TestSummonCreepSet', 0, 0, 0, 0)
+    check(e.call('Fh2TestSummonPhase') == 4, 'Rangieren an')
+    e.call('Fh2TestNoclipCreep', GAME, I, 100)
+    v, w = get(-0x350), get(-0x340)
+    check(0.25 < v[2] < 0.3 and abs(v[0]) < 1e-4 and abs(v[1] + 1.0) < 1e-4, f'faehrt langsam an (Ziel seitlich: hoechstens 2 m/s), entlang der Nase, Fallen bleibt: {v}')
+    check(abs(w[1] - 0.24) < 1e-3 and abs(w[0] - 0.1) < 1e-4 and abs(w[2] - 0.2) < 1e-4, f'dreht nach +x, langsam beim Anfahren, Kippen bleibt der Physik: {w}')
+    e.mu.reg_write(__import__('unicorn').x86_const.UC_X86_REG_XMM0, 0)
+    e.mu.reg_write(__import__('unicorn').x86_const.UC_X86_REG_XMM2, struct.unpack('<I', struct.pack('<f', 100.0))[0])
+    e.call('Fh2TestSummonCreepSet', 0, 0, 0, 0)  # straight ahead, 100 m
+    for _ in range(40):
+        e.call('Fh2TestNoclipCreep', GAME, I, 100)
+    v, w = get(-0x350), get(-0x340)
+    check(4.0 < v[2] <= 4.5 + 1e-3 and abs(w[1]) < 1e-4, f'geradeaus nach 4 s etwa 16 km/h, keine Drehung: {v} {w}')
+    # to the walker 5 m ahead: stops (wants 0) before reaching him
+    e.mu.reg_write(__import__('unicorn').x86_const.UC_X86_REG_XMM0, 0)
+    e.mu.reg_write(__import__('unicorn').x86_const.UC_X86_REG_XMM2, struct.unpack('<I', struct.pack('<f', 5.0))[0])
+    e.call('Fh2TestSummonCreepSet', 0, 0, 0, 1)
+    for _ in range(40):
+        e.call('Fh2TestNoclipCreep', GAME, I, 100)
+    v = get(-0x350)
+    check(abs(v[2]) < 0.1, f'zum Spieler: bleibt 6 m davor stehen: {v}')
+    e.call('Fh2TestSummonCreepSet', 0, 0, 0, -1)
+    check(e.call('Fh2TestSummonPhase') == 0, 'Rangieren aus')
     # the code bytes checked in summon_start, changed: summon stays off
     e2 = KEmu(DLL, tempfile.mkdtemp(prefix='eo-summon2-'))
     for s in pe.sections:
