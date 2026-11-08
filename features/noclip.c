@@ -30,6 +30,7 @@
 #include "wheel_buttons.h"
 #include "walking.h"
 #include "drive_look.h"
+#include "summon.h"
 
 #define RVA_DYNAMICS_VTABLE 0x2eb4bb8u
 #define RVA_DYNAMICS_REF_VTABLE 0x2eb5e18u
@@ -118,6 +119,7 @@ int noclip_own_look(void) {
 #define XI_LS 0x0040u
 #define XI_A 0x1000u
 #define XI_B 0x2000u
+#define XI_X 0x4000u
 #define XI_Y 0x8000u
 #define PAD_FRESH_MS 250u
 #define STICK_DEAD 0.24f
@@ -185,6 +187,7 @@ void noclip_pad_input(unsigned user, unsigned char *gamepad) {
     if (on == MODE_WALK) {
         /* on foot: Y gets back in; the game only keeps Start and Back (pause, map), the car stands */
         if (pressed & XI_Y) InterlockedExchange(&pad_request, MODE_WALK);
+        if (pressed & XI_X) summon_request(); /* V7.1 summon the car */
         unsigned short keep = (unsigned short)(buttons & (XI_START | XI_BACK));
         memory_copy(gamepad, &keep, sizeof(keep));
         for (unsigned i = 2; i < 12; ++i) gamepad[i] = 0; /* triggers and sticks */
@@ -339,17 +342,241 @@ static void put_back(void *dynamics) {
 }
 
 /* walking: the car at its place, or (far from it) under the ground below the walker, see walking.h */
+static float hidden_last[3];
+static int hidden_have_last;
 static void hold_walking(void *dynamics) {
     float at[3];
     if (!walking_car_hidden(at) || !float_is_finite(at[0]) || !float_is_finite(at[1]) || !float_is_finite(at[2])) {
+        hidden_have_last = 0;
         put_back(dynamics);
         return;
     }
     SetStateFn set = (SetStateFn)slot(dynamics, SLOT_SET_STATE);
     if (!set) return;
+    { /* diagnostics (walking.c): did the game's physics move the hidden car since it was put there? */
+        static unsigned logged;
+        GetStateFn get = (GetStateFn)slot(dynamics, SLOT_GET_STATE);
+        if (get && hidden_have_last && logged < 3) {
+            _Alignas(16) BodyState now;
+            get(dynamics, &now);
+            _Alignas(16) float p[4];
+            _mm_store_ps(p, now.position);
+            float up = p[1] - hidden_last[1], ax = p[0] - hidden_last[0], az = p[2] - hidden_last[2];
+            /* the walker moves it a few cm per update; more is the physics */
+            if (float_is_finite(up) && (up > 0.5f || up < -0.5f || ax * ax + az * az > 1.0f)) {
+                ++logged;
+                log_append_value("WALKING DIAG: the hidden car was moved by the game, cm up: ", (int)(up * 100.0f));
+            }
+        }
+        hidden_last[0] = at[0], hidden_last[1] = at[1], hidden_last[2] = at[2], hidden_have_last = 1;
+    }
     _Alignas(16) BodyState state = parked;
     state.position = _mm_setr_ps(at[0], at[1], at[2], 0.0f);
+    { /* Marvin 08.11.2026: the picture leaned with the hidden car's own lean (it depended on the way
+         one looked relative to the car) - hidden, the car is held level, only its heading kept */
+        _Alignas(16) float f[4];
+        _mm_store_ps(f, parked.forward);
+        float l = root(f[0] * f[0] + f[2] * f[2]);
+        if (l > 0.1f) {
+            float fx = f[0] / l, fz = f[2] / l;
+            _Alignas(16) float r[4];
+            _mm_store_ps(r, parked.right);
+            float side = r[0] * fz - r[2] * fx >= 0.0f ? 1.0f : -1.0f; /* the right row's handedness */
+            state.forward = _mm_setr_ps(fx, 0.0f, fz, 0.0f);
+            state.up = _mm_setr_ps(0.0f, 1.0f, 0.0f, 0.0f);
+            state.right = _mm_setr_ps(side * fz, 0.0f, -side * fx, 0.0f);
+        }
+    }
     set(dynamics, &state);
+}
+
+/* V7.1 summon (summon.h), after the game's update: where the summoned car is now becomes its place
+   (getting in, walking off and the brake all use it); while braking its speed is taken away softly */
+#define SUMMON_BRAKE_DECEL 6.0f /* m/s^2 */
+static void summon_follow(void *dynamics, float dt, int phase) {
+    GetStateFn get = (GetStateFn)slot(dynamics, SLOT_GET_STATE);
+    SetStateFn set = (SetStateFn)slot(dynamics, SLOT_SET_STATE);
+    if (!get || !set) return;
+    _Alignas(16) BodyState state;
+    get(dynamics, &state);
+    _Alignas(16) float p[4], v[4], r[4], f[4];
+    _mm_store_ps(p, state.position), _mm_store_ps(v, state.velocity);
+    _mm_store_ps(r, state.right), _mm_store_ps(f, state.forward);
+    for (unsigned i = 0; i < 3; ++i)
+        if (!float_is_finite(p[i]) || !float_is_finite(v[i])) return;
+    float speed = root(v[0] * v[0] + v[1] * v[1] + v[2] * v[2]);
+    { /* creeping: the real way gone since the last frame (the set speed says little: the brakes eat it,
+         Gripline makes up the rest, an obstacle pushes back) */
+        static float last[3];
+        static int have;
+        if (phase == SUMMON_CREEP && have && dt > 0.0f) {
+            float dx = p[0] - last[0], dz = p[2] - last[2];
+            speed = root(dx * dx + dz * dz) / dt;
+        }
+        last[0] = p[0], last[1] = p[1], last[2] = p[2];
+        have = phase == SUMMON_CREEP;
+    }
+    if (phase == SUMMON_BRAKE) {
+        /* a steady brake (the same force from any speed), the last bit softer */
+        float left = speed - SUMMON_BRAKE_DECEL * (dt > 0.0f ? dt : 0.0f) * (speed < 2.0f ? 0.5f : 1.0f);
+        float keep = speed > 0.0f && left > 0.3f ? left / speed : 0.0f;
+        state.velocity = _mm_mul_ps(state.velocity, _mm_set1_ps(keep));
+        state.spin = _mm_mul_ps(state.spin, _mm_set1_ps(keep));
+        set(dynamics, &state);
+        if (keep == 0.0f) summon_braked();
+        speed *= keep;
+    }
+    parked = state;
+    parked.velocity = _mm_setzero_ps();
+    parked.spin = _mm_setzero_ps();
+    walking_move_car(p, r, f);
+    summon_car_seen(p, speed);
+}
+
+/* V7.1 summon, SUMMON_CREEP (Marvin 08.11.2026: the car should come to him also from off the road,
+   not appear on the road; then "make it cooler"): before the game's update the car gets a speed along
+   its own nose and a turn towards the target, like a car driven at a calm pace; the game's physics does
+   the rest (ground, slopes, wheels, collisions). Up / down speed stays the physics'.
+   Speed (F8 style: calm 16 / normal 22 / sporty 31 km/h): speeds up and brakes with limited force, slows in turns, and plans its stop (brake curve) so
+   it comes to a stand at the target instead of braking at the last moment.
+   To the walker it parks beside him: the target is SUMMON_PARK_SIDE m beside him, on the side that
+   needs the least turning, fixed once the car is near, so it ends next to him with its side to him. */
+#define CREEP_TURN 0.8f        /* rad/s at most */
+#define CREEP_DECEL 6.0f       /* m/s^2 at most braking (from the AI's speed after the hand-over) */
+#define CREEP_PLAN 2.0f        /* m/s^2 the planned soft stop */
+#define CREEP_PARK_FIX 12.0f   /* metres to the walker: the parking side and direction stay */
+#define CREEP_CLEAR 2.6f       /* metres car centre -> walker: never nearer */
+static unsigned creep_seen;    /* the creep the parking side belongs to */
+/* The speed Gripline wants the car at, kept here and not read back from the car: the parked car's own
+   brakes take most of each frame's speed away again (Marvin's log 08.11.2026: the car never got going,
+   "stuck" in the open), so the speed is set anew every frame from this. */
+static float creep_command;
+/* Where the car was put last frame and how far along its nose it was meant to go: what the parked car's
+   brakes / tyres held back of that is added to its place (Marvin 08.11.2026: "it only gives a little
+   gas"). An obstacle still stops it - the physics pushes it back, the car does not get on, summon.c sees
+   it standing (summon_follow measures the real way gone). */
+static float creep_last[3], creep_meant;
+static float park_offset[2];
+static int park_side, park_fixed;
+static void summon_creep(void *dynamics, float dt) {
+    float at[3];
+    int to_walker;
+    unsigned serial = summon_creep_target(at, &to_walker);
+    if (!serial || !(dt > 0.0f)) return;
+    int fresh = serial != creep_seen;
+    if (fresh) creep_seen = serial, park_side = 0, park_fixed = 0;
+    GetStateFn get = (GetStateFn)slot(dynamics, SLOT_GET_STATE);
+    SetStateFn set = (SetStateFn)slot(dynamics, SLOT_SET_STATE);
+    if (!get || !set) return;
+    _Alignas(16) BodyState state;
+    get(dynamics, &state);
+    _Alignas(16) float p[4], v[4], f[4], w[4];
+    _mm_store_ps(p, state.position), _mm_store_ps(v, state.velocity), _mm_store_ps(f, state.forward), _mm_store_ps(w, state.spin);
+    for (unsigned i = 0; i < 3; ++i)
+        if (!float_is_finite(p[i]) || !float_is_finite(v[i]) || !float_is_finite(f[i])) return;
+    float fl = root(f[0] * f[0] + f[2] * f[2]);
+    if (!(fl > 0.2f)) return; /* nose up or down: leave it to the physics */
+    float fx = f[0] / fl, fz = f[2] / fl;
+    float walker_dist = -1.0f;
+    if (to_walker) { /* the parking place beside the walker */
+        float wx = at[0] - p[0], wz = at[2] - p[2];
+        walker_dist = root(wx * wx + wz * wz);
+        if (!park_fixed && walker_dist > 0.5f) {
+            float nx = -wz / walker_dist, nz = wx / walker_dist; /* across the way to him */
+            if (!park_side) { /* the side the nose is nearer to */
+                float ax = wx + nx * SUMMON_PARK_SIDE, az = wz + nz * SUMMON_PARK_SIDE;
+                float bx = wx - nx * SUMMON_PARK_SIDE, bz = wz - nz * SUMMON_PARK_SIDE;
+                float ca = (fx * ax + fz * az) / root(ax * ax + az * az), cb = (fx * bx + fz * bz) / root(bx * bx + bz * bz);
+                park_side = ca >= cb ? 1 : -1;
+            }
+            park_offset[0] = nx * park_side * SUMMON_PARK_SIDE, park_offset[1] = nz * park_side * SUMMON_PARK_SIDE;
+            if (walker_dist < CREEP_PARK_FIX) park_fixed = 1;
+        }
+        at[0] += park_offset[0], at[2] += park_offset[1];
+    }
+    float tx = at[0] - p[0], tz = at[2] - p[2], dist = root(tx * tx + tz * tz);
+    float along = v[0] * fx + v[2] * fz; /* a new creep starts from the car's own speed (the AI's hand-over) */
+    if (fresh || !float_is_finite(creep_command)) {
+        creep_command = along;
+        creep_last[0] = p[0], creep_last[1] = p[1], creep_last[2] = p[2], creep_meant = 0.0f;
+    } else {
+        along = creep_command;
+    }
+    float held_back = 0.0f; /* metres along the nose the car fell short of last frame */
+    {
+        float gone = (p[0] - creep_last[0]) * fx + (p[2] - creep_last[2]) * fz;
+        held_back = creep_meant - gone;
+        if (creep_meant >= 0.0f) held_back = held_back < 0.0f ? 0.0f : held_back > creep_meant ? creep_meant : held_back;
+        else held_back = held_back > 0.0f ? 0.0f : held_back < creep_meant ? creep_meant : held_back;
+    }
+    float want = 0.0f, yaw = 0.0f;
+    if (dist > 0.01f) {
+        float s = (fz * tx - fx * tz) / dist, c = (fx * tx + fz * tz) / dist; /* turn: + means spin +y */
+        float a = c >= 0.0f ? s : s >= 0.0f ? 2.0f - s : -2.0f - s;       /* about the angle, -2..2 */
+        if (dist > 1.5f) yaw = a * 1.5f; /* at the target: no turning on the spot */
+        if (yaw > CREEP_TURN) yaw = CREEP_TURN;
+        if (yaw < -CREEP_TURN) yaw = -CREEP_TURN;
+        float stop_left = dist - (to_walker ? 0.3f : 0.0f);
+        want = stop_left > 0.0f ? root(2.0f * CREEP_PLAN * stop_left) : 0.0f; /* the planned stop */
+        if (want > summon_creep_speed()) want = summon_creep_speed();
+        float turning = 2.0f + (summon_creep_speed() - 2.0f) * (c > 0.0f ? c : 0.0f); /* slower in turns, 2 m/s turning round */
+        if (want > turning) want = turning;
+        if (!to_walker && want < 1.2f) want = 1.2f; /* onto the road: keeps rolling, summon.c takes over */
+        if (to_walker && dist < 0.6f) want = 0.0f;
+        if (to_walker && want > 0.0f && want < 0.8f) want = 0.8f;
+    }
+    if (to_walker && walker_dist >= 0.0f && walker_dist < CREEP_CLEAR) want = 0.0f; /* never onto the walker */
+    { /* never onto the walker, whatever the target (also the way round an obstacle) */
+        float wp[3];
+        if (walking_walker_position(wp)) {
+            float wx = wp[0] - p[0], wz = wp[2] - p[2], wd = root(wx * wx + wz * wz);
+            if (wd < CREEP_CLEAR || (wd < CREEP_CLEAR + 2.0f && (fx * wx + fz * wz) > 0.0f && !to_walker)) want = 0.0f;
+        }
+    }
+    if (summon_creep_reverse()) want = -2.0f, yaw = 0.0f; /* stuck: back up straight, summon.c then drives round */
+    float up = summon_creep_accel() * dt, down = CREEP_DECEL * dt;
+    if (want > along) along = along + up < want ? along + up : want;
+    else along = along - down > want ? along - down : want;
+    creep_command = along;
+    float turn_scale = along < 1.0f ? (along > 0.3f ? along : 0.3f) : 1.0f;
+    if (want == 0.0f && along < 0.3f) turn_scale = 0.0f; /* standing: no turning on the spot */
+    /* Steering: the car is turned directly (its whole orientation about the world's up axis), not through
+       its spin - the parked car's tyres took a set spin away at once (Marvin 08.11.2026: "it only goes
+       straight ahead and does not steer"). A small angle each frame; + turns the nose from +z towards +x. */
+    float turn = yaw * (along >= 0.0f ? 1.0f : -1.0f) * turn_scale * dt;
+    if (turn > 0.2f) turn = 0.2f;
+    if (turn < -0.2f) turn = -0.2f;
+    float ts = turn * (1.0f - turn * turn / 6.0f), tc = 1.0f - turn * turn / 2.0f;
+    _Alignas(16) float r4[4], u4[4];
+    _mm_store_ps(r4, state.right), _mm_store_ps(u4, state.up);
+#define CREEP_YAW(q) _mm_setr_ps(q[0] * tc + q[2] * ts, q[1], q[2] * tc - q[0] * ts, 0.0f)
+    state.right = CREEP_YAW(r4), state.up = CREEP_YAW(u4), state.forward = CREEP_YAW(f);
+#undef CREEP_YAW
+    float nfx = fx * tc + fz * ts, nfz = fz * tc - fx * ts;
+    state.velocity = _mm_setr_ps(nfx * along, v[1], nfz * along, 0.0f); /* along the nose, no sliding sideways */
+    float px = p[0] + nfx * held_back, pz = p[2] + nfz * held_back;
+    state.position = _mm_setr_ps(px, p[1], pz, 0.0f);
+    creep_last[0] = px, creep_last[1] = p[1], creep_last[2] = pz, creep_meant = along * dt;
+    state.spin = _mm_setr_ps(w[0], 0.0f, w[2], 0.0f); /* the turn is ours; tilting stays the physics' */
+    set(dynamics, &state);
+}
+
+/* V7.1 summon: the held car onto the road next to it (summon.c found it), level, along the road */
+static void summon_onto_road(void *dynamics, const float at[3], const float ahead[3]) {
+    float length = root(ahead[0] * ahead[0] + ahead[2] * ahead[2]);
+    if (!(length > 0.1f)) return;
+    float fx = ahead[0] / length, fz = ahead[2] / length;
+    _Alignas(16) float r[4], f[4];
+    _mm_store_ps(r, parked.right), _mm_store_ps(f, parked.forward);
+    float m = r[0] * f[2] - r[2] * f[0] >= 0.0f ? 1.0f : -1.0f; /* the game's right row, as heading_from */
+    parked.position = _mm_setr_ps(at[0], at[1], at[2], 0.0f);
+    parked.right = _mm_setr_ps(m * fz, 0.0f, -m * fx, 0.0f);
+    parked.up = _mm_setr_ps(0.0f, 1.0f, 0.0f, 0.0f);
+    parked.forward = _mm_setr_ps(fx, 0.0f, fz, 0.0f);
+    parked.velocity = _mm_setzero_ps(), parked.spin = _mm_setzero_ps();
+    put_back(dynamics);
+    float right[3] = {m * fz, 0.0f, -m * fx}, forward[3] = {fx, 0.0f, fz};
+    walking_move_car(at, right, forward);
 }
 
 static void sin_cos(float a, float *s, float *c) {
@@ -631,6 +858,15 @@ static void handle_toggle(void) {
     }
     int held = keyboard_held(KEYBOARD_HOLD_NOCLIP), free_held = keyboard_held(KEYBOARD_HOLD_FREECAM);
     int walk_held = keyboard_held(KEYBOARD_HOLD_WALK);
+    { /* V7.1 summon key, only while walking (summon.h) */
+        static int summon_held;
+        int held_now = keyboard_held(KEYBOARD_HOLD_SUMMON);
+        if (held_now && !summon_held && on == MODE_WALK && !fade_stage) {
+            if (summon_ready()) summon_request();
+            else summon_warning_sound(), card("Auto rufen geht nicht\nSpiel-Code anders (Gripline.log)", "Summon not working\nGame code differs (Gripline.log)");
+        }
+        summon_held = held_now;
+    }
     int pressed = held && !key_held, free_pressed = free_held && !free_key_held, walk_pressed = walk_held && !walk_key_held;
     key_held = held, free_key_held = free_held, walk_key_held = walk_held;
     LONG request = InterlockedExchange(&pad_request, 0); /* controller: LS + D-pad up / down / right, Y */
@@ -773,13 +1009,20 @@ void noclip_car_update(void *car, float dt, float frame_dt, unsigned frame) {
     void *dynamics = NULL;
     int local = game && car && is_local_car(car);
     if (local) traffic_load_reached(dt); /* the start reached the road (load guard, traffic_files.c) */
-    void *park = NULL;
+    void *park = NULL, *follow = NULL;
+    int summon = SUMMON_IDLE;
     if (local && (on == MODE_WALK || driver_hidden_car == car)) walk_driver(car, on == MODE_WALK && walking_active());
     if (on == MODE_WALK && local) {
         /* on foot: the car stands where it was; the walker is moved in the camera (walking.c) */
         void *walk_body = car_body(car);
         if (walk_body && walk_body != body && !begin(walk_body)) walk_body = NULL;
-        if (walk_body && walk_body == parked_body) park = walk_body, hold_walking(park);
+        if (walk_body && walk_body == parked_body) {
+            summon = summon_phase();
+            if (summon == SUMMON_DRIVE || summon == SUMMON_BRAKE || summon == SUMMON_CREEP) { /* the car drives itself */
+                follow = walk_body;
+                if (summon == SUMMON_CREEP) summon_creep(walk_body, dt);
+            } else park = walk_body, hold_walking(park);
+        }
     } else if (on && local) {
         dynamics = car_body(car);
         if (dynamics && dynamics != body && !begin(dynamics)) dynamics = NULL;
@@ -804,7 +1047,17 @@ void noclip_car_update(void *car, float dt, float frame_dt, unsigned frame) {
     }
     original(car, dt, frame_dt, frame);
     if (dynamics && on) place(dynamics); /* ... and what the game moved in it is taken back */
-    else if (park && on == MODE_WALK) hold_walking(park);
+    else if (follow) summon_follow(follow, dt, summon);
+    else if (park && on == MODE_WALK) {
+        hold_walking(park);
+        if (summon == SUMMON_HOLD) { /* the route is planned: the car waits at its place */
+            float at[3], ahead[3];
+            if (summon_take_place(at, ahead)) summon_onto_road(park, at, ahead);
+            _Alignas(16) float p[4];
+            _mm_store_ps(p, parked.position);
+            summon_car_seen(p, 0.0f);
+        }
+    }
     else if (park) put_back(park);
     else if (local && !on) sample_trip(car, dt);
     no_damage_after_update(car, local, local_car != NULL);
@@ -941,6 +1194,11 @@ __declspec(dllexport) int Fh2TestNoclipFly(unsigned char *game_image, void *dyna
     fly((float)dt_ms / 1000.0f);
     place(dynamics);
     return 1;
+}
+/* one summon creep step on a body (tests/test_summon.py) */
+__declspec(dllexport) void Fh2TestNoclipCreep(unsigned char *game_image, void *dynamics, unsigned dt_ms) {
+    game = game_image;
+    summon_creep(dynamics, (float)dt_ms / 1000.0f);
 }
 /* sets the mode directly (tests/test_walking.py) */
 __declspec(dllexport) void Fh2TestNoclipMode(int mode) {
