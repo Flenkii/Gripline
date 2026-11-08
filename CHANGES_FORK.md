@@ -84,7 +84,7 @@ Plugin build on Azimuth 1.0.3 (October 29, 2026, tested in the game by Flenkii):
 - `features/summon.c/.h` – summon the car while walking (G / controller X): the game's AI drives it along a GPS
   route, Gripline drives it itself off the road, the last metres and when the GPS / AI cannot (backs up and drives
   round obstacles), parks it beside the walker; live card with distance, speed and arrival time; autopilot sounds
-  (`assets/sounds/summon_*.wav`, `features/summon_sounds.h` from `tools/make_summon_sounds.py`); F8 > Settings:
+  (own tones on / off / warning: `tools/make_summon_tones.py` -> `assets/sounds/summon_*.wav` -> `features/summon_sounds.h` via `tools/make_summon_sounds.py`); F8 > Settings:
   driving style (Calm / Normal / Sporty, `SummonStyle`) and sounds (`SummonSounds`) in Gripline.ini
 - what's-new cards for V7.1
 

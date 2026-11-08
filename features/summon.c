@@ -429,8 +429,8 @@ static void creep_begin(const float at[3], int to_walker, ULONGLONG now) {
 }
 
 /* AI off, route off, GPS destination off; then the car brakes (still walking) or nothing */
-static void stop(int brake) {
-    sound(summon_end_wav); /* Marvin 08.11.2026: "autopilot off" when the summon ends, however */
+static void stop_with(int brake, const void *wav) {
+    sound(wav);
     release_ai();
     reset();
     if (brake && walking_active()) {
@@ -441,17 +441,33 @@ static void stop(int brake) {
     }
 }
 
+/* ends a summon that went well or was cancelled: "autopilot off" */
+static void stop(int brake) {
+    stop_with(brake, summon_end_wav);
+}
+
+/* ends a summon that went wrong (no route, stuck, ...): the warning tone (Marvin 08.11.2026) */
+static void fail(int brake) {
+    stop_with(brake, summon_warning_wav);
+}
+
+void summon_warning_sound(void) {
+    sound(summon_warning_wav);
+}
+
 static void begin(void *satnav, ULONGLONG now) {
     if (!walking_active()) return;
     int arrived;
     unsigned char active = 0;
     if (!memory_read((unsigned char *)satnav + 0x160, &active, 1) || !active) {
         log_append("SUMMON: the GPS is not active.\r\n");
+        summon_warning_sound();
         card("Auto rufen geht gerade nicht\nGPS nicht aktiv", "Can't summon the car now\nGPS not active");
         return;
     }
     if (!tracker_matches(tracker, satnav)) {
         log_append("SUMMON: no route tracker for this GPS.\r\n");
+        summon_warning_sound();
         card("Auto rufen geht gerade nicht\nKein Routen-Tracker (Gripline.log)", "Can't summon the car now\nNo route tracker (Gripline.log)");
         return;
     }
@@ -459,6 +475,7 @@ static void begin(void *satnav, ULONGLONG now) {
     if (!car || driver_mode(car) != 1) {
         log_append_value("SUMMON: the car is not driven by the player, driver mode: ", car ? driver_mode(car) : -2);
         release_car(car);
+        summon_warning_sound();
         card("Auto rufen geht gerade nicht\nAuto nicht bereit (Gripline.log)", "Can't summon the car now\nCar not ready (Gripline.log)");
         return;
     }
@@ -563,7 +580,7 @@ static void tick(void *satnav) {
     }
     if (!drive_tracker) {
         log_append("SUMMON: the route tracker went away - summon stopped.\r\n");
-        stop(1);
+        fail(1);
         card("Auto rufen abgebrochen\nRoute weg", "Summon stopped\nRoute gone");
         return;
     }
@@ -623,7 +640,7 @@ static void tick(void *satnav) {
                                         : "SUMMON: the GPS found no route to the walker.\r\n";
                 if (creep_instead(gap, walker_ok, walker, now, why)) return;
                 log_append(why);
-                stop(0);
+                fail(0);
                 card("Auto rufen geht hier nicht\nKeine Route zu dir gefunden (Gripline.log)",
                      "Can't summon the car here\nNo route to you found (Gripline.log)");
             }
@@ -633,7 +650,7 @@ static void tick(void *satnav) {
             if (creep_instead(gap, walker_ok, walker, now, "SUMMON: the route tracker could not start (autodrive running?).\r\n"))
                 return;
             log_append("SUMMON: the route tracker could not start (autodrive running?).\r\n");
-            stop(0);
+            fail(0);
             card("Auto rufen geht gerade nicht\nRoute nicht startbar (Gripline.log)", "Can't summon the car now\nRoute could not start (Gripline.log)");
             return;
         }
@@ -641,7 +658,7 @@ static void tick(void *satnav) {
         if (!set_ai(drive_car, 1)) {
             if (creep_instead(gap, walker_ok, walker, now, "SUMMON: the AI driver could not take the car.\r\n")) return;
             log_append("SUMMON: the AI driver could not take the car.\r\n");
-            stop(0);
+            fail(0);
             card("Auto rufen geht gerade nicht\nKI-Fahrer nicht verf\xc3\xbc""gbar (Gripline.log)",
                  "Can't summon the car now\nAI driver not available (Gripline.log)");
             return;
@@ -715,13 +732,15 @@ static void tick(void *satnav) {
             creep_step = 1, creep_step_until = now + CREEP_BACK_MS;
             InterlockedExchange(&creep_reverse, 1);
             log_append_value("SUMMON: the car is stuck - it backs up and drives round, try: ", creep_tries);
-            if (creep_tries == 1)
+            if (creep_tries == 1) {
+                summon_warning_sound();
                 card("Dein Auto steckt kurz fest\nEs setzt zur\xc3\xbc""ck und f\xc3\xa4hrt drum herum", "Your car got stuck\nIt backs up and drives round");
+            }
             return;
         }
         if ((now - creep_from > 2000u && now - creep_slow_since > CREEP_STUCK_MS) || now - creep_from > CREEP_LIMIT_MS) {
             log_append_value("SUMMON: the car does not get on while creeping (something in the way?), metres to the walker: ", (int)gap);
-            stop(1);
+            fail(1);
             card("Auto rufen abgebrochen\nDas Auto kommt nicht weiter (Hindernis?)", "Summon stopped\nThe car can't get through (something in the way?)");
         }
         return;
@@ -730,7 +749,7 @@ static void tick(void *satnav) {
     if (driver_mode(drive_car) != 0) {
         log_append("SUMMON: the game took the car back from the AI - summon stopped.\r\n");
         driving_ai = 0;
-        stop(1);
+        fail(1);
         return;
     }
     int arrived = 0;
@@ -761,7 +780,8 @@ static void tick(void *satnav) {
         log_append_value(arrived ? "SUMMON: end of the route (nearest road), metres to the walker: "
                                  : "SUMMON: the route is gone, metres to the walker: ",
                          (int)gap);
-        stop(1);
+        if (arrived) stop(1);
+        else fail(1);
         if (arrived) card("Dein Auto ist da\nAn der n\xc3\xa4""chsten Stra\xc3\x9f""e - geh hin, F/Y = einsteigen",
                           "Your car is here\nAt the nearest road - walk over, F/Y = get in");
         else card("Auto rufen abgebrochen\nRoute weg (Gripline.log)", "Summon stopped\nRoute gone (Gripline.log)");
@@ -771,7 +791,7 @@ static void tick(void *satnav) {
     if (!got_going && now - drive_from > START_STALL_MS) {
         if (creep_instead(gap, walker_ok, walker, now, "SUMMON: the AI did not get the car going.\r\n")) return;
         log_append_value("SUMMON: the AI did not get the car going, metres to the walker: ", (int)gap);
-        stop(1);
+        fail(1);
         card("Auto rufen abgebrochen\nDas Auto kommt nicht los - park es n\xc3\xa4her an einer Stra\xc3\x9f""e",
              "Summon stopped\nThe car can't get going - park it closer to a road");
         return;
@@ -781,7 +801,7 @@ static void tick(void *satnav) {
         log_append_value(now - drive_from > DRIVE_LIMIT_MS ? "SUMMON: took too long, metres to the walker: "
                                                            : "SUMMON: the car is stuck, metres to the walker: ",
                          (int)gap);
-        stop(1);
+        fail(1);
         card("Auto rufen abgebrochen\nDas Auto steckt fest", "Summon stopped\nThe car is stuck");
     }
 }
@@ -807,7 +827,7 @@ static void *satnav_update(void *self, float dt) {
 static void satnav_deactivate(void *self) {
     if (self == drive_satnav && (phase == SUMMON_HOLD || phase == SUMMON_DRIVE || phase == SUMMON_CREEP)) {
         log_append("SUMMON: the GPS was switched off - summon stopped.\r\n");
-        stop(1);
+        fail(1);
     }
     ((ActionFn)previous_satnav_deactivate)(self);
 }

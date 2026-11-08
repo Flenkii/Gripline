@@ -812,7 +812,7 @@ static void handle_toggle(void) {
         int held_now = keyboard_held(KEYBOARD_HOLD_SUMMON);
         if (held_now && !summon_held && on == MODE_WALK && !fade_stage) {
             if (summon_ready()) summon_request();
-            else card("Auto rufen geht nicht\nSpiel-Code anders (Gripline.log)", "Summon not working\nGame code differs (Gripline.log)");
+            else summon_warning_sound(), card("Auto rufen geht nicht\nSpiel-Code anders (Gripline.log)", "Summon not working\nGame code differs (Gripline.log)");
         }
         summon_held = held_now;
     }

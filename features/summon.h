@@ -43,6 +43,8 @@ enum {
                      road to the road, and the last metres to the walker (Marvin 08.11.2026) */
 };
 int summon_phase(void);
+/* the summon warning tone (when summoning cannot work), if the sounds are on */
+void summon_warning_sound(void);
 
 /* F8 > Einstellungen (V7.1): how the car drives where Gripline drives it, and the autopilot sounds */
 enum { SUMMON_STYLE_CALM, SUMMON_STYLE_NORMAL, SUMMON_STYLE_SPORTY, SUMMON_STYLE_COUNT };
