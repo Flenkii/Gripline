@@ -97,5 +97,11 @@ int keyboard_menu_mouse(int *x, int *y, int *buttons, int *wheel, int *client_w,
 void keyboard_menu_pulse(unsigned input);
 int keyboard_mouse_center(void);
 void keyboard_set_mouse_center(int seconds);
+/* V7.1 mouse look sensitivity in percent (0 = off, max 300): walking (WalkMouseLook) and in the car
+   (DriveMouseLook), FH2_Keyboard.ini; the F8 menu changes them, they work at once */
+int keyboard_walk_mouse_look(void);
+void keyboard_set_walk_mouse_look(int percent);
+int keyboard_drive_mouse_look(void);
+void keyboard_set_drive_mouse_look(int percent);
 
 #endif
