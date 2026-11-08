@@ -48,7 +48,7 @@
 #define DRIVE_LIMIT_MS 300000u /* at most 5 minutes */
 #define STUCK_SPEED 1.0f       /* m/s */
 #define STUCK_MS 20000u
-#define START_STALL_MS 6000u   /* the AI has not got going at all (car off the road?) */
+#define START_STALL_MS 10000u  /* the AI has not got going at all (car off the road / facing away?) */
 #define NEAR_END 30.0f         /* the GPS drops its route some 10-15 m before the end (Marvin's log 08.11.):
                                   a route gone this near the walker means the car has come */
 #define SHORT_START 30.0f      /* nearer than this the GPS route is too short for the AI to set off */
@@ -100,6 +100,7 @@ static SRWLOCK place_lock = SRWLOCK_INIT;
 static float place_at[3], place_forward[3];
 static volatile LONG place_pending;
 static int got_going; /* the car has moved since the AI took it */
+static float drive_top; /* the highest speed seen while the AI has the car (log) */
 static int road_checked;
 static int road_ok; /* the nearest-road query is the game's code as found */
 /* SUMMON_CREEP: game thread sets, car update thread reads */
@@ -582,8 +583,8 @@ static int creep_instead(float gap, int walker_ok, const float walker[3], ULONGL
     log_append_value("SUMMON: Gripline drives the car to the walker itself, metres: ", (int)gap);
     release_ai();
     creep_begin(walker, 1, now);
-    tinted("Dein Auto kommt\nEs f\xc3\xa4hrt querfeldein zu dir (G/X = abbrechen)",
-           "Your car is on its way\nIt drives cross-country to you (G/X = cancel)", NOTIFY_COLOR_GREEN);
+    tinted("Dein Auto kommt\nGripline f\xc3\xa4hrt es selbst zu dir (G/X = abbrechen)",
+           "Your car is on its way\nGripline drives it to you itself (G/X = cancel)", NOTIFY_COLOR_GREEN);
     return 1;
 }
 
@@ -680,6 +681,7 @@ static void tick(void *satnav) {
         }
         driving_ai = 1;
         got_going = 0;
+        drive_top = 0.0f;
         drive_from = slow_since = now;
         InterlockedExchange(&phase, SUMMON_DRIVE);
         log_append("SUMMON: the AI drives the car to the walker.\r\n");
@@ -803,7 +805,19 @@ static void tick(void *satnav) {
         return;
     }
     if (speed >= STUCK_SPEED) slow_since = now, got_going = 1;
+    if (speed > drive_top) drive_top = speed;
     if (!got_going && now - drive_from > START_STALL_MS) {
+        { /* why (Marvin 08.11.2026: the AI never got going any more) */
+            void *task = NULL;
+            int ended = 0;
+            void *r = route_of(satnav, &ended);
+            if (drive_tracker) memory_read((unsigned char *)drive_tracker + 0x128, &task, 8);
+            log_append_value("SUMMON: AI stall - driver mode (0 = AI): ", driver_mode(drive_car));
+            log_append_value("SUMMON: AI stall - route valid: ", r != NULL);
+            log_append_value("SUMMON: AI stall - route says arrived: ", ended);
+            log_append_value("SUMMON: AI stall - tracker follows the route: ", task != NULL);
+            log_append_value("SUMMON: AI stall - top speed cm/s: ", (int)(drive_top * 100.0f));
+        }
         if (creep_instead(gap, walker_ok, walker, now, "SUMMON: the AI did not get the car going.\r\n")) return;
         if (creep_to_road(seen, seen_ok, walker, walker_ok, now)) return;
         log_append_value("SUMMON: the AI did not get the car going, metres to the walker: ", (int)gap);
