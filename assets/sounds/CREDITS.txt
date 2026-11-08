@@ -3,6 +3,7 @@ by Sounds From The Lab (https://soundsfromthelab.com, https://youtu.be/bvEcUGSPz
 The source says: "No copyright!", "Perfect for use in your video creation, game design or other creative
 endeavour", royalty-free sound effects for free.
 
-Summon sounds (summon_start.wav, summon_end.wav): cut from "Tesla_Autopilot_Sound_Effect.wav" and
-"Tesla_Autopilot_Off_Sound.wav", given by Marvin (08.11.2026). Source and licence not checked yet:
-clear them before publishing.
+Summon sounds (summon_start.wav, summon_end.wav): cut from the Tesla autopilot on / off sound effects by
+YTSFX ("YouTube Sound Effects", https://www.youtube.com/watch?v=4XE3h8EaqFA,
+https://www.youtube.com/watch?v=Q7k-jdqW1-o). The channel says: "Free to Use", tagged #NoCopyright.
+The sounds themselves come from Tesla's cars (YTSFX recorded / shared them, not made them).
