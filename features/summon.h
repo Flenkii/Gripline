@@ -21,7 +21,9 @@
    - The walker stands still while the car is farther than SUMMON_FREEZE m (the game has floor
      collision only around the car), looking around works. */
 
-#define SUMMON_STOP_DISTANCE 9.0f /* metres car -> walker: the AI stops, the car brakes */
+#define SUMMON_STOP_DISTANCE 9.0f /* metres car -> walker: nearer and standing = the car is here */
+#define SUMMON_HANDOVER 30.0f     /* metres car -> walker: the AI hands over, Gripline parks the car beside him */
+#define SUMMON_PARK_SIDE 3.2f     /* metres beside the walker the car's centre stops (getting in: 4 m) */
 #define SUMMON_FREEZE 50.0f       /* walker stands still while the car is farther */
 
 /* Game start (plugin): checks the game code and chains the GPS hooks. 1 = summon can work. */
@@ -46,8 +48,9 @@ void summon_car_seen(const float position[3], float speed);
 /* noclip.c, car update thread, while held: 1 once when the car is to be put onto the road first
    (position a little above it, the road's heading towards the walker) */
 int summon_take_place(float position[3], float forward[3]);
-/* noclip.c, car update thread, SUMMON_CREEP: where to go; slow_down = 1 near the end (the walker) */
-int summon_creep_target(float out[3], int *slow_down);
+/* noclip.c, car update thread, SUMMON_CREEP: where to go; to_walker = 1: to the walker (the car parks
+   beside him). Returns a number that changes with each new creep (0 = not creeping). */
+unsigned summon_creep_target(float out[3], int *to_walker);
 /* noclip.c: the car stands (brake phase over) */
 void summon_braked(void);
 /* walking.c: 1 = the walker stands still (car far away and moving). */

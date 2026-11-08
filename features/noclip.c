@@ -392,7 +392,7 @@ static void hold_walking(void *dynamics) {
 
 /* V7.1 summon (summon.h), after the game's update: where the summoned car is now becomes its place
    (getting in, walking off and the brake all use it); while braking its speed is taken away softly */
-#define SUMMON_BRAKE_TAU 0.45f /* s until about two thirds of the speed is gone */
+#define SUMMON_BRAKE_DECEL 6.0f /* m/s^2 */
 static void summon_follow(void *dynamics, float dt, int phase) {
     GetStateFn get = (GetStateFn)slot(dynamics, SLOT_GET_STATE);
     SetStateFn set = (SetStateFn)slot(dynamics, SLOT_SET_STATE);
@@ -406,8 +406,9 @@ static void summon_follow(void *dynamics, float dt, int phase) {
         if (!float_is_finite(p[i]) || !float_is_finite(v[i])) return;
     float speed = root(v[0] * v[0] + v[1] * v[1] + v[2] * v[2]);
     if (phase == SUMMON_BRAKE) {
-        float x = dt > 0.0f ? dt / SUMMON_BRAKE_TAU : 0.0f, keep = 1.0f / (1.0f + x + x * x / 2.0f);
-        if (speed * keep < 0.3f) keep = 0.0f;
+        /* a steady brake (the same force from any speed), the last bit softer */
+        float left = speed - SUMMON_BRAKE_DECEL * (dt > 0.0f ? dt : 0.0f) * (speed < 2.0f ? 0.5f : 1.0f);
+        float keep = speed > 0.0f && left > 0.3f ? left / speed : 0.0f;
         state.velocity = _mm_mul_ps(state.velocity, _mm_set1_ps(keep));
         state.spin = _mm_mul_ps(state.spin, _mm_set1_ps(keep));
         set(dynamics, &state);
@@ -422,17 +423,29 @@ static void summon_follow(void *dynamics, float dt, int phase) {
 }
 
 /* V7.1 summon, SUMMON_CREEP (Marvin 08.11.2026: the car should come to him also from off the road,
-   not appear on the road): before the game's update the car gets a slow speed along its own nose and a
-   turn towards the target, like a car rolling at walking pace; the game's physics does the rest
-   (ground, slopes, wheels, collisions). Up / down speed stays the physics'. */
-#define CREEP_SPEED 4.5f    /* m/s, about 16 km/h */
-#define CREEP_TURN 0.8f     /* rad/s at most */
-#define CREEP_EASE 0.7f     /* s: speeding up / slowing down */
-#define CREEP_STOP_AT 6.0f  /* to the walker: slows down to stand this far before him */
+   not appear on the road; then "make it cooler"): before the game's update the car gets a speed along
+   its own nose and a turn towards the target, like a car driven at a calm pace; the game's physics does
+   the rest (ground, slopes, wheels, collisions). Up / down speed stays the physics'.
+   Speed: speeds up and brakes with limited force, slows in turns, and plans its stop (brake curve) so
+   it comes to a stand at the target instead of braking at the last moment.
+   To the walker it parks beside him: the target is SUMMON_PARK_SIDE m beside him, on the side that
+   needs the least turning, fixed once the car is near, so it ends next to him with its side to him. */
+#define CREEP_SPEED 6.0f       /* m/s, about 22 km/h */
+#define CREEP_TURN 0.8f        /* rad/s at most */
+#define CREEP_ACCEL 2.5f       /* m/s^2 speeding up */
+#define CREEP_DECEL 6.0f       /* m/s^2 at most braking (from the AI's speed after the hand-over) */
+#define CREEP_PLAN 2.0f        /* m/s^2 the planned soft stop */
+#define CREEP_PARK_FIX 12.0f   /* metres to the walker: the parking side and direction stay */
+#define CREEP_CLEAR 2.6f       /* metres car centre -> walker: never nearer */
+static unsigned creep_seen;    /* the creep the parking side belongs to */
+static float park_offset[2];
+static int park_side, park_fixed;
 static void summon_creep(void *dynamics, float dt) {
     float at[3];
     int to_walker;
-    if (!summon_creep_target(at, &to_walker) || !(dt > 0.0f)) return;
+    unsigned serial = summon_creep_target(at, &to_walker);
+    if (!serial || !(dt > 0.0f)) return;
+    if (serial != creep_seen) creep_seen = serial, park_side = 0, park_fixed = 0;
     GetStateFn get = (GetStateFn)slot(dynamics, SLOT_GET_STATE);
     SetStateFn set = (SetStateFn)slot(dynamics, SLOT_SET_STATE);
     if (!get || !set) return;
@@ -445,26 +458,49 @@ static void summon_creep(void *dynamics, float dt) {
     float fl = root(f[0] * f[0] + f[2] * f[2]);
     if (!(fl > 0.2f)) return; /* nose up or down: leave it to the physics */
     float fx = f[0] / fl, fz = f[2] / fl;
-    float tx = at[0] - p[0], tz = at[2] - p[2], dist = root(tx * tx + tz * tz);
-    if (!(dist > 0.01f)) return;
-    float s = (fz * tx - fx * tz) / dist, c = (fx * tx + fz * tz) / dist; /* turn: + means spin +y */
-    float a = c >= 0.0f ? s : s >= 0.0f ? 2.0f - s : -2.0f - s;       /* about the angle, -2..2 */
-    float yaw = a * 1.5f;
-    if (yaw > CREEP_TURN) yaw = CREEP_TURN;
-    if (yaw < -CREEP_TURN) yaw = -CREEP_TURN;
-    float want = CREEP_SPEED;
-    if (to_walker) {
-        float left = (dist - CREEP_STOP_AT) * 0.8f;
-        want = left < want ? left : want;
-    } else if (dist * 0.8f < want) {
-        want = dist * 0.8f;
+    float walker_dist = -1.0f;
+    if (to_walker) { /* the parking place beside the walker */
+        float wx = at[0] - p[0], wz = at[2] - p[2];
+        walker_dist = root(wx * wx + wz * wz);
+        if (!park_fixed && walker_dist > 0.5f) {
+            float nx = -wz / walker_dist, nz = wx / walker_dist; /* across the way to him */
+            if (!park_side) { /* the side the nose is nearer to */
+                float ax = wx + nx * SUMMON_PARK_SIDE, az = wz + nz * SUMMON_PARK_SIDE;
+                float bx = wx - nx * SUMMON_PARK_SIDE, bz = wz - nz * SUMMON_PARK_SIDE;
+                float ca = (fx * ax + fz * az) / root(ax * ax + az * az), cb = (fx * bx + fz * bz) / root(bx * bx + bz * bz);
+                park_side = ca >= cb ? 1 : -1;
+            }
+            park_offset[0] = nx * park_side * SUMMON_PARK_SIDE, park_offset[1] = nz * park_side * SUMMON_PARK_SIDE;
+            if (walker_dist < CREEP_PARK_FIX) park_fixed = 1;
+        }
+        at[0] += park_offset[0], at[2] += park_offset[1];
     }
-    if (want < 1.2f) want = to_walker && dist <= CREEP_STOP_AT ? 0.0f : 1.2f;
-    if (c < 0.3f && want > 2.0f) want = 2.0f; /* turning round: slowly */
-    float along = v[0] * fx + v[2] * fz, x = dt / CREEP_EASE;
-    along += (want - along) * (x >= 1.0f ? 1.0f : x);
+    float tx = at[0] - p[0], tz = at[2] - p[2], dist = root(tx * tx + tz * tz);
+    float along = v[0] * fx + v[2] * fz;
+    float want = 0.0f, yaw = 0.0f;
+    if (dist > 0.01f) {
+        float s = (fz * tx - fx * tz) / dist, c = (fx * tx + fz * tz) / dist; /* turn: + means spin +y */
+        float a = c >= 0.0f ? s : s >= 0.0f ? 2.0f - s : -2.0f - s;       /* about the angle, -2..2 */
+        if (dist > 1.5f) yaw = a * 1.5f; /* at the target: no turning on the spot */
+        if (yaw > CREEP_TURN) yaw = CREEP_TURN;
+        if (yaw < -CREEP_TURN) yaw = -CREEP_TURN;
+        float stop_left = dist - (to_walker ? 0.3f : 0.0f);
+        want = stop_left > 0.0f ? root(2.0f * CREEP_PLAN * stop_left) : 0.0f; /* the planned stop */
+        if (want > CREEP_SPEED) want = CREEP_SPEED;
+        float turning = 2.0f + 4.0f * (c > 0.0f ? c : 0.0f); /* slower in turns, 2 m/s turning round */
+        if (want > turning) want = turning;
+        if (!to_walker && want < 1.2f) want = 1.2f; /* onto the road: keeps rolling, summon.c takes over */
+        if (to_walker && dist < 0.6f) want = 0.0f;
+        if (to_walker && want > 0.0f && want < 0.8f) want = 0.8f;
+    }
+    if (to_walker && walker_dist >= 0.0f && walker_dist < CREEP_CLEAR) want = 0.0f; /* never onto the walker */
+    float up = CREEP_ACCEL * dt, down = CREEP_DECEL * dt;
+    if (want > along) along = along + up < want ? along + up : want;
+    else along = along - down > want ? along - down : want;
     state.velocity = _mm_setr_ps(fx * along, v[1], fz * along, 0.0f); /* no sliding sideways */
-    state.spin = _mm_setr_ps(w[0], yaw * (along >= 0.0f ? 1.0f : -1.0f) * (along < 1.0f ? (along > 0.3f ? along : 0.3f) : 1.0f), w[2], 0.0f);
+    float turn_scale = along < 1.0f ? (along > 0.3f ? along : 0.3f) : 1.0f;
+    if (want == 0.0f && along < 0.3f) turn_scale = 0.0f; /* standing: no turning on the spot */
+    state.spin = _mm_setr_ps(w[0], yaw * (along >= 0.0f ? 1.0f : -1.0f) * turn_scale, w[2], 0.0f);
     set(dynamics, &state);
 }
 

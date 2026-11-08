@@ -9,6 +9,7 @@
 #include "walking.h"
 #include "notify.h"
 #include "game_language.h"
+#include "game_units.h"
 
 /* ------------------------------------------------------------------ game addresses */
 
@@ -36,7 +37,12 @@
 #define CAR_DRIVER_HOLDER 0x4d10u
 #define CAR_DRIVER_MODE 0x4d30u            /* 1 = the player drives, 0 = the AI */
 
-#define HOLD_MS 2000u          /* the car at its place while the world there loads */
+#define HOLD_MS 2000u          /* the car at its place while the world there loads (it was hidden far away) */
+#define HOLD_NEAR_MS 300u      /* the car was in sight: the world around it is there already */
+#define HOLD_FAR 40.0f         /* metres car -> walker from which the car may have been hidden */
+#define LIVE_MS 250u           /* the live card (distance, speed) while the car comes */
+#define LIVE_TAG 0x53a00001u
+#define ARRIVED_SPEED 0.4f     /* m/s: the car stands */
 #define ROUTE_WAIT_MS 8000u    /* the GPS plans the route */
 #define DRIVE_LIMIT_MS 300000u /* at most 5 minutes */
 #define STUCK_SPEED 1.0f       /* m/s */
@@ -95,7 +101,8 @@ static int road_ok; /* the nearest-road query is the game's code as found */
 static SRWLOCK creep_lock = SRWLOCK_INIT;
 static float creep_at[3];
 static int creep_to_walker;
-static ULONGLONG creep_from, creep_slow_since;
+static unsigned creep_serial;
+static ULONGLONG creep_from, creep_slow_since, live_next;
 
 int summon_ready(void) {
     return ready;
@@ -328,17 +335,19 @@ int summon_take_place(float position[3], float forward[3]) {
     return 1;
 }
 
-int summon_creep_target(float out[3], int *slow_down) {
+unsigned summon_creep_target(float out[3], int *to_walker) {
     if (phase != SUMMON_CREEP) return 0;
     AcquireSRWLockShared(&creep_lock);
-    out[0] = creep_at[0], out[1] = creep_at[1], out[2] = creep_at[2], *slow_down = creep_to_walker;
+    out[0] = creep_at[0], out[1] = creep_at[1], out[2] = creep_at[2], *to_walker = creep_to_walker;
+    unsigned serial = creep_serial;
     ReleaseSRWLockShared(&creep_lock);
-    return 1;
+    return serial;
 }
 
-static void creep_set(const float at[3], int to_walker) {
+static void creep_set(const float at[3], int to_walker, int fresh) {
     AcquireSRWLockExclusive(&creep_lock);
     creep_at[0] = at[0], creep_at[1] = at[1], creep_at[2] = at[2], creep_to_walker = to_walker;
+    if (fresh && !++creep_serial) creep_serial = 1;
     ReleaseSRWLockExclusive(&creep_lock);
 }
 
@@ -369,7 +378,7 @@ static void release_ai(void) {
 
 /* Gripline drives the car itself to at (the road, or the walker) */
 static void creep_begin(const float at[3], int to_walker, ULONGLONG now) {
-    creep_set(at, to_walker);
+    creep_set(at, to_walker, 1);
     creep_from = creep_slow_since = now;
     InterlockedExchange(&phase, SUMMON_CREEP);
 }
@@ -413,11 +422,44 @@ static void begin(void *satnav, ULONGLONG now) {
     }
     (void)arrived;
     drive_car = car, drive_satnav = satnav, drive_tracker = tracker;
-    hold_until = now + HOLD_MS;
+    float away = walking_car_distance();
+    hold_until = now + (away < 0.0f || away > HOLD_FAR ? HOLD_MS : HOLD_NEAR_MS);
+    live_next = now + 1500u; /* the start card first */
     InterlockedExchange(&phase, SUMMON_HOLD);
-    log_append("SUMMON: started - the car is held at its place while the world there loads.\r\n");
+    log_append_value("SUMMON: started - the car waits at its place a moment, metres to the walker: ", (int)(away + 0.5f));
     card("Auto wird gerufen\nGPS plant die Route zu dir... (G/X = abbrechen)",
          "Summoning the car\nThe GPS plans the route to you... (G/X = cancel)");
+}
+
+static void put_number(char *out, unsigned *n, int value) {
+    char digits[12];
+    unsigned d = 0, v = value < 0 ? 0u : (unsigned)value;
+    do digits[d++] = (char)('0' + v % 10); while ((v /= 10) && d < sizeof(digits));
+    while (d && *n < 120) out[(*n)++] = digits[--d];
+    out[*n] = 0;
+}
+
+static void put_words(char *out, unsigned *n, const char *text) {
+    while (*text && *n < 120) out[(*n)++] = *text++;
+    out[*n] = 0;
+}
+
+/* while the car comes: how far it is and how fast, a live card updated in place */
+static void live_card(float gap, float speed, int parking, ULONGLONG now) {
+    if (gap < 0.0f || now < live_next || !notify_kind_on(NOTIFY_KIND_LIVE)) return;
+    live_next = now + LIVE_MS;
+    int de = game_language_is_german(game), imperial = game_units_imperial(game);
+    char text[128];
+    unsigned n = 0;
+    text[0] = 0;
+    put_words(text, &n, parking ? (de ? "Dein Auto parkt neben dir - " : "Your car is parking beside you - ")
+                                : (de ? "Dein Auto kommt - " : "Your car is coming - "));
+    put_number(text, &n, (int)(imperial ? gap * 3.28084f + 0.5f : gap + 0.5f));
+    put_words(text, &n, imperial ? " ft\n" : " m\n");
+    put_number(text, &n, (int)(speed * (imperial ? 2.23694f : 3.6f) + 0.5f));
+    put_words(text, &n, imperial ? " mph" : " km/h");
+    put_words(text, &n, de ? "   G/X = abbrechen" : "   G/X = cancel");
+    notify_show_live(text, LIVE_TAG, 1200);
 }
 
 static void tick(void *satnav) {
@@ -534,10 +576,13 @@ static void tick(void *satnav) {
         return;
     }
     if (p == SUMMON_CREEP) {
+        live_card(gap, speed, creep_to_walker && gap < SUMMON_HANDOVER, now);
         if (creep_to_walker) {
-            if (walker_ok) creep_set(walker, 1); /* follows the walker */
-            if (gap >= 0.0f && gap < SUMMON_STOP_DISTANCE) {
-                log_append("SUMMON: the car is here (crept the last metres).\r\n");
+            if (walker_ok) creep_set(walker, 1, 0); /* follows the walker */
+            /* here = it stands beside the walker (noclip.c stops it there), or it is very near anyway */
+            if (gap >= 0.0f && ((gap < SUMMON_STOP_DISTANCE && speed < ARRIVED_SPEED && now - creep_from > 1000u) ||
+                                gap < SUMMON_PARK_SIDE - 0.7f)) {
+                log_append_value("SUMMON: the car is here (parked beside the walker), metres: ", (int)(gap + 0.5f));
                 stop(1);
                 tinted("Dein Auto ist da\nF/Y = einsteigen", "Your car is here\nF/Y = get in", NOTIFY_COLOR_GREEN);
                 return;
@@ -546,7 +591,8 @@ static void tick(void *satnav) {
             float at[3];
             int slow;
             summon_creep_target(at, &slow);
-            if (seen_ok && distance_xz(seen, at) < CREEP_ROAD_REACHED) {
+            float off = seen_ok ? distance_xz(seen, at) : 1e9f;
+            if (off < 1.0f || (off < CREEP_ROAD_REACHED && speed < 1.5f)) { /* on the road and slow: no jolt */
                 log_append("SUMMON: the car is on the road - the GPS and the AI take over.\r\n");
                 InterlockedExchange(&phase, SUMMON_HOLD);
                 hold_until = now; /* road_checked stays: straight to the route */
@@ -570,10 +616,13 @@ static void tick(void *satnav) {
     }
     int arrived = 0;
     void *route = route_of(satnav, &arrived);
-    if (gap >= 0.0f && gap < SUMMON_STOP_DISTANCE) {
-        log_append("SUMMON: the car is here.\r\n");
-        stop(1);
-        tinted("Dein Auto ist da\nF/Y = einsteigen", "Your car is here\nF/Y = get in", NOTIFY_COLOR_GREEN);
+    live_card(gap, speed, 0, now);
+    if (gap >= 0.0f && gap < SUMMON_HANDOVER && walker_ok) {
+        /* near: the AI would stop hard 9 m away; Gripline slows the car down softly and parks it
+           beside the walker, near enough to get in (Marvin 08.11.2026: "make it cooler") */
+        log_append_value("SUMMON: near the walker - the AI hands over, the car parks beside him, metres: ", (int)gap);
+        release_ai();
+        creep_begin(walker, 1, now);
         return;
     }
     if ((arrived || !route) && gap >= 0.0f && gap < CREEP_RANGE && walker_ok) {
@@ -712,7 +761,7 @@ __declspec(dllexport) void Fh2TestSummonRequest(void) {
 }
 __declspec(dllexport) void Fh2TestSummonCreepSet(float x, float y, float z, int to_walker) {
     float at[3] = {x, y, z};
-    creep_set(at, to_walker);
+    creep_set(at, to_walker, 1);
     InterlockedExchange(&phase, to_walker >= 0 ? SUMMON_CREEP : SUMMON_IDLE);
 }
 __declspec(dllexport) int Fh2TestSummonPhase(void) {

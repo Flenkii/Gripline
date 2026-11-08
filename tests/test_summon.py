@@ -76,7 +76,7 @@ else:
     check(e.call('Fh2TestSummonPhase') == 4, 'Rangieren an')
     e.call('Fh2TestNoclipCreep', GAME, I, 100)
     v, w = get(-0x350), get(-0x340)
-    check(0.25 < v[2] < 0.3 and abs(v[0]) < 1e-4 and abs(v[1] + 1.0) < 1e-4, f'faehrt langsam an (Ziel seitlich: hoechstens 2 m/s), entlang der Nase, Fallen bleibt: {v}')
+    check(0.24 < v[2] < 0.26 and abs(v[0]) < 1e-4 and abs(v[1] + 1.0) < 1e-4, f'faehrt sanft an (2,5 m/s^2, Ziel seitlich: hoechstens 2 m/s), entlang der Nase, Fallen bleibt: {v}')
     check(abs(w[1] - 0.24) < 1e-3 and abs(w[0] - 0.1) < 1e-4 and abs(w[2] - 0.2) < 1e-4, f'dreht nach +x, langsam beim Anfahren, Kippen bleibt der Physik: {w}')
     e.mu.reg_write(__import__('unicorn').x86_const.UC_X86_REG_XMM0, 0)
     e.mu.reg_write(__import__('unicorn').x86_const.UC_X86_REG_XMM2, struct.unpack('<I', struct.pack('<f', 100.0))[0])
@@ -84,15 +84,29 @@ else:
     for _ in range(40):
         e.call('Fh2TestNoclipCreep', GAME, I, 100)
     v, w = get(-0x350), get(-0x340)
-    check(4.0 < v[2] <= 4.5 + 1e-3 and abs(w[1]) < 1e-4, f'geradeaus nach 4 s etwa 16 km/h, keine Drehung: {v} {w}')
-    # to the walker 5 m ahead: stops (wants 0) before reaching him
+    check(abs(v[2] - 6.0) < 1e-3 and abs(w[1]) < 1e-4, f'geradeaus nach 4 s etwa 22 km/h, keine Drehung: {v} {w}')
+    # braking: target now 4 m ahead (road): slows with at most 6 m/s^2 along the planned stop
     e.mu.reg_write(__import__('unicorn').x86_const.UC_X86_REG_XMM0, 0)
-    e.mu.reg_write(__import__('unicorn').x86_const.UC_X86_REG_XMM2, struct.unpack('<I', struct.pack('<f', 5.0))[0])
+    e.mu.reg_write(__import__('unicorn').x86_const.UC_X86_REG_XMM2, struct.unpack('<I', struct.pack('<f', 4.0))[0])
+    e.call('Fh2TestSummonCreepSet', 0, 0, 0, 0)
+    e.call('Fh2TestNoclipCreep', GAME, I, 100)
+    v = get(-0x350)
+    check(abs(v[2] - 5.4) < 1e-3, f'bremst gleichmaessig (6 m/s^2), kein Ruck: {v}')
+    # to the walker 8 m ahead: parks beside him (turns off the straight line), keeps going
+    e.mu.reg_write(__import__('unicorn').x86_const.UC_X86_REG_XMM0, 0)
+    e.mu.reg_write(__import__('unicorn').x86_const.UC_X86_REG_XMM2, struct.unpack('<I', struct.pack('<f', 8.0))[0])
+    e.call('Fh2TestSummonCreepSet', 0, 0, 0, 1)
+    e.call('Fh2TestNoclipCreep', GAME, I, 100)
+    v, w = get(-0x350), get(-0x340)
+    check(v[2] > 4.0 and abs(w[1]) > 0.3, f'zum Spieler: faehrt neben ihn (dreht seitlich weg): {v} {w}')
+    # the walker 2 m ahead: never nearer than 2.6 m - stops
+    e.mu.reg_write(__import__('unicorn').x86_const.UC_X86_REG_XMM0, 0)
+    e.mu.reg_write(__import__('unicorn').x86_const.UC_X86_REG_XMM2, struct.unpack('<I', struct.pack('<f', 2.0))[0])
     e.call('Fh2TestSummonCreepSet', 0, 0, 0, 1)
     for _ in range(40):
         e.call('Fh2TestNoclipCreep', GAME, I, 100)
     v = get(-0x350)
-    check(abs(v[2]) < 0.1, f'zum Spieler: bleibt 6 m davor stehen: {v}')
+    check(abs(v[2]) < 0.1, f'Spieler zu nah: Auto bleibt stehen, faehrt ihn nie an: {v}')
     e.call('Fh2TestSummonCreepSet', 0, 0, 0, -1)
     check(e.call('Fh2TestSummonPhase') == 0, 'Rangieren aus')
     # the code bytes checked in summon_start, changed: summon stays off
