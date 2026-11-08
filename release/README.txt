@@ -59,6 +59,7 @@ NEW IN V7.1
   - Mouse in the menus: press Esc, move the mouse over a tile to select it, left click
     opens it, wheel = tabs at the top / scroll lists, right click = back.
   - Mouse look in the car (every view; outside the camera circles the car).
+  - Mouse look sensitivity for walking and driving: F8 > Mouse look: sensitivity.
   - Smoother walking: easing, mouse look, crouch (hold Ctrl / B), handheld camera (F8),
     driver hidden while you walk, follow camera when you get out.
 

@@ -64,8 +64,8 @@ static wchar_t ini_path[PATH_CAPACITY];
 static int mouse_sensitivity; /* [Keyboard] MouseSteering, 0 = off */
 static int mouse_dead = 30;   /* [Keyboard] MouseDeadZone: percent of the game's stick dead zone the mouse skips */
 static int mouse_center;      /* [Keyboard] MouseCenter: seconds without mouse movement until the wheel turns back straight, 0 = never */
-static int walk_mouse = 100;  /* [Keyboard] WalkMouseLook: walking's mouse look in percent, 0 = off (V7.1) */
-static int drive_mouse = 100; /* [Keyboard] DriveMouseLook: mouse look in the car in percent, 0 = off (V7.1) */
+static volatile int walk_mouse = 100;  /* [Keyboard] WalkMouseLook: walking's mouse look in percent, 0 = off (V7.1) */
+static volatile int drive_mouse = 100; /* [Keyboard] DriveMouseLook: mouse look in the car in percent, 0 = off (V7.1) */
 static int menu_mouse = 1;    /* [Keyboard] MenuMouse: mouse in the game's menus, 1 = on, 0 = off (V7.1) */
 static volatile LONG values[KEY_SETTING_COUNT];
 static int loaded;
@@ -504,6 +504,22 @@ int keyboard_mouse_center(void) {
 void keyboard_set_mouse_center(int seconds) {
     if (seconds < 0 || seconds > 30) return;
     mouse_center = seconds;
+}
+
+int keyboard_walk_mouse_look(void) {
+    return walk_mouse;
+}
+
+void keyboard_set_walk_mouse_look(int percent) {
+    if (percent >= 0 && percent <= 300) walk_mouse = percent;
+}
+
+int keyboard_drive_mouse_look(void) {
+    return drive_mouse;
+}
+
+void keyboard_set_drive_mouse_look(int percent) {
+    if (percent >= 0 && percent <= 300) drive_mouse = percent;
 }
 
 const wchar_t *keyboard_ini_path(void) {

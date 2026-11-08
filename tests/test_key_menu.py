@@ -80,7 +80,7 @@ def press(*vk):
     tick()
     return level
 def selected():
-    b = e.alloc(64)
+    b = e.alloc(256)
     i = e.call('Fh2TestKeyMenuSelected', b)
     return e.wstr(b) if i != 0xffffffff and i < 64 else None
 def panel():
@@ -118,7 +118,7 @@ check(ok == 1 and card_text == 'Press F8 to change your keys\nKey menu: arrows, 
 check(e.call('Fh2TestKeyboardBinding', 42, 0) == F8, 'KeyMenu = F8 (Standard)')
 
 press(F8)
-check(tick() == LEVEL_GROUPS and panel() == 23, f'F8 oeffnet das Menue (4 Abschnitte + 4 Seiten + Maus + Telemetrie + Tempomat + Fahrtenbuch + Rekorde + Welt + Verkehr + Kein Schaden + Einstellungen + Handkamera + Karten & Hinweise + Karten-Design + Problem-Bericht + Alle Tasten + Hinweis): {panel()}')
+check(tick() == LEVEL_GROUPS and panel() == 24, f'F8 oeffnet das Menue (4 Abschnitte + 4 Seiten + Maus + Maus-Blick + Telemetrie + Tempomat + Fahrtenbuch + Rekorde + Welt + Verkehr + Kein Schaden + Einstellungen + Handkamera + Karten & Hinweise + Karten-Design + Problem-Bericht + Alle Tasten + Hinweis): {panel()}')
 top = panel_rows()
 check(top.get('Keys & controls') == '' and top.get('Driving & data') == '' and top.get('World & cars') == '' and top.get('Gripline') == '',
       f'vier Abschnitte: {list(top)}')
@@ -260,6 +260,29 @@ check('MouseSteering=0\r\n' in ini(), 'wieder Aus')
 press(ESC); press(ESC)
 check(tick() == LEVEL_CLOSED, 'Maus: Esc, Esc: zu')
 
+# mouse look page (V7.1): walking / driving sensitivity, arrows change, Enter steps on, FH2_Keyboard.ini
+press(0x79)
+check(goto('Mouse look: sensitivity'), selected())
+press(ENTER)
+rows = panel_rows()
+check(selected() == 'While walking' and rows.get('While walking') == '100 %' and rows.get('While driving') == '100 %', f'Maus-Blick-Seite: {rows}')
+press(0x27)  # right arrow
+check(panel_rows().get('While walking') == '110 %' and 'WalkMouseLook=110\r\n' in ini(), f'Laufen 110 % gespeichert: {ini()!r}')
+for _ in range(20): press(0x27)
+check(panel_rows().get('While walking') == '300 %' and 'WalkMouseLook=300\r\n' in ini(), 'Laufen hoert bei 300 % auf')
+press(ENTER)
+check(panel_rows().get('While walking') == 'Off' and 'WalkMouseLook=0\r\n' in ini(), 'Enter am Ende: wieder Aus')
+press(DOWN); press(0x25); press(0x25)  # left arrow twice
+check(panel_rows().get('While driving') == '80 %' and 'DriveMouseLook=80\r\n' in ini(), 'Fahren 80 % gespeichert')
+press(DOWN); press(ENTER)
+rows = panel_rows()
+check(rows.get('While walking') == '100 %' and rows.get('While driving') == '100 %' and 'WalkMouseLook=100\r\n' in ini()
+      and 'DriveMouseLook=100\r\n' in ini(), f'beide auf Standard: {rows}')
+press(ESC)
+check(tick() == LEVEL_GROUPS and selected() == 'Mouse look: sensitivity', 'Esc: zurueck zur Hauptseite')
+press(ESC)
+check(tick() == LEVEL_CLOSED, 'Maus-Blick: zu')
+
 # telemetry page: Turn rate on -> Gripline.ini TelemetryShow, dead zone 40 % -> FH2_Keyboard.ini
 press(0x79)
 goto('Live telemetry')
@@ -282,7 +305,7 @@ press(DOWN); press(0x25)
 check(panel_rows().get('Background opacity') == '90 %' and b'TelemetryOpacity=90' in open(os.path.join(root, 'Gripline.ini'), 'rb').read(), 'Deckkraft 90 % gespeichert')
 press(DOWN); press(ENTER)
 check(panel_rows().get('Size') == '115 %' and b'TelemetrySize=115' in open(os.path.join(root, 'Gripline.ini'), 'rb').read(), 'Groesse 115 % gespeichert')
-press(ESC); press(UP); press(ENTER)
+press(ESC); press(UP); press(UP); press(ENTER)
 for _ in range(10): press(DOWN)
 check(selected() == '40 %', selected())
 press(ENTER)
@@ -292,8 +315,8 @@ check(tick() == LEVEL_CLOSED, 'Telemetrie/Totzone: zu')
 
 # world page: three on/off rows, restart note
 press(0x79)
-goto('World: cameras, icons, Drivatars')
-check(selected() == 'World: cameras, icons, Drivatars', selected())
+goto('World: cameras, Drivatars …')
+check(selected() == 'World: cameras, Drivatars …', selected())
 press(ENTER)
 rows = panel_rows()
 check(selected() == 'Speed cameras' and 'Names above cars' in rows and 'Event icons on the road' in rows
