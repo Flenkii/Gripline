@@ -100,6 +100,16 @@ static float eye[3];
 static float head[3]; /* the head sphere's centre (WALK_HEAD above the body, lower or aside under branches) */
 
 static _Alignas(16) unsigned char params_free[0x40], params_floor[0x40];
+
+/* Diagnostics (Marvin 08.11.2026: at ~50 m the car goes and the camera rises a little). The car is
+   hidden on purpose (WALK_HIDE_FROM); why the camera rises is not known yet. Gripline.log gets, for
+   the first switches of a session: the walker's floor and eye height at the switch and one second
+   later, the camera the game looks through, sudden floor jumps and what the floor was. */
+static volatile LONG diag_switch; /* 1 = the car was just hidden, 2 = put back (car thread -> walker) */
+static void *floor_hit;           /* what the last floor check hit */
+static unsigned diag_count;
+static int diag_kind;             /* the switch being watched */
+static float diag_time, diag_floor, diag_eye;
 static void *world;
 static int world_tried; /* tests: no lookup */
 
@@ -204,8 +214,10 @@ int walking_car_hidden(float out[3]) {
         return 0;
     }
     float d = walking_car_distance();
+    LONG was = hiding;
     if (d > WALK_HIDE_FROM) InterlockedExchange(&hiding, 1);
     else if (d >= 0.0f && d < WALK_HIDE_BACK) InterlockedExchange(&hiding, 0);
+    if (hiding != was) InterlockedExchange(&diag_switch, hiding ? 1 : 2); /* the walker's thread logs it */
     if (!hiding) return 0;
     out[0] = hide_at[0], out[1] = hide_at[1], out[2] = hide_at[2];
     return 1;
@@ -402,10 +414,79 @@ static int slide(const float from[3], const float to[3], int floor, float out[3]
     out[0] = p[0], out[1] = p[1], out[2] = p[2];
     void *hit = NULL;
     memory_copy(&hit, result + 0x10, 8);
+    if (floor && hit) floor_hit = hit;
     return hit != NULL;
 }
 
 /* ------------------------------------------------------------------ the walker */
+
+/* one Gripline.log line: text and whole numbers (cm, m) */
+static void diag_put(char *line, unsigned *n, const char *text) {
+    while (*text && *n < 200) line[(*n)++] = *text++;
+}
+static void diag_num(char *line, unsigned *n, int v) {
+    char digits[12];
+    unsigned k = 0, u = v < 0 ? (unsigned)(-v) : (unsigned)v;
+    if (v < 0) diag_put(line, n, "-");
+    do digits[k++] = (char)('0' + u % 10), u /= 10;
+    while (u && k < 11);
+    while (k && *n < 200) line[(*n)++] = digits[--k];
+}
+static int diag_cm(float metres) {
+    return (int)(metres * 100.0f + (metres < 0.0f ? -0.5f : 0.5f));
+}
+
+/* end of step(): watches the second after the car was hidden or put back */
+static void diag_frame(float dt, float before_y) {
+    static unsigned jumps;
+    LONG sw = InterlockedExchange(&diag_switch, 0);
+    char line[240];
+    unsigned n = 0;
+    if (sw && diag_count < 6) {
+        ++diag_count;
+        diag_kind = (int)sw, diag_time = 0.0f, diag_floor = centre[1], diag_eye = eye[1], jumps = 0;
+        diag_put(line, &n, sw == 1 ? "WALKING DIAG: car hidden under the walker at " : "WALKING DIAG: car back at its place at ");
+        diag_num(line, &n, (int)walking_car_distance());
+        diag_put(line, &n, " m - floor ");
+        diag_num(line, &n, diag_cm(centre[1] - car_place[1]));
+        diag_put(line, &n, " cm, eye ");
+        diag_num(line, &n, diag_cm(eye[1] - car_place[1]));
+        diag_put(line, &n, " cm above the car's place, camera ");
+        diag_num(line, &n, walking_view_camera());
+        diag_put(line, &n, grounded ? ", on the ground" : ", in the air");
+        diag_put(line, &n, no_floor ? ", no floor collision\r\n" : "\r\n");
+        line[n] = 0;
+        log_append(line);
+        log_class("WALKING DIAG: floor at the switch: ", floor_hit);
+        return;
+    }
+    if (!diag_kind || !(dt > 0.0f)) return;
+    diag_time += dt;
+    float jump = centre[1] - before_y;
+    if ((jump > 0.15f || jump < -0.15f) && jumps < 3) { /* curbs are up to 0.4 m: only logged here */
+        ++jumps;
+        diag_put(line, &n, "WALKING DIAG: floor height jumped in one frame, cm: ");
+        diag_num(line, &n, diag_cm(jump));
+        diag_put(line, &n, "\r\n");
+        line[n] = 0;
+        log_append(line);
+        log_class("WALKING DIAG: floor now: ", floor_hit);
+    }
+    if (diag_time >= 1.0f) {
+        diag_put(line, &n, "WALKING DIAG: one second later - floor ");
+        diag_num(line, &n, diag_cm(centre[1] - diag_floor));
+        diag_put(line, &n, " cm, eye ");
+        diag_num(line, &n, diag_cm(eye[1] - diag_eye));
+        diag_put(line, &n, " cm moved, camera ");
+        diag_num(line, &n, walking_view_camera());
+        diag_put(line, &n, no_floor ? ", no floor collision\r\n" : "\r\n");
+        line[n] = 0;
+        log_append(line);
+        log_class("WALKING DIAG: floor then: ", floor_hit);
+        diag_kind = 0;
+    }
+}
+
 
 /* share of the way to a target after dt with ease time tau (1 - e^(-dt/tau), series of e^x) */
 static float ease(float dt, float tau) {
@@ -687,6 +768,7 @@ static void step(float dt) {
     hide_at[0] = centre[0], hide_at[1] = centre[1] - WALK_HIDE_BELOW, hide_at[2] = centre[2];
     float cx = centre[0] - car_place[0], cz = centre[2] - car_place[2];
     InterlockedExchange(&distance_cm, (LONG)(root(cx * cx + cz * cz) * 100.0f));
+    diag_frame(dt, before[1]);
     { /* V7.1 walking gauge (walk_gauge.h): what it shows, for the card window's thread */
         WalkGaugeData g;
         g.speed = smooth_speed;

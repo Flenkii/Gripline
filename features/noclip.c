@@ -342,14 +342,34 @@ static void put_back(void *dynamics) {
 }
 
 /* walking: the car at its place, or (far from it) under the ground below the walker, see walking.h */
+static float hidden_last[3];
+static int hidden_have_last;
 static void hold_walking(void *dynamics) {
     float at[3];
     if (!walking_car_hidden(at) || !float_is_finite(at[0]) || !float_is_finite(at[1]) || !float_is_finite(at[2])) {
+        hidden_have_last = 0;
         put_back(dynamics);
         return;
     }
     SetStateFn set = (SetStateFn)slot(dynamics, SLOT_SET_STATE);
     if (!set) return;
+    { /* diagnostics (walking.c): did the game's physics move the hidden car since it was put there? */
+        static unsigned logged;
+        GetStateFn get = (GetStateFn)slot(dynamics, SLOT_GET_STATE);
+        if (get && hidden_have_last && logged < 3) {
+            _Alignas(16) BodyState now;
+            get(dynamics, &now);
+            _Alignas(16) float p[4];
+            _mm_store_ps(p, now.position);
+            float up = p[1] - hidden_last[1], ax = p[0] - hidden_last[0], az = p[2] - hidden_last[2];
+            /* the walker moves it a few cm per update; more is the physics */
+            if (float_is_finite(up) && (up > 0.5f || up < -0.5f || ax * ax + az * az > 1.0f)) {
+                ++logged;
+                log_append_value("WALKING DIAG: the hidden car was moved by the game, cm up: ", (int)(up * 100.0f));
+            }
+        }
+        hidden_last[0] = at[0], hidden_last[1] = at[1], hidden_last[2] = at[2], hidden_have_last = 1;
+    }
     _Alignas(16) BodyState state = parked;
     state.position = _mm_setr_ps(at[0], at[1], at[2], 0.0f);
     set(dynamics, &state);
