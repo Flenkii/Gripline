@@ -1086,7 +1086,7 @@ static void paint_pill(unsigned char *px, int w, int x0, int y0, int pw, int ph,
 /* V7 overhaul: the Gripline menu (panel at the top) gets a taller header and roomier rows while it is
    short enough; the key list (F5) and the telemetry keep the compact rows */
 static int panel_roomy(const Layout *l, unsigned count) {
-    return l->style != NOTIFY_STYLE_CLASSIC && ((draw_kind == 1 && count <= 24) || draw_kind == 2);
+    return l->style != NOTIFY_STYLE_CLASSIC && ((draw_kind == 1 && count <= 26) || draw_kind == 2);
 }
 static int panel_header_px(const Layout *l, unsigned count) {
     return panel_roomy(l, count) && draw_kind == 1 ? (int)(76 * l->scale) : l->panel_header;
@@ -3306,6 +3306,13 @@ __declspec(dllexport) int Fh2TestNotifyPanelRow(unsigned index, wchar_t *label, 
 }
 
 /* Key list panel: rows/width of its bitmap; with pixels, draws it (l.panel_height rows). */
+/* tests/test_key_menu.py: drawn height of the panel shown now (the Gripline menu keeps its roomy rows) */
+__declspec(dllexport) int Fh2TestNotifyPanelPixels(unsigned height) {
+    Layout l = layout_for(height);
+    draw_kind = (int)panel_at_top;
+    return panel_pixels(&l, (unsigned)panel_count);
+}
+
 __declspec(dllexport) int Fh2TestNotifyPanelDraw(unsigned height, unsigned char *pixels, int pitch, int *width,
                                                  int *rows, unsigned *count, wchar_t *first_label,
                                                  wchar_t *first_keys) {

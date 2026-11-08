@@ -119,6 +119,7 @@ check(e.call('Fh2TestKeyboardBinding', 42, 0) == F8, 'KeyMenu = F8 (Standard)')
 
 press(F8)
 check(tick() == LEVEL_GROUPS and panel() == 25, f'F8 oeffnet das Menue (4 Abschnitte + 4 Seiten + Maus + Maus-Blick + Telemetrie + Tempomat + Fahrtenbuch + Rekorde + Welt + Verkehr + Kein Schaden + Einstellungen + Handkamera + Lauf-Tacho + Karten & Hinweise + Karten-Design + Problem-Bericht + Alle Tasten + Hinweis): {panel()}')
+check(e.call('Fh2TestNotifyPanelPixels', 1080) >= 76 + 25 * 26, f'V7.1 Hauptseite mit Lauf-Tacho behaelt die grossen Zeilen: {e.call("Fh2TestNotifyPanelPixels", 1080)} px')
 top = panel_rows()
 check(top.get('Keys & controls') == '' and top.get('Driving & data') == '' and top.get('World & cars') == '' and top.get('Gripline') == '',
       f'vier Abschnitte: {list(top)}')
