@@ -141,7 +141,11 @@ static int world_tried; /* tests: no lookup */
 #define WALK_MAX_DISTANCE 2000.0f /* from the car */
 #define WALK_HIDE_FROM 45.0f /* the game loads floor collision only ~65 m around the car: farther away the car */
 #define WALK_HIDE_BACK 40.0f /* goes along under the walker (under the ground), back at its place nearer */
-#define WALK_HIDE_BELOW 30.0f
+/* Marvin 08.11.2026: with the car 30 m deep the camera seemed to rise and the horizon to lean (the
+   log showed the eye did not move: the game draws the ground around the walker by the car's distance,
+   suspected). Now the car is held just under the floor: its roof about 4 m down, also on steep
+   slopes under ground. Floor checks ignore the car (slide()). */
+#define WALK_HIDE_BELOW 6.5f
 #define WALK_FALL_LIMIT 150.0f   /* below the car: fell through the world, back to the car */
 #define WALK_STEP 0.4f     /* steps and curbs up to 40 cm */
 #define WALK_SNAP 0.3f     /* stays on the ground going down up to this per step */
@@ -149,7 +153,7 @@ static int world_tried; /* tests: no lookup */
 #define WALK_RECOVER 1.5f  /* sunk into the floor: looked for again from this far above */
 #define WALK_SLIDE_SLACK 0.3f /* a slide result may be this much farther than the move itself */
 #define WALK_RECOVER_MAX 0.6f /* the floor found again lifts the walker at most this much */
-#define WALK_PROBE 25.0f   /* looks this far down for a floor (less than WALK_HIDE_BELOW: not the car) */
+#define WALK_PROBE 25.0f   /* looks this far down for a floor (the hidden car is not counted, slide()) */
 #define WALK_NO_FLOOR 4.0f /* metres of falling without any floor: no collision loaded there */
 
 int walking_ready(void) {
@@ -411,9 +415,17 @@ static int slide(const float from[3], const float to[3], int floor, float out[3]
         }
         return 1;
     }
-    out[0] = p[0], out[1] = p[1], out[2] = p[2];
     void *hit = NULL;
     memory_copy(&hit, result + 0x10, 8);
+    if (hit && hiding) {
+        /* the hidden car right under the walker is no floor (a box around its place, below the ground) */
+        float hx = p[0] - hide_at[0], hz = p[2] - hide_at[2], hy = p[1] - hide_at[1];
+        if (hx * hx + hz * hz < 16.0f && hy > -2.0f && hy < 3.5f) {
+            for (unsigned i = 0; i < 3; ++i) out[i] = to[i];
+            return 0;
+        }
+    }
+    out[0] = p[0], out[1] = p[1], out[2] = p[2];
     if (floor && hit) floor_hit = hit;
     return hit != NULL;
 }
