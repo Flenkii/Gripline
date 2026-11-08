@@ -910,8 +910,34 @@ static void *camera_view(void *camera, void *out) {
 typedef void (*MultiCamUpdateFn)(void *, float, uintptr_t, uintptr_t);
 static void *previous_multicam;
 static void multicam_update(void *self, float dt, uintptr_t a, uintptr_t b) {
+    int was_ok = walk_view_ok;
     walk_view_ok = 0;
     ((MultiCamUpdateFn)previous_multicam)(self, dt, a, b);
+    {
+        static int seen;
+        if (!seen) seen = 1, log_append("WALKING DIAG: multi camera update runs through Gripline.\r\n");
+        static unsigned watched;
+        static LONG last_hiding = -1;
+        if (active && entered && hiding != last_hiding) last_hiding = hiding, watched = 0;
+        if (active && entered && watched < 400) { /* frames after each switch: what the picture really is */
+            if (watched == 0 || watched == 60 || watched == 240) {
+                _Alignas(16) float mm[16];
+                char line[240];
+                unsigned n = 0;
+                if (memory_read((unsigned char *)self + 0x260, mm, sizeof(mm))) {
+                    diag_put(line, &n, "WALKING DIAG: picture rows y (x1000): ");
+                    for (unsigned k = 0; k < 16; ++k) diag_num(line, &n, (int)(mm[k] * 1000.0f)), diag_put(line, &n, " ");
+                    diag_put(line, &n, walk_view_ok ? " view ok, hidden " : " NO walker view, hidden ");
+                    diag_num(line, &n, (int)hiding);
+                    diag_put(line, &n, "\r\n");
+                    line[n] = 0;
+                    log_append(line);
+                }
+            }
+            ++watched;
+        }
+    }
+    (void)was_ok;
     if (!active || !entered || !walk_view_ok) return;
     unsigned char *m = (unsigned char *)self;
     void *current = NULL;
