@@ -28,6 +28,7 @@ python test_cockpit_view.py ../out-test/fh2-mods/Gripline.dll
 python test_nitro.py ../out-test/fh2-mods/Gripline.dll
 python test_cockpit.py ../out-test/fh2-mods/Gripline.dll
 python test_walking.py ../out-test/fh2-mods/Gripline.dll
+python test_walk_gauge.py ../out-test/fh2-mods/Gripline.dll
 python test_drive_look.py ../out-test/fh2-mods/Gripline.dll
 python test_no_damage.py ../out-test/fh2-mods/Gripline.dll path/to/forza_durango_release_final.exe
 ```

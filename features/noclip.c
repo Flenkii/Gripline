@@ -856,6 +856,9 @@ static void walk_info(ULONGLONG now) {
     }
     if (!walking_has_collision()) put_text(text, &n, de ? " (ohne Kollision)" : " (no collision)");
     else if (walking_no_floor()) put_text(text, &n, de ? " (hier kein Boden geladen)" : " (no floor loaded here)");
+    /* V7.1: the walking gauge at the bottom right shows speed and car already; the card then only
+       comes for the notes about the collision */
+    if (walk_gauge_style() != WALK_GAUGE_OFF && walking_has_collision() && !walking_no_floor()) return;
     if (notify_kind_on(NOTIFY_KIND_LIVE)) notify_show_live(text, INFO_TAG, 1000);
 }
 

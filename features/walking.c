@@ -6,6 +6,9 @@
 #include "walking.h"
 #include "keyboard_pad.h"
 #include "drive_look.h"
+#include "walk_gauge.h"
+#include "game_language.h"
+#include "game_units.h"
 
 /* ------------------------------------------------------------------ game addresses */
 
@@ -89,6 +92,8 @@ static int stepped;
 
 /* read on other threads */
 static volatile LONG distance_cm = -100, speed_x10, collision_ok;
+static SRWLOCK gauge_lock = SRWLOCK_INIT; /* V7.1 walking gauge data (step -> card window) */
+static WalkGaugeData gauge;
 static float smooth_speed;
 static float eye[3];
 static float head[3]; /* the head sphere's centre (WALK_HEAD above the body, lower or aside under branches) */
@@ -659,6 +664,27 @@ static void step(float dt) {
     hide_at[0] = centre[0], hide_at[1] = centre[1] - WALK_HIDE_BELOW, hide_at[2] = centre[2];
     float cx = centre[0] - car_place[0], cz = centre[2] - car_place[2];
     InterlockedExchange(&distance_cm, (LONG)(root(cx * cx + cz * cz) * 100.0f));
+    { /* V7.1 walking gauge (walk_gauge.h): what it shows, for the card window's thread */
+        WalkGaugeData g;
+        g.speed = smooth_speed;
+        g.mode = crouching ? WALK_MODE_CROUCH : hs < 0.25f ? WALK_MODE_STAND : in.run ? WALK_MODE_RUN : WALK_MODE_WALK;
+        g.distance = root(cx * cx + cz * cz);
+        float ahead = -(cx * dir[0] + cz * dir[1]), side = -(cx * rx + cz * rz), l = root(ahead * ahead + side * side);
+        g.car_ahead = l > 0.01f ? ahead / l : 1.0f, g.car_right = l > 0.01f ? side / l : 0.0f;
+        float foot = 0.0f;
+        if (bob_on) { /* the eye is lowest (a footfall) where cos(2 * phase) = 1 */
+            float s2, c2;
+            sin_cos_wide(2.0f * bob_phase, &s2, &c2);
+            float c = c2 > 0.0f ? c2 : 0.0f, c4 = c * c * c * c;
+            float run_share = clampf((hs - WALK_SPEED) / (WALK_RUN - WALK_SPEED), 0.0f, 1.0f);
+            foot = c4 * c4 * bob_amount * (0.55f + 0.45f * run_share) * (1.0f - 0.6f * crouch);
+        }
+        g.step = foot;
+        g.german = g.imperial = 0;
+        AcquireSRWLockExclusive(&gauge_lock);
+        gauge = g;
+        ReleaseSRWLockExclusive(&gauge_lock);
+    }
     stepped = 1;
 }
 
@@ -774,6 +800,25 @@ static int hud_hidden(void) {
     return running != 0;
 }
 
+/* V7.1 walking gauge: 1 = show it (walking, out of the car, the game running - not in a menu or
+   paused, where the game draws its HUD again) and *out filled */
+int walking_gauge_data(WalkGaugeData *out) {
+    if (!hud_hidden() || distance_cm < 0) return 0;
+    static ULONGLONG units_next;
+    static volatile LONG german, imperial;
+    ULONGLONG now = GetTickCount64();
+    if (now >= units_next) { /* the game's language and speed unit, read now and then */
+        units_next = now + 3000;
+        InterlockedExchange(&german, game_language_is_german(game));
+        InterlockedExchange(&imperial, game_units_imperial(game));
+    }
+    AcquireSRWLockShared(&gauge_lock);
+    *out = gauge;
+    ReleaseSRWLockShared(&gauge_lock);
+    out->german = german != 0, out->imperial = imperial != 0;
+    return 1;
+}
+
 /* skipped draws give back what the game handed to them (as Extra Options' cinematic view) */
 static void wait_render(unsigned i, void *renderer, void *surface, void *parameters) {
     if (!hud_hidden()) {
@@ -878,6 +923,11 @@ int walking_start(unsigned char *game_image) {
 #ifdef FH2_TWEAKS_TEST
 __declspec(dllexport) int Fh2TestWalkHidden(float *out) {
     return walking_car_hidden(out);
+}
+/* tests/test_walking.py: what the walking gauge would show (without the game-running check) */
+__declspec(dllexport) void Fh2TestWalkGaugeRaw(float *out) {
+    out[0] = gauge.speed, out[1] = (float)gauge.mode, out[2] = gauge.distance;
+    out[3] = gauge.car_ahead, out[4] = gauge.car_right, out[5] = gauge.step;
 }
 /* tests/test_walking.py: one step without a game world (no collision) */
 __declspec(dllexport) void Fh2TestWalkStep(unsigned char *game_image, int reset, unsigned dt_ms, float *out) {

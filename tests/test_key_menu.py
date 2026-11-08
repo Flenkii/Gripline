@@ -118,7 +118,8 @@ check(ok == 1 and card_text == 'Press F8 to change your keys\nKey menu: arrows, 
 check(e.call('Fh2TestKeyboardBinding', 42, 0) == F8, 'KeyMenu = F8 (Standard)')
 
 press(F8)
-check(tick() == LEVEL_GROUPS and panel() == 24, f'F8 oeffnet das Menue (4 Abschnitte + 4 Seiten + Maus + Maus-Blick + Telemetrie + Tempomat + Fahrtenbuch + Rekorde + Welt + Verkehr + Kein Schaden + Einstellungen + Handkamera + Karten & Hinweise + Karten-Design + Problem-Bericht + Alle Tasten + Hinweis): {panel()}')
+check(tick() == LEVEL_GROUPS and panel() == 25, f'F8 oeffnet das Menue (4 Abschnitte + 4 Seiten + Maus + Maus-Blick + Telemetrie + Tempomat + Fahrtenbuch + Rekorde + Welt + Verkehr + Kein Schaden + Einstellungen + Handkamera + Lauf-Tacho + Karten & Hinweise + Karten-Design + Problem-Bericht + Alle Tasten + Hinweis): {panel()}')
+check(e.call('Fh2TestNotifyPanelPixels', 1080) >= 76 + 25 * 26, f'V7.1 Hauptseite mit Lauf-Tacho behaelt die grossen Zeilen: {e.call("Fh2TestNotifyPanelPixels", 1080)} px')
 top = panel_rows()
 check(top.get('Keys & controls') == '' and top.get('Driving & data') == '' and top.get('World & cars') == '' and top.get('Gripline') == '',
       f'vier Abschnitte: {list(top)}')
@@ -348,6 +349,27 @@ press(ESC)
 check(panel_rows().get('No damage on cars') == 'Off', 'Hauptseite zeigt Aus')
 press(ESC)
 check(tick() == LEVEL_CLOSED, 'Schaden: zu')
+
+# V7.1 walking speedometer: Step pulse is the default, Racing bar chosen -> Gripline.ini WalkGauge=2, then Off
+press(0x79)
+goto('Walking: speedometer')
+check(panel_rows().get('Walking: speedometer') == 'Step pulse', f'Tacho-Zeile zeigt Schritt-Puls: {panel_rows().get("Walking: speedometer")!r}')
+press(ENTER)
+rows = panel_rows()
+check(selected() == 'Step pulse' and rows.get('Step pulse') == '\u2713 active' and rows.get('Off') == '' and rows.get('Ring') == ''
+      and 'Racing bar' in rows and 'Bottom right while on foot' in rows, f'Tacho-Seite: {rows}')
+press(UP); press(ENTER)
+gi = open(os.path.join(root, 'Gripline.ini'), 'rb').read()
+check(b'WalkGauge=2' in gi and panel_rows().get('Racing bar') == '\u2713 active' and panel_rows().get('Step pulse') == 'default',
+      f'Racing-Leiste gewaehlt und gespeichert: {gi!r}')
+press(UP); press(UP); press(ENTER)
+check(b'WalkGauge=0' in open(os.path.join(root, 'Gripline.ini'), 'rb').read(), 'Tacho aus gespeichert')
+press(DOWN); press(DOWN); press(DOWN); press(ENTER)
+check(b'WalkGauge=3' in open(os.path.join(root, 'Gripline.ini'), 'rb').read(), 'wieder Schritt-Puls')
+press(ESC)
+check(panel_rows().get('Walking: speedometer') == 'Step pulse', 'Hauptseite zeigt Schritt-Puls')
+press(ESC)
+check(tick() == LEVEL_CLOSED, 'Tacho: zu')
 
 # logbook page: totals, nothing driven yet
 press(0x79)

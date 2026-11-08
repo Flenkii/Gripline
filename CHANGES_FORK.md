@@ -80,6 +80,7 @@ Plugin build on Azimuth 1.0.3 (October 29, 2026, tested in the game by Flenkii):
   tab row or up/down, right click = B (`MenuMouse` in FH2_Keyboard.ini)
 - `features/drive_look.c/.h` – mouse look in the car, every view (outside the camera circles the car)
 - walking: easing, mouse look, crouch, handheld camera (F8), driver figure hidden, follow camera when getting out
+- walking speedometer at the bottom right while on foot: three looks (Ring, Racing bar, Step pulse = default), F8 > Gripline > Walking: speedometer, Gripline.ini `WalkGauge` (`features/walk_gauge.c/.h`)
 - what's-new cards for V7.1
 
 ## V7 – The Big Update (November 2026)
