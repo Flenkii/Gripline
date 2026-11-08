@@ -1082,10 +1082,9 @@ static void paint_pill(unsigned char *px, int w, int x0, int y0, int pw, int ph,
 }
 
 /* V7 overhaul: the Gripline menu (panel at the top) gets a taller header and roomier rows while it is
-   short enough (up to 30 rows: 894 px at 1080p, fits the screen); the key list (F5) and the telemetry keep
-   the compact rows */
+   short enough; the key list (F5) and the telemetry keep the compact rows */
 static int panel_roomy(const Layout *l, unsigned count) {
-    return l->style != NOTIFY_STYLE_CLASSIC && ((draw_kind == 1 && count <= 30) || draw_kind == 2);
+    return l->style != NOTIFY_STYLE_CLASSIC && ((draw_kind == 1 && count <= 24) || draw_kind == 2);
 }
 static int panel_header_px(const Layout *l, unsigned count) {
     return panel_roomy(l, count) && draw_kind == 1 ? (int)(76 * l->scale) : l->panel_header;
