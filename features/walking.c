@@ -141,11 +141,10 @@ static int world_tried; /* tests: no lookup */
 #define WALK_MAX_DISTANCE 2000.0f /* from the car */
 #define WALK_HIDE_FROM 45.0f /* the game loads floor collision only ~65 m around the car: farther away the car */
 #define WALK_HIDE_BACK 40.0f /* goes along under the walker (under the ground), back at its place nearer */
-/* Marvin 08.11.2026: with the car 30 m deep the camera seemed to rise and the horizon to lean (the
-   log showed the eye did not move: the game draws the ground around the walker by the car's distance,
-   suspected). Now the car is held just under the floor: its roof about 4 m down, also on steep
-   slopes under ground. Floor checks ignore the car (slide()). */
-#define WALK_HIDE_BELOW 6.5f
+/* Marvin 08.11.2026: beyond 45 m the camera seemed to rise and the horizon to lean. The log showed
+   the eye Gripline gives the camera does not move; 6.5 m deep instead of 30 m did not change it
+   (video 08.11.), so it stays 30 m deep (safer under bridges). Floor checks ignore the car (slide()). */
+#define WALK_HIDE_BELOW 30.0f
 #define WALK_FALL_LIMIT 150.0f   /* below the car: fell through the world, back to the car */
 #define WALK_STEP 0.4f     /* steps and curbs up to 40 cm */
 #define WALK_SNAP 0.3f     /* stays on the ground going down up to this per step */
