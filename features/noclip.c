@@ -405,6 +405,17 @@ static void summon_follow(void *dynamics, float dt, int phase) {
     for (unsigned i = 0; i < 3; ++i)
         if (!float_is_finite(p[i]) || !float_is_finite(v[i])) return;
     float speed = root(v[0] * v[0] + v[1] * v[1] + v[2] * v[2]);
+    { /* creeping: the real way gone since the last frame (the set speed says little: the brakes eat it,
+         Gripline makes up the rest, an obstacle pushes back) */
+        static float last[3];
+        static int have;
+        if (phase == SUMMON_CREEP && have && dt > 0.0f) {
+            float dx = p[0] - last[0], dz = p[2] - last[2];
+            speed = root(dx * dx + dz * dz) / dt;
+        }
+        last[0] = p[0], last[1] = p[1], last[2] = p[2];
+        have = phase == SUMMON_CREEP;
+    }
     if (phase == SUMMON_BRAKE) {
         /* a steady brake (the same force from any speed), the last bit softer */
         float left = speed - SUMMON_BRAKE_DECEL * (dt > 0.0f ? dt : 0.0f) * (speed < 2.0f ? 0.5f : 1.0f);
@@ -440,6 +451,11 @@ static unsigned creep_seen;    /* the creep the parking side belongs to */
    brakes take most of each frame's speed away again (Marvin's log 08.11.2026: the car never got going,
    "stuck" in the open), so the speed is set anew every frame from this. */
 static float creep_command;
+/* Where the car was put last frame and how far along its nose it was meant to go: what the parked car's
+   brakes / tyres held back of that is added to its place (Marvin 08.11.2026: "it only gives a little
+   gas"). An obstacle still stops it - the physics pushes it back, the car does not get on, summon.c sees
+   it standing (summon_follow measures the real way gone). */
+static float creep_last[3], creep_meant;
 static float park_offset[2];
 static int park_side, park_fixed;
 static void summon_creep(void *dynamics, float dt) {
@@ -480,8 +496,19 @@ static void summon_creep(void *dynamics, float dt) {
     }
     float tx = at[0] - p[0], tz = at[2] - p[2], dist = root(tx * tx + tz * tz);
     float along = v[0] * fx + v[2] * fz; /* a new creep starts from the car's own speed (the AI's hand-over) */
-    if (fresh || !float_is_finite(creep_command)) creep_command = along;
-    else along = creep_command;
+    if (fresh || !float_is_finite(creep_command)) {
+        creep_command = along;
+        creep_last[0] = p[0], creep_last[1] = p[1], creep_last[2] = p[2], creep_meant = 0.0f;
+    } else {
+        along = creep_command;
+    }
+    float held_back = 0.0f; /* metres along the nose the car fell short of last frame */
+    {
+        float gone = (p[0] - creep_last[0]) * fx + (p[2] - creep_last[2]) * fz;
+        held_back = creep_meant - gone;
+        if (creep_meant >= 0.0f) held_back = held_back < 0.0f ? 0.0f : held_back > creep_meant ? creep_meant : held_back;
+        else held_back = held_back > 0.0f ? 0.0f : held_back < creep_meant ? creep_meant : held_back;
+    }
     float want = 0.0f, yaw = 0.0f;
     if (dist > 0.01f) {
         float s = (fz * tx - fx * tz) / dist, c = (fx * tx + fz * tz) / dist; /* turn: + means spin +y */
@@ -527,6 +554,9 @@ static void summon_creep(void *dynamics, float dt) {
 #undef CREEP_YAW
     float nfx = fx * tc + fz * ts, nfz = fz * tc - fx * ts;
     state.velocity = _mm_setr_ps(nfx * along, v[1], nfz * along, 0.0f); /* along the nose, no sliding sideways */
+    float px = p[0] + nfx * held_back, pz = p[2] + nfz * held_back;
+    state.position = _mm_setr_ps(px, p[1], pz, 0.0f);
+    creep_last[0] = px, creep_last[1] = p[1], creep_last[2] = pz, creep_meant = along * dt;
     state.spin = _mm_setr_ps(w[0], 0.0f, w[2], 0.0f); /* the turn is ours; tilting stays the physics' */
     set(dynamics, &state);
 }

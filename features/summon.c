@@ -48,7 +48,7 @@
 #define DRIVE_LIMIT_MS 300000u /* at most 5 minutes */
 #define STUCK_SPEED 1.0f       /* m/s */
 #define STUCK_MS 20000u
-#define START_STALL_MS 10000u  /* the AI has not got going at all (car off the road?) */
+#define START_STALL_MS 6000u   /* the AI has not got going at all (car off the road?) */
 #define NEAR_END 30.0f         /* the GPS drops its route some 10-15 m before the end (Marvin's log 08.11.):
                                   a route gone this near the walker means the car has come */
 #define SHORT_START 30.0f      /* nearer than this the GPS route is too short for the AI to set off */
@@ -541,6 +541,27 @@ static void live_card(float gap, float speed, int parking, ULONGLONG now) {
     notify_show_live(text, LIVE_TAG, 1200);
 }
 
+/* The AI only drives along the route: off the road the car does not get going (Marvin 08.11.2026, car
+   parked a few metres next to the road). The AI always tries first (the nearest-road point is a road
+   node, often several metres away also for a car on the road - Marvin's log 08.11.: 8-10 m on the road);
+   only when it does not get going Gripline drives the car to the road itself (not put there: "appearing
+   out of nothing on the road is not nice"), then the AI tries again. Once per summon. */
+static int creep_to_road(const float seen[3], int seen_ok, ULONGLONG now) {
+    if (road_checked) return 0;
+    road_checked = 1;
+    float road[3], heading[3];
+    if (!road_ok || !seen_ok || !nearest_road(drive_car, road, heading)) {
+        log_append("SUMMON: no nearest road found for the car.\r\n");
+        return 0;
+    }
+    float off = distance_xz(seen, road);
+    if (off <= ROAD_SNAP || off > CREEP_RANGE) return 0;
+    log_append_value("SUMMON: the AI does not get going - the car creeps onto the nearest road first, metres: ", (int)(off + 0.5f));
+    release_ai();
+    creep_begin(road, 0, now);
+    return 1;
+}
+
 /* the GPS / the AI cannot bring the car: when it is near enough, Gripline drives it to the walker
    itself, straight across (Marvin 08.11.2026: "make it really good") */
 static int creep_instead(float gap, int walker_ok, const float walker[3], ULONGLONG now, const char *why) {
@@ -606,24 +627,6 @@ static void tick(void *satnav) {
             tinted("Dein Auto kommt\nEs rangiert zu dir (G/X = abbrechen)", "Your car is on its way\nIt is manoeuvring to you (G/X = cancel)",
                    NOTIFY_COLOR_GREEN);
             return;
-        }
-        if (!road_checked) {
-            road_checked = 1;
-            float road[3], heading[3];
-            if (road_ok && seen_ok && nearest_road(drive_car, road, heading)) {
-                float off = distance_xz(seen, road);
-                if (off > ROAD_SNAP && off <= CREEP_RANGE) {
-                    /* the AI only drives along the route: off the road the car would not get going
-                       (Marvin 08.11.2026, car parked a few metres next to the road). It is not put
-                       there (Marvin: "appearing out of nothing on the road is not nice"): Gripline
-                       drives it there slowly, then the AI takes over. */
-                    log_append_value("SUMMON: the car stands off the road - it creeps onto the nearest road, metres: ", (int)(off + 0.5f));
-                    creep_begin(road, 0, now);
-                    return;
-                }
-            } else {
-                log_append("SUMMON: no nearest road found for the car (drives from where it is).\r\n");
-            }
         }
         if (!routed) {
             routed = 1;
@@ -790,6 +793,7 @@ static void tick(void *satnav) {
     if (speed >= STUCK_SPEED) slow_since = now, got_going = 1;
     if (!got_going && now - drive_from > START_STALL_MS) {
         if (creep_instead(gap, walker_ok, walker, now, "SUMMON: the AI did not get the car going.\r\n")) return;
+        if (creep_to_road(seen, seen_ok, now)) return;
         log_append_value("SUMMON: the AI did not get the car going, metres to the walker: ", (int)gap);
         fail(1);
         card("Auto rufen abgebrochen\nDas Auto kommt nicht los - park es n\xc3\xa4her an einer Stra\xc3\x9f""e",

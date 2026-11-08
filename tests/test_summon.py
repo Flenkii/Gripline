@@ -66,6 +66,10 @@ else:
         e.mu.mem_write(I + off, struct.pack('<4f', *v, 0.0))
     def get(off):
         return struct.unpack('<3f', bytes(e.mu.mem_read(I + off, 12)))
+    def level():
+        vec(-0x380, 1.0, 0.0, 0.0); vec(-0x370, 0.0, 1.0, 0.0); vec(-0x360, 0.0, 0.0, 1.0)
+    def place():  # back to the origin, facing +z (Gripline moves the car itself now)
+        vec(-0x390, 0.0, 0.0, 0.0); level()
     vec(-0x390, 0.0, 0.0, 0.0); vec(-0x350, 0.0, -1.0, 0.0); vec(-0x340, 0.1, 0.0, 0.2)
     vec(-0x380, 1.0, 0.0, 0.0); vec(-0x370, 0.0, 1.0, 0.0); vec(-0x360, 0.0, 0.0, 1.0)
     e.call('Fh2TestSummonCreepSet', 0, 0, 0, 0)  # a float call needs xmm args: set through memory below
@@ -82,9 +86,7 @@ else:
           f'lenkt nach +x (Auto selbst gedreht, langsam beim Anfahren), Kippen bleibt der Physik: {fw} {w}')
     r = get(-0x380)
     check(abs(r[0] - 0.9997) < 1e-3 and abs(r[2] + 0.024) < 1e-3, f'rechts-Achse dreht mit: {r}')
-    def level():
-        vec(-0x380, 1.0, 0.0, 0.0); vec(-0x370, 0.0, 1.0, 0.0); vec(-0x360, 0.0, 0.0, 1.0)
-    level()
+    place()
     e.mu.reg_write(__import__('unicorn').x86_const.UC_X86_REG_XMM0, 0)
     e.mu.reg_write(__import__('unicorn').x86_const.UC_X86_REG_XMM2, struct.unpack('<I', struct.pack('<f', 100.0))[0])
     e.call('Fh2TestSummonCreepSet', 0, 0, 0, 0)  # straight ahead, 100 m
@@ -92,6 +94,7 @@ else:
         e.call('Fh2TestNoclipCreep', GAME, I, 100)
     v, w = get(-0x350), get(-0x340)
     check(abs(v[2] - 6.0) < 1e-3 and abs(get(-0x360)[0]) < 1e-4, f'geradeaus nach 4 s etwa 22 km/h, keine Drehung: {v} {get(-0x360)}')
+    place()
     # braking: target now 4 m ahead (road): slows with at most 6 m/s^2 along the planned stop
     e.mu.reg_write(__import__('unicorn').x86_const.UC_X86_REG_XMM0, 0)
     e.mu.reg_write(__import__('unicorn').x86_const.UC_X86_REG_XMM2, struct.unpack('<I', struct.pack('<f', 4.0))[0])
@@ -102,12 +105,13 @@ else:
     # to the walker 8 m ahead: parks beside him (turns off the straight line), keeps going
     e.mu.reg_write(__import__('unicorn').x86_const.UC_X86_REG_XMM0, 0)
     e.mu.reg_write(__import__('unicorn').x86_const.UC_X86_REG_XMM2, struct.unpack('<I', struct.pack('<f', 8.0))[0])
+    place()
     e.call('Fh2TestSummonCreepSet', 0, 0, 0, 1)
     e.call('Fh2TestNoclipCreep', GAME, I, 100)
     v, w = get(-0x350), get(-0x340)
     fw = get(-0x360)
     check(v[2] > 4.0 and abs(fw[0]) > 0.03, f'zum Spieler: faehrt neben ihn (dreht seitlich weg): {v} {fw}')
-    level()
+    place()
     # the walker 2 m ahead: never nearer than 2.6 m - stops
     e.mu.reg_write(__import__('unicorn').x86_const.UC_X86_REG_XMM0, 0)
     e.mu.reg_write(__import__('unicorn').x86_const.UC_X86_REG_XMM2, struct.unpack('<I', struct.pack('<f', 2.0))[0])
@@ -120,6 +124,7 @@ else:
     e.mu.reg_write(__import__('unicorn').x86_const.UC_X86_REG_XMM0, 0)
     e.mu.reg_write(__import__('unicorn').x86_const.UC_X86_REG_XMM2, struct.unpack('<I', struct.pack('<f', 100.0))[0])
     vec(-0x350, 0.0, 0.0, 0.0)
+    place()
     e.call('Fh2TestSummonCreepSet', 0, 0, 0, 0)
     for _ in range(30):
         e.call('Fh2TestNoclipCreep', GAME, I, 100)
@@ -128,6 +133,9 @@ else:
     e.call('Fh2TestNoclipCreep', GAME, I, 100)
     v = get(-0x350)
     check(abs(v[2] - 6.0) < 1e-3, f'Bremsen des geparkten Autos halten es nicht auf (Tempo kommt von Gripline): {v}')
+    pz = get(-0x390)[2]
+    check(9.0 < pz < 14.0, f'haelt das Physik das Auto fest, schiebt Gripline es den fehlenden Weg weiter: {pz:.2f} m nach 3 s')
+    place()
     # stuck: backs up straight (summon.c drives round next)
     e.call('Fh2TestSummonReverse', 1)
     for _ in range(20):  # from 6 m/s forward: braking 6 m/s^2, then back
@@ -137,6 +145,7 @@ else:
     e.call('Fh2TestSummonReverse', 0)
     # sporty: straight ahead 100 m, top speed 8.5 m/s
     e.call('Fh2TestSummonStyle', 2)
+    place()
     e.mu.reg_write(__import__('unicorn').x86_const.UC_X86_REG_XMM0, 0)
     e.mu.reg_write(__import__('unicorn').x86_const.UC_X86_REG_XMM2, struct.unpack('<I', struct.pack('<f', 100.0))[0])
     e.call('Fh2TestSummonCreepSet', 0, 0, 0, 0)
