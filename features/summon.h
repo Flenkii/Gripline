@@ -41,6 +41,9 @@ enum {
 int summon_phase(void);
 /* noclip.c, car update thread, while summoning: where the car is and how fast (m/s) */
 void summon_car_seen(const float position[3], float speed);
+/* noclip.c, car update thread, while held: 1 once when the car is to be put onto the road first
+   (position a little above it, the road's heading towards the walker) */
+int summon_take_place(float position[3], float forward[3]);
 /* noclip.c: the car stands (brake phase over) */
 void summon_braked(void);
 /* walking.c: 1 = the walker stands still (car far away and moving). */

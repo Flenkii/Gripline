@@ -406,6 +406,24 @@ static void summon_follow(void *dynamics, float dt, int phase) {
     summon_car_seen(p, speed);
 }
 
+/* V7.1 summon: the held car onto the road next to it (summon.c found it), level, along the road */
+static void summon_onto_road(void *dynamics, const float at[3], const float ahead[3]) {
+    float length = root(ahead[0] * ahead[0] + ahead[2] * ahead[2]);
+    if (!(length > 0.1f)) return;
+    float fx = ahead[0] / length, fz = ahead[2] / length;
+    _Alignas(16) float r[4], f[4];
+    _mm_store_ps(r, parked.right), _mm_store_ps(f, parked.forward);
+    float m = r[0] * f[2] - r[2] * f[0] >= 0.0f ? 1.0f : -1.0f; /* the game's right row, as heading_from */
+    parked.position = _mm_setr_ps(at[0], at[1], at[2], 0.0f);
+    parked.right = _mm_setr_ps(m * fz, 0.0f, -m * fx, 0.0f);
+    parked.up = _mm_setr_ps(0.0f, 1.0f, 0.0f, 0.0f);
+    parked.forward = _mm_setr_ps(fx, 0.0f, fz, 0.0f);
+    parked.velocity = _mm_setzero_ps(), parked.spin = _mm_setzero_ps();
+    put_back(dynamics);
+    float right[3] = {m * fz, 0.0f, -m * fx}, forward[3] = {fx, 0.0f, fz};
+    walking_move_car(at, right, forward);
+}
+
 static void sin_cos(float a, float *s, float *c) {
     float a2 = a * a; /* |a| <= 1.4: the series is exact to about 1e-4 */
     *s = a * (1.0f - a2 / 6.0f * (1.0f - a2 / 20.0f * (1.0f - a2 / 42.0f * (1.0f - a2 / 72.0f))));
@@ -876,6 +894,8 @@ void noclip_car_update(void *car, float dt, float frame_dt, unsigned frame) {
     else if (park && on == MODE_WALK) {
         hold_walking(park);
         if (summon == SUMMON_HOLD) { /* the route is planned: the car waits at its place */
+            float at[3], ahead[3];
+            if (summon_take_place(at, ahead)) summon_onto_road(park, at, ahead);
             _Alignas(16) float p[4];
             _mm_store_ps(p, parked.position);
             summon_car_seen(p, 0.0f);

@@ -31,6 +31,8 @@
 #define RVA_REWIND_RECORDER 0x34d5700u
 #define RVA_REWIND_CLEAR 0x99c4c0u
 #define RVA_SHARED_LOCK 0x3eb620u          /* weak reference -> shared (object, counter) */
+#define CAR_ROAD_MODE 0x4f94u           /* the car's reset mode; 0 while asking for the nearest road */
+#define CAR_ROAD_BINDINGS 0x4f70u
 #define CAR_DRIVER_HOLDER 0x4d10u
 #define CAR_DRIVER_MODE 0x4d30u            /* 1 = the player drives, 0 = the AI */
 
@@ -39,6 +41,8 @@
 #define DRIVE_LIMIT_MS 300000u /* at most 5 minutes */
 #define STUCK_SPEED 1.0f       /* m/s */
 #define STUCK_MS 20000u
+#define START_STALL_MS 7000u   /* the AI has not got going at all (car off the road?) */
+#define ROAD_SNAP 3.0f         /* metres from the nearest road: farther, the car is put onto it first */
 #define BRAKE_LIMIT_MS 5000u
 
 typedef struct {
@@ -53,6 +57,7 @@ typedef void (*RewindClearFn)(void *, unsigned char, unsigned char);
 typedef void (*SharedLockFn)(void *, Shared *);
 typedef void *(*PlayerGetter)(void *, int);
 typedef void *(*CarGetter)(void *, void **);
+typedef unsigned char (*NearestRoadFn)(void *car, float *position, float *basis, unsigned char pop_history);
 
 static unsigned char *game;
 static int ready;
@@ -71,6 +76,13 @@ static float target[3];            /* the walker's place the route goes to */
 static SRWLOCK seen_lock = SRWLOCK_INIT;
 static float car_seen[3], car_speed;
 static int car_seen_ok;
+/* game thread -> car update thread: put the held car onto the road (once) */
+static SRWLOCK place_lock = SRWLOCK_INIT;
+static float place_at[3], place_forward[3];
+static volatile LONG place_pending;
+static int got_going; /* the car has moved since the AI took it */
+static int road_checked;
+static int road_ok; /* the nearest-road query is the game's code as found */
 
 int summon_ready(void) {
     return ready;
@@ -234,12 +246,82 @@ static float distance_xz(const float a[3], const float b[3]) {
     return _mm_cvtss_f32(_mm_sqrt_ss(_mm_set_ss(d > 0.0f ? d : 0.0f)));
 }
 
+/* The road the car stands on or next to, as the game's own "reset to the road" finds it (game+0xf5db40,
+   used by Gripline before V6 for the garage swap): the car's road binding gives the nearest road node,
+   which is checked first (the query follows its neighbours); the car's reset mode is borrowed as 0 only
+   for this call. out = position, forward = the road's heading. */
+static int node_ok(unsigned char *node, float position[3]) {
+    void *edges;
+    int edge_count;
+    if (!memory_read(node + 0x14, position, 12) || !memory_read(node + 0x20, &edge_count, 4) || edge_count < 1 ||
+        edge_count > 64 || !memory_read_pointer(node, &edges) || !edges)
+        return 0;
+    for (unsigned i = 0; i < 3; ++i)
+        if (!float_is_finite(position[i])) return 0;
+    int usable = 0;
+    for (int i = 0; i < edge_count; ++i) {
+        unsigned char *entry = (unsigned char *)edges + (size_t)i * 16, *edge;
+        void *points;
+        int index, count;
+        if (!memory_read_pointer(entry, (void **)&edge) || !edge || !memory_read(entry + 8, &index, 4) ||
+            !memory_read_pointer(edge, &points) || !points || !memory_read(edge + 0x10, &count, 4) || count < 1 ||
+            count > 1000000 || index < 0 || index >= count)
+            return 0;
+        for (int side = -1; side <= 1; side += 2) {
+            int next = index + side;
+            unsigned char *neighbour;
+            float np[3];
+            if (next < 0 || next >= count) continue;
+            if (!memory_read((unsigned char *)points + (size_t)next * 8, &neighbour, 8)) return 0;
+            if (!neighbour) continue;
+            if (!memory_read(neighbour + 0x14, np, 12)) return 0;
+            for (unsigned j = 0; j < 3; ++j)
+                if (!float_is_finite(np[j])) return 0;
+            if (np[0] != position[0] || np[1] != position[1] || np[2] != position[2]) usable = 1;
+        }
+    }
+    return usable;
+}
+
+static int nearest_road(unsigned char *car, float out[3], float forward[3]) {
+    void *bindings, *outer, *inner;
+    unsigned char *node;
+    int mode;
+    float node_position[3];
+    if (!has_vtable(car, GAME_RVA_PLAYER_CAR_VTABLE) || !memory_read(car + CAR_ROAD_MODE, &mode, 4) ||
+        !memory_is_writable(car + CAR_ROAD_MODE, 4) || !memory_read_pointer(car + CAR_ROAD_BINDINGS, &bindings) ||
+        !has_vtable(bindings, GAME_RVA_ROAD_BINDINGS_VTABLE) || !memory_read_pointer((unsigned char *)bindings + 0xa8, &outer) ||
+        !outer || !memory_read_pointer(outer, &inner) || !inner || !memory_read_pointer((unsigned char *)inner + 0x10, (void **)&node) ||
+        !node || !node_ok(node, node_position))
+        return 0;
+    _Alignas(16) float position[4] = {0}, basis[12] = {0};
+    *(volatile int *)(car + CAR_ROAD_MODE) = 0;
+    unsigned char found = ((NearestRoadFn)(game + GAME_RVA_NEAREST_ROAD))(car, position, basis, 0);
+    *(volatile int *)(car + CAR_ROAD_MODE) = mode;
+    if (!found) return 0;
+    for (unsigned i = 0; i < 3; ++i)
+        if (!float_is_finite(position[i]) || !float_is_finite(basis[8 + i])) return 0;
+    float f2 = basis[8] * basis[8] + basis[10] * basis[10];
+    if (f2 < 0.25f || f2 > 1.1f) return 0;
+    for (unsigned i = 0; i < 3; ++i) out[i] = position[i], forward[i] = basis[8 + i];
+    return 1;
+}
+
+int summon_take_place(float position[3], float forward[3]) {
+    if (!place_pending || !InterlockedExchange(&place_pending, 0)) return 0;
+    AcquireSRWLockShared(&place_lock);
+    for (unsigned i = 0; i < 3; ++i) position[i] = place_at[i], forward[i] = place_forward[i];
+    ReleaseSRWLockShared(&place_lock);
+    return 1;
+}
+
 /* ------------------------------------------------------------------ the summon */
 
 static void reset(void) {
     if (drive_car) release_car(drive_car);
     drive_car = drive_satnav = drive_tracker = NULL;
-    routed = route_begun = driving_ai = 0;
+    routed = route_begun = driving_ai = got_going = road_checked = 0;
+    InterlockedExchange(&place_pending, 0);
     InterlockedExchange(&frozen, 0);
     AcquireSRWLockExclusive(&seen_lock);
     car_seen_ok = 0;
@@ -344,6 +426,29 @@ static void tick(void *satnav) {
             return;
         }
         if (now < hold_until) return;
+        if (!road_checked) {
+            road_checked = 1;
+            float road[3], heading[3];
+            if (road_ok && seen_ok && nearest_road(drive_car, road, heading)) {
+                float off = distance_xz(seen, road);
+                if (off > ROAD_SNAP) {
+                    /* the AI only drives along the route: off the road the car would not get going
+                       (Marvin 08.11.2026, car parked a few metres next to the road) */
+                    float tx = target[0] - road[0], tz = target[2] - road[2];
+                    if (heading[0] * tx + heading[2] * tz < 0.0f) heading[0] = -heading[0], heading[1] = -heading[1], heading[2] = -heading[2];
+                    AcquireSRWLockExclusive(&place_lock);
+                    place_at[0] = road[0], place_at[1] = road[1] + 0.6f, place_at[2] = road[2];
+                    place_forward[0] = heading[0], place_forward[1] = heading[1], place_forward[2] = heading[2];
+                    ReleaseSRWLockExclusive(&place_lock);
+                    InterlockedExchange(&place_pending, 1);
+                    log_append_value("SUMMON: the car stood off the road - put onto the nearest road, metres: ", (int)(off + 0.5f));
+                    hold_until = now + 600; /* it settles there, the GPS starts from there */
+                    return;
+                }
+            } else {
+                log_append("SUMMON: no nearest road found for the car (drives from where it is).\r\n");
+            }
+        }
         if (!routed) {
             routed = 1;
             route_until = now + ROUTE_WAIT_MS;
@@ -378,6 +483,7 @@ static void tick(void *satnav) {
             return;
         }
         driving_ai = 1;
+        got_going = 0;
         drive_from = slow_since = now;
         InterlockedExchange(&phase, SUMMON_DRIVE);
         log_append("SUMMON: the AI drives the car to the walker.\r\n");
@@ -410,7 +516,14 @@ static void tick(void *satnav) {
         else card("Auto rufen abgebrochen\nRoute weg (Gripline.log)", "Summon stopped\nRoute gone (Gripline.log)");
         return;
     }
-    if (speed >= STUCK_SPEED) slow_since = now;
+    if (speed >= STUCK_SPEED) slow_since = now, got_going = 1;
+    if (!got_going && now - drive_from > START_STALL_MS) {
+        log_append_value("SUMMON: the AI did not get the car going, metres to the walker: ", (int)gap);
+        stop(1);
+        card("Auto rufen abgebrochen\nDas Auto kommt nicht los - park es n\xc3\xa4her an einer Stra\xc3\x9f""e",
+             "Summon stopped\nThe car can't get going - park it closer to a road");
+        return;
+    }
     if (now - slow_since > STUCK_MS || now - drive_from > DRIVE_LIMIT_MS) {
         log_append_value(now - drive_from > DRIVE_LIMIT_MS ? "SUMMON: took too long, metres to the walker: "
                                                            : "SUMMON: the car is stuck, metres to the walker: ",
@@ -495,6 +608,9 @@ int summon_start(unsigned char *game_image) {
         log_append("SUMMON: game code differs - summon off.\r\n");
         return 0;
     }
+    static const unsigned char road_code[] = {0x48, 0x8b, 0xc4, 0x56, 0x57, 0x41, 0x54, 0x41, 0x56, 0x41, 0x57, 0x48, 0x81, 0xec};
+    road_ok = memory_equal(game + GAME_RVA_NEAREST_ROAD, road_code, sizeof(road_code));
+    if (!road_ok) log_append("SUMMON: nearest-road code differs - a car off the road is not put onto it.\r\n");
     if (!chain(RVA_TRACKER_UPDATE_SLOT, RVA_TRACKER_UPDATE, (void *)(uintptr_t)tracker_update, &previous_tracker_update) ||
         !chain(RVA_TRACKER_DESTROY_SLOT, RVA_TRACKER_DESTROY, (void *)(uintptr_t)tracker_destroy, &previous_tracker_destroy) ||
         !chain(RVA_SATNAV_DEACTIVATE_SLOT, RVA_SATNAV_DEACTIVATE, (void *)(uintptr_t)satnav_deactivate,
