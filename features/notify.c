@@ -2571,10 +2571,10 @@ static float sin_cos_tan_half(float fov) {
     return cs > 0.05f ? sn / cs : 20.0f;
 }
 
-/* V7.1 car marker (walking.h walking_car_marker): a blue arrow (Gripline blue) pointing at (dx, dy)
+/* V7.1 car marker (walking.h walking_car_marker): an arrow in the card colour (F8, also rainbow) pointing at (dx, dy)
    with its tip at (tx, ty), drawn straight into the frame with a soft edge and a dark rim */
 static void draw_marker(unsigned char *frame, int frame_w, int frame_h, float tx, float ty, float dx, float dy,
-                        float size, float alpha) {
+                        float size, float alpha, const unsigned char blue[3], const unsigned char light[3]) {
     float l = dx * dx + dy * dy;
     if (l < 1e-6f) dx = 0.0f, dy = 1.0f;
     else {
@@ -2586,7 +2586,6 @@ static void draw_marker(unsigned char *frame, int frame_w, int frame_h, float tx
     float ax[3] = {tx, bx + px * size * 0.6f, bx - px * size * 0.6f};
     float ay[3] = {ty, by + py * size * 0.6f, by - py * size * 0.6f};
     int x0 = (int)(tx - size * 1.4f), x1 = (int)(tx + size * 1.4f), y0 = (int)(ty - size * 1.4f), y1 = (int)(ty + size * 1.4f);
-    static const unsigned char blue[3] = {38, 120, 225}, light[3] = {110, 185, 255};
     float rim = size * 0.12f + 1.0f;
     for (int y = y0; y <= y1; ++y) {
         if (y < 0 || y >= frame_h) continue;
@@ -2909,6 +2908,9 @@ static DWORD WINAPI overlay_thread(void *unused) {
                             l.width * 4, l.width, l.height, a);
             y += l.height + l.gap;
         }
+        /* the rainbow moves on also while only the gauge / the marker are up (Marvin 08.11.2026: without a
+           card or the menu the gauge's rainbow stood still) */
+        if ((marker || gauge) && color == NOTIFY_COLOR_RAINBOW) rainbow_tick();
         if (marker) {
             float half_h = (float)screen_h * 0.5f, half_w = (float)screen_w * 0.5f;
             float tan_v = sin_cos_tan_half(m_fov), tan_h = tan_v * (float)screen_w / (float)screen_h;
@@ -2917,7 +2919,7 @@ static DWORD WINAPI overlay_thread(void *unused) {
             int on = m_ahead > 0.5f && sx > edge && sx < screen_w - edge && sy > edge && sy < screen_h - edge;
             if (on) {
                 draw_marker(frame, frame_w, frame_h, sx - (float)(screen_w - frame_w), sy - size * 0.4f, 0.0f, 1.0f, size,
-                            marker_alpha);
+                            marker_alpha, palette[color][0], palette[color][1]);
             } else { /* at the edge, pointing the way to turn */
                 float dx = m_ahead > 0.5f ? sx - half_w : (m_tx >= 0.0f ? 1.0f : -1.0f) * half_w;
                 float dy = m_ahead > 0.5f ? sy - half_h : 0.0f;
@@ -2926,7 +2928,7 @@ static DWORD WINAPI overlay_thread(void *unused) {
                 float k = k1 < k2 ? k1 : k2;
                 if (k > 1e8f) k = 0.0f, dx = 0.0f, dy = 1.0f;
                 draw_marker(frame, frame_w, frame_h, half_w + dx * k - (float)(screen_w - frame_w), half_h + dy * k, dx, dy,
-                            size, marker_alpha * 0.9f);
+                            size, marker_alpha * 0.9f, palette[color][0], palette[color][1]);
             }
         }
         if (gauge && gauge_style != WALK_GAUGE_OFF && gauge_alpha > 0.0f) {
