@@ -33,6 +33,8 @@ void notify_show_deferred_call(NotifyTextFn make);
    swap chain). host = azimuth.exe image. Returns 1 when hooked. */
 int notify_install(unsigned char *host);
 int notify_install_late(void); /* after the game made its swap chain (plugin build) */
+/* plugin build, before notify_install: always the window over the game (it has the walking gauge and the fade) */
+void notify_prefer_window(void);
 
 /* On/off (menu, INI). Off hides cards at once; messages are still logged. */
 void notify_set_enabled(int enabled);

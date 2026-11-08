@@ -3034,11 +3034,39 @@ static HRESULT STDMETHODCALLTYPE hook_resize1(IDXGISwapChain3 *swapchain, UINT c
     return original_resize1(swapchain, count, width, height, format, flags, mask, queues);
 }
 
+/* plugin build: the cards always go into the window over the game, also when the early hook sees the swap
+   chain made (the game re-made its device after Gripline was loaded). The D3D12 overlay draws only the
+   cards; the walking gauge and the fade to black exist only in the window (Marvin 08.11.2026: speedometer
+   and black fade gone in a start where the early hook caught the swap chain). */
+static volatile LONG prefer_window;
+void notify_prefer_window(void) {
+    InterlockedExchange(&prefer_window, 1);
+}
+
 static void hook_swapchain(IUnknown *device, IDXGISwapChain *swapchain) {
     ID3D12CommandQueue *q = NULL;
     if (making_helper || !swapchain || !device ||
         FAILED(IUnknown_QueryInterface(device, &IID_ID3D12CommandQueue, (void **)&q)))
         return; /* not a D3D12 swap chain (or a helper window) */
+    if (prefer_window) {
+        ID3D12CommandQueue_Release(q);
+        HWND output = NULL;
+        __try {
+            DXGI_SWAP_CHAIN_DESC sd;
+            if (SUCCEEDED(IDXGISwapChain_GetDesc(swapchain, &sd))) output = sd.OutputWindow;
+        } __except (EXCEPTION_EXECUTE_HANDLER) {
+            output = NULL;
+        }
+        if (!output) return; /* the late hook takes it */
+        swapchain_seen = swapchain; /* Present: deferred cards; no D3D12 drawing (queue stays NULL) */
+        void **vt = *(void ***)swapchain;
+        int hooked = swap_slot(&vt[8], (void *)hook_present, (void **)&original_present) &&
+                     swap_slot(&vt[22], (void *)hook_present1, (void **)&original_present1);
+        log_append(hooked ? "NOTIFY: game swap chain found early; cards go into a window over the game.\r\n"
+                          : "NOTIFY: game swap chain found early; Present not hooked, cards in a window over the game.\r\n");
+        start_window_overlay(output);
+        return;
+    }
     idle_gpu();
     if (queue && queue != q) {
         /* a new queue (device re-created): start over with fresh objects */

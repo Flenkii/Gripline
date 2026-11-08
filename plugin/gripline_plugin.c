@@ -603,6 +603,7 @@ FH2MOD_EXPORT int fh2mod_init(const FH2ModApi *platform) {
     unsigned char *host = (unsigned char *)GetModuleHandleW(NULL);
     if (host) {
         int keys = keyboard_pad_arm(host, directory); /* before Azimuth sets up its gamepads */
+        notify_prefer_window();                       /* the window has the walking gauge and the fade */
         int cards = notify_install(host);             /* game picture cards */
         platform_log(keys ? "early keyboard hook: yes" : "early keyboard hook: no");
         platform_log(cards ? "early card hook: yes" : "early card hook: no");
