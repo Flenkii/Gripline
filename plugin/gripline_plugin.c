@@ -38,6 +38,7 @@
 #include "features/noclip.h"
 #include "features/walking.h"
 #include "features/menu_mouse.h"
+#include "features/focus_guard.h"
 #include "features/no_damage.h"
 #include "features/version_check.h"
 #include "features/update_check.h"
@@ -516,6 +517,7 @@ static void start_features(void) {
     walking_set_handheld(options.walk_handheld);
     walk_gauge_set_style(options.walk_gauge);
     menu_mouse_start(game); /* after walking: both chain the UI frame */
+    focus_guard_start();    /* Azimuth may miss "window active" at the start -> pause menu again and again */
     no_damage_bind(game);
     no_damage_set_mode(options.no_damage);
     noclip_install();
