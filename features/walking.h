@@ -78,6 +78,8 @@ int walking_handheld(void);
    a menu), with what it shows. Any thread. */
 #include "walk_gauge.h"
 int walking_gauge_data(WalkGaugeData *out);
+/* V7.1: blue arrow over the hidden car's place (see walking.c) */
+int walking_car_marker(float *tx, float *ty, float *ahead, float *fov, float *distance);
 
 /* Door sounds of the fade when getting out / in (Marvin 06.11.2026, his own sound file, cut in two,
    built into the DLL): 0 = door opens, 1 = door shuts. Played through Windows (winmm PlaySoundW,

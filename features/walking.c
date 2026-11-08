@@ -894,6 +894,7 @@ int walking_view_outside(void) {
     return i >= 0 && cameras[i].family == 1;
 }
 
+static void marker_update(void);
 static void *camera_view(void *camera, void *out) {
     int i = camera_index(camera);
     if (i < 0) return out;
@@ -907,6 +908,7 @@ static void *camera_view(void *camera, void *out) {
         walk_fov = fov ? fov(camera) : 0.0f;
         walk_view_camera = camera;
         walk_view_ok = 1;
+        if (hiding) marker_update();
     }
     return result;
 }
@@ -1030,6 +1032,52 @@ static int hud_hidden(void) {
 
 /* V7.1 walking gauge: 1 = show it (walking, out of the car, the game running - not in a menu or
    paused, where the game draws its HUD again) and *out filled */
+
+/* V7.1 car marker (Marvin 08.11.2026): while the car is hidden beyond 45 m a blue arrow shows where it
+   is parked. 1 = show it; tx / ty: the place seen from the eye (right / up per metre ahead), ahead:
+   metres in front of the eye (<= 0 behind), fov: the camera's vertical view angle (radians). */
+static SRWLOCK marker_lock = SRWLOCK_INIT;
+static float marker_tx, marker_ty, marker_ahead, marker_fov = 1.0f;
+static int marker_on;
+int walking_car_marker(float *tx, float *ty, float *ahead, float *fov, float *distance) {
+    if (!hud_hidden() || !hiding) return 0;
+    AcquireSRWLockShared(&marker_lock);
+    int on = marker_on;
+    *tx = marker_tx, *ty = marker_ty, *ahead = marker_ahead, *fov = marker_fov;
+    ReleaseSRWLockShared(&marker_lock);
+    *distance = walking_car_distance();
+    return on;
+}
+
+static void marker_update(void) {
+    /* the camera's axes: ahead = look, right level, up = right x ahead */
+    float fx = look[0], fy = look[1], fz = look[2];
+    float rl = root(fz * fz + fx * fx);
+    if (rl < 1e-4f) return;
+    float rx = -fz / rl, rz = fx / rl; /* right of the look, level (sign checked below with the walker's right) */
+    float wr = mirror * dir[1] * rx + (-mirror * dir[0]) * rz;
+    if (wr < 0.0f) rx = -rx, rz = -rz;
+    float ux = -(rz * fy), uy = rz * fx - rx * fz, uz = rx * fy;
+    if (uy < 0.0f) ux = -ux, uy = -uy, uz = -uz;
+    float vx = car_place[0] - eye[0], vy = car_place[1] + 2.2f - eye[1], vz = car_place[2] - eye[2];
+    float a = vx * fx + vy * fy + vz * fz, x = vx * rx + vz * rz, y = vx * ux + vy * uy + vz * uz;
+    float fov = walk_fov;
+    if (fov > 20.0f && fov < 140.0f) fov *= 0.0174533f; /* degrees */
+    if (!(fov > 0.3f && fov < 2.5f)) fov = 1.0f;
+    static int fov_logged;
+    if (!fov_logged) {
+        fov_logged = 1;
+        log_append_value("WALKING: car marker - camera view angle (x1000): ", (int)(walk_fov * 1000.0f));
+    }
+    AcquireSRWLockExclusive(&marker_lock);
+    marker_ahead = a;
+    marker_tx = a > 0.1f ? x / a : x;
+    marker_ty = a > 0.1f ? y / a : y;
+    marker_fov = fov;
+    marker_on = 1;
+    ReleaseSRWLockExclusive(&marker_lock);
+}
+
 int walking_gauge_data(WalkGaugeData *out) {
     if (!hud_hidden() || distance_cm < 0) return 0;
     static ULONGLONG units_next;

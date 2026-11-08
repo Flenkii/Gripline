@@ -2563,6 +2563,70 @@ static void blend_block(unsigned char *frame, int frame_w, int frame_h, int x, i
     }
 }
 
+/* tan(fov / 2) for a view angle up to 2.5 rad (series, exact to ~1e-4) */
+static float sin_cos_tan_half(float fov) {
+    float a = fov * 0.5f, a2 = a * a;
+    float sn = a * (1.0f - a2 / 6.0f * (1.0f - a2 / 20.0f * (1.0f - a2 / 42.0f * (1.0f - a2 / 72.0f))));
+    float cs = 1.0f - a2 / 2.0f * (1.0f - a2 / 12.0f * (1.0f - a2 / 30.0f * (1.0f - a2 / 56.0f)));
+    return cs > 0.05f ? sn / cs : 20.0f;
+}
+
+/* V7.1 car marker (walking.h walking_car_marker): a blue arrow (Gripline blue) pointing at (dx, dy)
+   with its tip at (tx, ty), drawn straight into the frame with a soft edge and a dark rim */
+static void draw_marker(unsigned char *frame, int frame_w, int frame_h, float tx, float ty, float dx, float dy,
+                        float size, float alpha) {
+    float l = dx * dx + dy * dy;
+    if (l < 1e-6f) dx = 0.0f, dy = 1.0f;
+    else {
+        float r = 1.0f / root(l);
+        dx *= r, dy *= r;
+    }
+    float px = -dy, py = dx; /* across the arrow */
+    float bx = tx - dx * size, by = ty - dy * size; /* middle of the back edge */
+    float ax[3] = {tx, bx + px * size * 0.6f, bx - px * size * 0.6f};
+    float ay[3] = {ty, by + py * size * 0.6f, by - py * size * 0.6f};
+    int x0 = (int)(tx - size * 1.4f), x1 = (int)(tx + size * 1.4f), y0 = (int)(ty - size * 1.4f), y1 = (int)(ty + size * 1.4f);
+    static const unsigned char blue[3] = {38, 120, 225}, light[3] = {110, 185, 255};
+    float rim = size * 0.12f + 1.0f;
+    for (int y = y0; y <= y1; ++y) {
+        if (y < 0 || y >= frame_h) continue;
+        for (int x = x0; x <= x1; ++x) {
+            if (x < 0 || x >= frame_w) continue;
+            float qx = (float)x + 0.5f, qy = (float)y + 0.5f, d = 1e9f;
+            int inside = 1;
+            for (int e = 0; e < 3; ++e) { /* signed distance to each edge (positive = inside) */
+                float ex = ax[(e + 1) % 3] - ax[e], ey = ay[(e + 1) % 3] - ay[e];
+                float el = root(ex * ex + ey * ey);
+                if (el < 1e-3f) continue;
+                float cx = ax[(e + 2) % 3] - ax[e], cy = ay[(e + 2) % 3] - ay[e];
+                float side = (ex * cy - ey * cx) >= 0.0f ? 1.0f : -1.0f;
+                float sd = side * (ex * (qy - ay[e]) - ey * (qx - ax[e])) / el;
+                if (sd < d) d = sd;
+                if (sd < 0.0f) inside = 0;
+            }
+            (void)inside;
+            float cover = d + rim + 0.5f; /* rim + fill */
+            if (cover <= 0.0f) continue;
+            if (cover > 1.0f) cover = 1.0f;
+            float fill = d + 0.5f;
+            fill = fill < 0.0f ? 0.0f : fill > 1.0f ? 1.0f : fill;
+            float shade = d / size; /* lighter towards the middle */
+            shade = shade < 0.0f ? 0.0f : shade > 0.35f ? 1.0f : shade / 0.35f;
+            float a = cover * alpha;
+            unsigned char *o = frame + ((size_t)y * frame_w + x) * 4;
+            float col[3];
+            for (int c = 0; c < 3; ++c) {
+                float f = (float)blue[c] + ((float)light[c] - (float)blue[c]) * shade * 0.6f;
+                col[c] = (f * fill + 10.0f * (1.0f - fill)); /* dark rim outside the fill */
+            }
+            /* premultiplied over, BGRA */
+            float keep = 1.0f - a;
+            float v[4] = {col[2] * a + o[0] * keep, col[1] * a + o[1] * keep, col[0] * a + o[2] * keep, 255.0f * a + o[3] * keep};
+            for (int c = 0; c < 4; ++c) o[c] = (unsigned char)(v[c] > 255.0f ? 255.0f : v[c]);
+        }
+    }
+}
+
 /* the menu pointer: a white arrow with a dark rim (premultiplied BGRA, size x size, tip at 0,0) */
 #define CURSOR_MAX 72
 static unsigned char cursor_pixels[CURSOR_MAX * CURSOR_MAX * 4];
@@ -2692,6 +2756,14 @@ static DWORD WINAPI overlay_thread(void *unused) {
         gauge_alpha = gauge_alpha < 0.0f ? 0.0f : gauge_alpha > 1.0f ? 1.0f : gauge_alpha;
         if (gauge_style == WALK_GAUGE_OFF) gauge_alpha = 0.0f;
         int gauge = gauge_alpha > 0.0f;
+        /* V7.1 car marker: a blue arrow over the hidden car's place */
+        static float marker_alpha;
+        float m_tx = 0.0f, m_ty = 0.0f, m_ahead = 0.0f, m_fov = 1.0f, m_dist = 0.0f;
+        int marker_want = !dark && walking_car_marker(&m_tx, &m_ty, &m_ahead, &m_fov, &m_dist);
+        marker_alpha += marker_want ? gauge_dt / 0.3f : -gauge_dt / 0.2f;
+        marker_alpha = marker_alpha < 0.0f ? 0.0f : marker_alpha > 1.0f ? 1.0f : marker_alpha;
+        int marker = marker_want && marker_alpha > 0.0f;
+        gauge = gauge || marker; /* keeps the window up */
         if ((!count && !panel && !tele_n && !dark && !pointer && !gauge) || !focused /* black shows even with cards off */ || win.IsIconic(game_window)) {
             if (visible) win.ShowWindow(window, SW_HIDE);
             visible = 0;
@@ -2754,12 +2826,12 @@ static DWORD WINAPI overlay_thread(void *unused) {
         int want_w = l.margin + 2 * l.width + l.gap + (int)(40.0f * l.scale) + 4;
         if (tele && (tele_pos >= NOTIFY_TELE_LEFT_TOP || pl.width + l.margin + 4 > want_w)) want_w = screen_w;
         int gauge_w = 0, gauge_h = 0, gauge_margin = walk_gauge_margin(screen_h);
-        if (gauge) {
+        if (gauge && gauge_style != WALK_GAUGE_OFF && gauge_alpha > 0.0f) {
             walk_gauge_size(gauge_style, screen_h, &gauge_w, &gauge_h);
             if ((size_t)gauge_w * gauge_h * 4 > sizeof(scratch_gauge)) gauge = 0;
             else if (gauge_w + gauge_margin + 4 > want_w) want_w = gauge_w + gauge_margin + 4;
         }
-        if (dark || pointer || want_w > screen_w) want_w = screen_w;
+        if (dark || pointer || marker || want_w > screen_w) want_w = screen_w;
         if (want_w != frame_w || screen_h != frame_h) {
             if (bitmap) gdi.DeleteObject(bitmap);
             BITMAPINFO info;
@@ -2837,7 +2909,27 @@ static DWORD WINAPI overlay_thread(void *unused) {
                             l.width * 4, l.width, l.height, a);
             y += l.height + l.gap;
         }
-        if (gauge) {
+        if (marker) {
+            float half_h = (float)screen_h * 0.5f, half_w = (float)screen_w * 0.5f;
+            float tan_v = sin_cos_tan_half(m_fov), tan_h = tan_v * (float)screen_w / (float)screen_h;
+            float sx = half_w + m_tx / tan_h * half_w, sy = half_h - m_ty / tan_v * half_h;
+            float size = (float)screen_h * 0.028f, edge = size * 2.2f;
+            int on = m_ahead > 0.5f && sx > edge && sx < screen_w - edge && sy > edge && sy < screen_h - edge;
+            if (on) {
+                draw_marker(frame, frame_w, frame_h, sx - (float)(screen_w - frame_w), sy - size * 0.4f, 0.0f, 1.0f, size,
+                            marker_alpha);
+            } else { /* at the edge, pointing the way to turn */
+                float dx = m_ahead > 0.5f ? sx - half_w : (m_tx >= 0.0f ? 1.0f : -1.0f) * half_w;
+                float dy = m_ahead > 0.5f ? sy - half_h : 0.0f;
+                float ax = dx < 0.0f ? -dx : dx, ay = dy < 0.0f ? -dy : dy;
+                float k1 = ax > 1e-3f ? (half_w - edge) / ax : 1e9f, k2 = ay > 1e-3f ? (half_h - edge) / ay : 1e9f;
+                float k = k1 < k2 ? k1 : k2;
+                if (k > 1e8f) k = 0.0f, dx = 0.0f, dy = 1.0f;
+                draw_marker(frame, frame_w, frame_h, half_w + dx * k - (float)(screen_w - frame_w), half_h + dy * k, dx, dy,
+                            size, marker_alpha * 0.9f);
+            }
+        }
+        if (gauge && gauge_style != WALK_GAUGE_OFF && gauge_alpha > 0.0f) {
             /* drawn again when what it shows changed, and every frame while something moves on it */
             static int drawn_style = -1, drawn_h, drawn_value = -1, drawn_mode = -1, drawn_dist = -1, drawn_dir = 99999,
                        drawn_colour = -1;
