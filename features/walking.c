@@ -461,13 +461,16 @@ static int diag_cm(float metres) {
 static void diag_frame(float dt, float before_y) {
     static unsigned jumps;
     LONG sw = InterlockedExchange(&diag_switch, 0);
-    if (sw == 1) { /* Marvin 08.11.2026: say why the car is gone (and why the picture sits a little higher) */
+    if (sw == 1 || sw == 2) { /* Marvin 08.11.2026: why the car is gone - and when it is back */
         int de = game_language_is_german(game);
-        notify_show_tinted(de ? "Auto au\xc3\x9f""er Sicht\nAb 45 m wird dein Auto versteckt, damit der Boden geladen bleibt. Das Bild "
-                                "wirkt dabei etwas h\xc3\xb6""her. Unter 40 m steht es wieder da."
-                              : "Car out of sight\nBeyond 45 m your car is hidden so the ground stays loaded. The picture "
-                                "looks a little higher then. Within 40 m it is back.",
-                           NOTIFY_COLOR_ORANGE, de ? "HINWEIS" : "NOTE", 0);
+        if (sw == 1)
+            notify_show_tinted(de ? "Auto au\xc3\x9f""er Sicht\nVersteckt, damit der Boden geladen bleibt"
+                                  : "Car out of sight\nHidden so the ground stays loaded",
+                               NOTIFY_COLOR_ORANGE, de ? "HINWEIS" : "NOTE", 0);
+        else
+            notify_show_tinted(de ? "Auto wieder da\nUnter 40 m steht es an seinem Platz"
+                                  : "Car back\nWithin 40 m it stands at its place",
+                               NOTIFY_COLOR_GREEN, de ? "HINWEIS" : "NOTE", 0);
     }
     char line[240];
     unsigned n = 0;
