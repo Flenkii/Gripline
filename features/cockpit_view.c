@@ -35,7 +35,7 @@ static unsigned char button_held[4], button_taken[4];
 #define PRESS_MS 150u
 static volatile LONG want_driver; /* WANT_* */
 enum { WANT_NONE, WANT_DRIVER, WANT_OUTSIDE, WANT_CAMERA };
-static volatile LONG want_camera = -1, want_second; /* WANT_CAMERA: walking.c's camera index, cockpit 2 */
+static volatile LONG want_camera = -1, want_second; /* WANT_CAMERA: walking.c's camera index, dashboard cam */
 static volatile LONG64 want_since;
 static volatile LONG press_device = -1; /* user * 2 + wheel of the controller that gets the presses */
 
@@ -102,7 +102,7 @@ static int want_reached(void) {
         case WANT_DRIVER: return driver_active();
         case WANT_OUTSIDE: return walking_view_outside();
         case WANT_CAMERA:
-            /* cockpit 2 lives on the driver camera: the camera first, then the view */
+            /* dashboard cam lives on the driver camera: the camera first, then the view */
             if (walking_view_camera() != want_camera) return 0;
             if (want_second && !second_view) set_view(1);
             if (!want_second && second_view) set_view(0);
@@ -141,9 +141,9 @@ static int camera_button(unsigned user, int held) {
     }
     if (press) {
         if (second_view) {
-            set_view(0); /* cockpit 2 -> the game's next camera */
+            set_view(0); /* dashboard cam -> the game's next camera */
         } else if (driver_active()) {
-            set_view(1); /* cockpit -> cockpit 2, the game stays on the driver camera */
+            set_view(1); /* cockpit -> dashboard cam, the game stays on the driver camera */
             button_taken[user] = 1;
         }
     }
@@ -214,7 +214,7 @@ void cockpit_view_start(unsigned char *game_image) {
         VirtualProtect(site, 5, old, &ignored);
         FlushInstructionCache(GetCurrentProcess(), site, 5);
     }
-    log_append("COCKPIT VIEW: camera button step ready (cockpit -> cockpit 2 -> next camera).\r\n");
+    log_append("COCKPIT VIEW: camera button step ready (cockpit -> dashboard cam -> next camera).\r\n");
 }
 
 /* The driver camera's vtable (game+0x2e78120) asks for its field of view every frame (slot 0x70);
@@ -234,13 +234,13 @@ static void hook_driver_camera(unsigned char *game_image) {
     void **slot = (void **)(game_image + RVA_DRIVER_CAMERA_VTABLE + FOV_SLOT);
     void *current = NULL;
     if (!memory_read_pointer(slot, &current) || !current) {
-        log_append("COCKPIT VIEW: driver camera not found - cockpit view 2 cannot move the camera.\r\n");
+        log_append("COCKPIT VIEW: driver camera not found - dashboard cam cannot move the camera.\r\n");
         return;
     }
     if (current == (void *)(uintptr_t)driver_fov) return;
     DWORD old, ignored;
     if (!VirtualProtect(slot, sizeof(void *), PAGE_READWRITE, &old)) {
-        log_append("COCKPIT VIEW: driver camera is write-protected - cockpit view 2 cannot move the camera.\r\n");
+        log_append("COCKPIT VIEW: driver camera is write-protected - dashboard cam cannot move the camera.\r\n");
         return;
     }
     previous_fov = (GetFovFn)current;

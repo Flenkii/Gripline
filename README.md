@@ -19,13 +19,13 @@ mod. Since V6 Gripline only does what the others don't:
 |---|---|
 | **Keyboard** | Drive with WASD, arrow keys move the camera while driving and scroll in menus, Enter/Backspace/Esc in menus. Works together with a controller (one merged pad). Bindings in `FH2_Keyboard.ini`. |
 | **Steering animation** *(off by default)* | Cockpit: hands hidden, the in-game steering wheel turns 1:1 with your real wheel, as far as the rotation set in the Azimuth launcher. Files are made once into `mods\Gripline\media`, game files stay untouched. Applies after a restart. |
-| **Cockpit view 2** | A second interior camera like in FH5: Tab goes cockpit → cockpit 2 → next camera (also **V**). Distance: *Cockpit View 2: Forward / Up*. |
+| **Dashboard cam** | A second interior camera like in FH5: Tab goes cockpit → dashboard cam → next camera (also **V**). Distance: *Dashboard Cam: Forward / Up*. |
 | **More traffic** | Presets Original / Much More Traffic (100 cars, all day) / No Traffic / Drivatars Only, or an amount from 30 to 100 cars, picked by name on the *Traffic* page (MODS › Installed mods › Gripline). Gripline raises the game's own traffic data (copies, game files unchanged). Applies after a restart; offline only. New installs start with Original (V6.4.1). If a start with more traffic hangs while loading, Gripline sets the traffic back to Original at the next start and shows a card. |
 | **Nitro key** | For [NitroSystem](https://github.com/qiangqiang101/NitroSystem) by qiangqiang101: **N** presses its nitro button. Off in online sessions. |
 | **Key list** | **F5** shows all your key bindings at the right of the picture; F5 again hides it. |
 | **Noclip** *(V6.4)* | **F6** lets your car fly through the map: through walls, the ground and buildings. W/S fly forward/back, A/D turn, Space/Left Ctrl up/down, Left Shift held = 4x faster; the arrow keys still move the camera. A card says on/off and shows speed and height while flying (mph/ft or km/h/m, like the game's speedometer). Offline only: a card says when it is locked in an online session and available again offline (like nitro). |
 | **Cards** | Small Gripline cards at the top right of the picture (also in fullscreen). Can be switched off; colour selectable (*Gripline: Card Colour*: blue, red, green, purple, orange, yellow, pink, white). V6.4 cards: every setting changed in the menu ("Traffic: Preset – Much More Traffic"), a trip summary in the pause menu (distance, top speed, driving time of the session; miles/mph when the game is set to mph), wheel connected (green) / disconnected (red, WARNING), and a start check when Azimuth, Extra Options and FH2MP do not fit together (e.g. FH2MP needs an update for a new Azimuth; red, WARNING). Warning cards are always red with WARNING in the title (also "Nitro off" online, with the reason), noclip locked is orange, "Nitro on again" and noclip available again are green; all other cards use the chosen colour. |
-| **Gripline menu** *(V7)* | **F8** (controller: hold **LS + D-pad right**) opens the Gripline menu in the game: change, add or reset keys, traffic, cards, card design, steering animation, cockpit view 2, live telemetry, cruise control, world options, no damage, problem report. Arrows/Enter/Esc or D-pad/A/B. |
+| **Gripline menu** *(V7)* | **F8** (controller: hold **LS + D-pad right**) opens the Gripline menu in the game: change, add or reset keys, traffic, cards, card design, steering animation, dashboard cam, live telemetry, cruise control, world options, no damage, problem report. Arrows/Enter/Esc or D-pad/A/B. |
 | **Walking** *(V7)* | **F** (controller: hold **LS + Y**) gets you out of the car: walk on foot, invisible, with collision (trees, walls, buildings). WASD walk, mouse or arrows look, Shift run, Space jump, hold Ctrl to crouch (controller: sticks, RT run, A jump, hold B to crouch). Smooth movement and camera since V7.1; mouse steering pauses while walking. The car stays parked; **F** / **Y** near the car gets you back in. Fade to black with car door sounds. On foot a speedometer sits at the bottom right *(V7.1)*: speed, walking / running / crouching and an arrow with the distance to your car; three looks (Ring, Racing bar, Step pulse) or off in F8 > Walking: speedometer. Offline only. |
 | **Mouse look** *(V7.1)* | Move the mouse while driving to look around, in every view (inside the camera turns, outside it circles the car). Leave the mouse alone for 2 s while driving and it eases back; standing still it stays. Off while mouse steering is on. `DriveMouseLook` in FH2_Keyboard.ini (percent, 0 = off). Sensitivity for walking and driving: F8 > Mouse look: sensitivity (works at once). |
 | **Freecam** *(V7)* | **F7** (controller: hold **LS + D-pad down**) flies a free camera through the world, keys like noclip. Offline only. Noclip is now also on the controller (**LS + D-pad up**). |
@@ -109,7 +109,7 @@ itself when it cannot hook the game, and makes them new when the game's car file
 | Key | Function | Key | Function |
 |---|---|---|---|
 | W | Throttle | Arrow keys | Camera while driving, scroll in menus |
-| S | Brake / reverse | Tab | Change camera (incl. cockpit 2) |
+| S | Brake / reverse | Tab | Change camera (incl. dashboard cam) |
 | A / D | Steer | C / Num2 | Look back |
 | Space | Handbrake | Num4 / Num6 | Look left / right |
 | E / Q | Shift up / down | R | Rewind |
@@ -119,7 +119,7 @@ itself when it cannot hook the game, and makes them new when the game's car file
 | Esc | Pause / menu | M | Map |
 | X / Y | Buttons X / Y | Minus / Plus | Radio previous / next |
 | Page Up / Page Down | Tabs left / right (LB / RB) | N | Nitro (NitroSystem) |
-| V | Cockpit view 2 | F5 | Key list |
+| V | Dashboard cam | F5 | Key list |
 | F6 | Noclip on/off (offline) | Space / Left Ctrl | Noclip: up / down |
 | Left Shift (held) | Noclip: faster | W / S, A / D | Noclip: fly, turn |
 | F7 | Freecam on/off (offline) | F8 | Gripline menu |
@@ -150,7 +150,7 @@ Wheel problems belong to Azimuth (report them there without mods).
 - **[Flenkii](https://github.com/Flenkii)** – idea, testing, maintainer
 - **Claude (Anthropic)** – wrote most of the code together with Flenkii
 - **Lancaster** (Discord) – testing and ideas
-- A YouTube viewer – idea for cockpit view 2
+- A YouTube viewer – idea for dashboard cam
 - **MRAlexis99**, Midnight and the Discord community – ideas for V7 (no damage, telemetry, world options, mouse steering)
 - seveN and a YouTube viewer – bug reports (V6.4.1, V6.5)
 - **[Sounds From The Lab](https://soundsfromthelab.com)** – car door sounds for walking (royalty-free, "Car Door Opening And Closing Slamming Shut")

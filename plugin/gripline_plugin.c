@@ -587,7 +587,7 @@ FH2MOD_EXPORT int fh2mod_init(const FH2ModApi *platform) {
     info.github_repo = "Flenkii/Gripline";
     info.platform_version = "2.7.4";
     info.check_updates = 0;
-    info.description = "Keyboard driving, 1:1 cockpit wheel, cockpit view 2, noclip, freecam, live telemetry and no damage "
+    info.description = "Keyboard driving, 1:1 cockpit wheel, dashboard cam, noclip, freecam, live telemetry and no damage "
                        "for Forza Horizon 2. Gripline menu: F8. Runs next to Extra Options and Azimuth's wheel. "
                        "Settings: Pause > Settings > MODS.";
     mod = api->register_mod(&info);

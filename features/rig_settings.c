@@ -140,13 +140,13 @@ static const RigText german[RIG_SETTING_COUNT] = {
                                 "Kleine Gripline-Karten oben rechts im Bild, z. B. wenn etwas "
                                 "gespeichert wurde oder Nitro online aus ist. Auch im Vollbild. "
                                 "Wirkt sofort."},
-    [RIG_GRIP_VIEW_FORWARD] = {"Cockpit-Ansicht 2: vor (cm)",
-                            "Zweite Cockpit-Ansicht wie in FH5: so viele Zentimeter weiter vorne am "
-                            "Tacho. Kamera-Taste: Cockpit, Cockpit 2, nächste Kamera (auch V). "
+    [RIG_GRIP_VIEW_FORWARD] = {"Dashboard-Cam: vor (cm)",
+                            "Dashboard-Cam wie in FH5: so viele Zentimeter weiter vorne am "
+                            "Tacho. Kamera-Taste: Cockpit, Dashboard-Cam, nächste Kamera (auch V). "
                             "Das Lenkrad verschwindet dort. "
                             "Wirkt sofort."},
-    [RIG_GRIP_VIEW_UP] = {"Cockpit-Ansicht 2: hoch (cm)",
-                          "So viele Zentimeter sitzt du in der zweiten Cockpit-Ansicht höher "
+    [RIG_GRIP_VIEW_UP] = {"Dashboard-Cam: hoch (cm)",
+                          "So viele Zentimeter sitzt du in der Dashboard-Cam höher "
                           "(negativ = tiefer). Wirkt sofort."},
     [RIG_GRIP_CARD_COLOR] = {"Gripline: Kartenfarbe",
                              "Farbe der Gripline-Karten (Streifen, Logo und Schrift) und der Tastenliste. "
@@ -208,13 +208,13 @@ static const RigText english[RIG_SETTING_COUNT] = {
                                 "Small Gripline cards at the top right of the picture, e.g. when "
                                 "something was saved or nitro is off online. Also in fullscreen. "
                                 "Applies immediately."},
-    [RIG_GRIP_VIEW_FORWARD] = {"Cockpit View 2: Forward (cm)",
-                            "Second cockpit view like in FH5: this many centimetres closer to the "
-                            "gauges. Camera button: cockpit, cockpit 2, next camera (also V). "
+    [RIG_GRIP_VIEW_FORWARD] = {"Dashboard Cam: Forward (cm)",
+                            "Dashboard cam like in FH5: this many centimetres closer to the "
+                            "gauges. Camera button: cockpit, dashboard cam, next camera (also V). "
                             "The steering wheel disappears there. "
                             "Applies immediately."},
-    [RIG_GRIP_VIEW_UP] = {"Cockpit View 2: Up (cm)",
-                          "You sit this many centimetres higher in the second cockpit view "
+    [RIG_GRIP_VIEW_UP] = {"Dashboard Cam: Up (cm)",
+                          "You sit this many centimetres higher in the dashboard cam "
                           "(negative = lower). Applies immediately."},
     [RIG_GRIP_CARD_COLOR] = {"Gripline: Card Colour",
                              "Colour of the Gripline cards (bar, logo and title) and of the key list. "

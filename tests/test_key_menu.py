@@ -396,15 +396,15 @@ check('Own sprints' not in panel_rows(), 'Eigene Sprints nicht mehr im Menue')
 press(ESC)
 check(tick() == LEVEL_CLOSED, 'Rekorde: zu')
 
-# settings page (V7): card colour with preview, cockpit view 2, update notice
+# settings page (V7): card colour with preview, dashboard cam, update notice
 gpath = os.path.join(root, 'Gripline.ini')
 open(gpath, 'wb').write(b'[Gripline]\r\nCardColor=0\r\nUpdateCheck=1\r\n')
 press(0x79)
 check(goto('Settings'), selected())
 press(ENTER)
 rows = panel_rows()
-check(selected() == 'Card colour' and 'Steering animation 1:1' in rows and 'Cockpit view 2: forward' in rows
-      and 'Cockpit view 2: height' in rows and rows.get('Update notice at start') == 'On', f'Einstellungen: {rows}')
+check(selected() == 'Card colour' and 'Steering animation 1:1' in rows and 'Dashboard cam: forward' in rows
+      and 'Dashboard cam: height' in rows and rows.get('Update notice at start') == 'On', f'Einstellungen: {rows}')
 press(ENTER)
 check(selected() == 'Blue (original)' and panel_rows().get('Blue (original)') == '\u2713 active', f'Farbseite: {panel_rows()}')
 press(DOWN)
@@ -414,7 +414,7 @@ check(e.call('Fh2TestNotifyColorGet') == 0 and selected() == 'Card colour', 'Esc
 press(ENTER); press(DOWN); press(DOWN); press(ENTER)
 check(e.call('Fh2TestNotifyColorGet') == 2 and panel_rows().get('Green') == '\u2713 active', 'Gruen gewaehlt')
 press(ESC)
-check(goto('Cockpit view 2: forward'), selected())
+check(goto('Dashboard cam: forward'), selected())
 press(ENTER)
 check(selected() == '35 cm', f'nach vorn: aktueller Wert gewaehlt {selected()}')
 press(DOWN); press(ENTER)
