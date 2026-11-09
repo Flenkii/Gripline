@@ -93,6 +93,22 @@ static int version_after(const char *text, const char *marker, unsigned *major, 
     return 1;
 }
 
+/* a plain release tag "v7.1.0" / "7.2" (only digits and dots after an optional v): the numbers, else 0 */
+static int plain_tag_version(const char *tag, unsigned *major, unsigned *minor, unsigned *patch) {
+    const char *p = tag;
+    if (*p == 'v' || *p == 'V') ++p;
+    if (*p < '0' || *p > '9') return 0;
+    unsigned part[3] = {0, 0, 0};
+    for (unsigned i = 0; i < 3; ++i) {
+        while (*p >= '0' && *p <= '9' && part[i] < 100000) part[i] = part[i] * 10 + (unsigned)(*p++ - '0');
+        if (i == 2 || *p != '.' || p[1] < '0' || p[1] > '9') break;
+        ++p;
+    }
+    if (*p) return 0; /* "v8-final" and the like are not a version tag: the release title decides */
+    *major = part[0], *minor = part[1], *patch = part[2];
+    return 1;
+}
+
 /* the card for GitHub's answer: 1 = newer release (card in out), 0 = up to date or not understood */
 static int make_card(const char *json, size_t length, int de, char *out, size_t cap) {
     char tag[128], name[256];
@@ -100,8 +116,10 @@ static int make_card(const char *json, size_t length, int de, char *out, size_t 
     out[0] = 0;
     int have_tag = json_string(json, length, "\"tag_name\"", tag, sizeof(tag)) != 0;
     int have_name = json_string(json, length, "\"name\"", name, sizeof(name)) != 0;
-    /* tags are v0.2.98-fork6, v0.2.98-fork6.4, ...; the release title "Gripline V6.4 - ..." as fallback */
-    if (!(have_tag && version_after(tag, "fork", &major, &minor, &patch)) &&
+    /* tags are v0.2.98-fork6, v0.2.98-fork6.4, ... (V7.1 and older) or plain v7.1.0 (from V7.2 on);
+       the release title "Gripline V6.4 - ..." as fallback */
+    if (!(have_tag && (version_after(tag, "fork", &major, &minor, &patch) ||
+                       plain_tag_version(tag, &major, &minor, &patch))) &&
         !(have_name && version_after(name, "Gripline V", &major, &minor, &patch))) {
         log_append("UPDATE: newest release not understood - no card.\r\n");
         return 0;

@@ -39,7 +39,7 @@ enum { TOP_STYLE = 100, TOP_RESET = 101, TOP_MOUSE = 102, TOP_TELEMETRY = 103, T
 
 /* settings page (V7): rows */
 enum { SET_COLOR, SET_STEERING, SET_VIEW_FORWARD, SET_VIEW_UP, SET_UPDATE, SET_SUMMON_STYLE, SET_SUMMON_SOUNDS };
-/* cockpit view 2 choices in cm (rig_settings.c ranges -20..80 and -20..30) */
+/* dashboard cam choices in cm (rig_settings.c ranges -20..80 and -20..30) */
 #define VIEW_STEP 5
 #define VIEW_FORWARD_MIN (-20)
 #define VIEW_FORWARD_MAX 80
@@ -733,9 +733,9 @@ static void build_page(wchar_t *title) {
                     SET_STEERING);
             wchar_t cm[32];
             centimetres(rig_setting_get(RIG_GRIP_VIEW_FORWARD), cm);
-            row_add(tr(L"Cockpit-Ansicht 2: nach vorn", L"Cockpit view 2: forward"), cm, 0, SET_VIEW_FORWARD);
+            row_add(tr(L"Dashboard-Cam: nach vorn", L"Dashboard cam: forward"), cm, 0, SET_VIEW_FORWARD);
             centimetres(rig_setting_get(RIG_GRIP_VIEW_UP), cm);
-            row_add(tr(L"Cockpit-Ansicht 2: Höhe", L"Cockpit view 2: height"), cm, 0, SET_VIEW_UP);
+            row_add(tr(L"Dashboard-Cam: Höhe", L"Dashboard cam: height"), cm, 0, SET_VIEW_UP);
             row_add(tr(L"Update-Hinweis beim Start", L"Update notice at start"), update_check_enabled() ? tr(L"An", L"On") : tr(L"Aus", L"Off"), 0,
                     SET_UPDATE);
             row_add(tr(L"Auto rufen: Fahrstil", L"Summon car: driving style"),
@@ -759,7 +759,7 @@ static void build_page(wchar_t *title) {
         case LEVEL_VIEW_UP: {
             int forward = m.level == LEVEL_VIEW_FORWARD;
             int now = rig_setting_get(forward ? RIG_GRIP_VIEW_FORWARD : RIG_GRIP_VIEW_UP);
-            wcopy(title, 0, 64, forward ? tr(L"Cockpit 2: nach vorn", L"Cockpit 2: forward") : tr(L"Cockpit 2: Höhe", L"Cockpit 2: height"));
+            wcopy(title, 0, 64, forward ? tr(L"Dashboard-Cam: nach vorn", L"Dashboard cam: forward") : tr(L"Dashboard-Cam: Höhe", L"Dashboard cam: height"));
             int low = forward ? VIEW_FORWARD_MIN : VIEW_UP_MIN, high = forward ? VIEW_FORWARD_MAX : VIEW_UP_MAX;
             int standard = forward ? 35 : -5;
             for (int v = low; v <= high; v += VIEW_STEP) {
@@ -1415,7 +1415,7 @@ static void choose(void) {
             int forward = m.level == LEVEL_VIEW_FORWARD;
             int value = (forward ? VIEW_FORWARD_MIN : VIEW_UP_MIN) + action;
             rig_setting_set(forward ? RIG_GRIP_VIEW_FORWARD : RIG_GRIP_VIEW_UP, value); /* live, saved, card */
-            log_append_value(forward ? "KEYMENU: cockpit view 2 forward cm " : "KEYMENU: cockpit view 2 up cm ", value);
+            log_append_value(forward ? "KEYMENU: dashboard cam forward cm " : "KEYMENU: dashboard cam up cm ", value);
             break;
         }
         case LEVEL_TRAFFIC:

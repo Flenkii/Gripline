@@ -43,7 +43,7 @@ after removing Gripline? Delete the folder mods\Gripline - then everything is or
 Gripline:
   - Keyboard driving (WASD, arrows = camera), works together with a controller.
   - Cockpit: the steering wheel turns 1:1 with your real wheel (rotation from the Azimuth
-    launcher), cockpit view 2 like in FH5 (Tab or V).
+    launcher), dashboard cam like in FH5 (Tab or V).
   - More Traffic: Original, Much More Traffic, No Traffic or Drivatars Only, picked by name
     (MODS > Installed mods > Gripline > Traffic), 30-100 cars, rush hour all day (restart needed).
   - Nitro key N for the mod NitroSystem (off online), key list F5, Gripline cards,
@@ -67,7 +67,7 @@ NEW IN V7.1
 -----------------------------
   - Gripline menu (F8; controller: hold LS + D-pad right): all Gripline settings in the
     game - keys (change, add, reset), traffic, cards, card design, steering animation,
-    cockpit view 2, telemetry, cruise control, world, no damage, problem report.
+    dashboard cam, telemetry, cruise control, world, no damage, problem report.
     Arrows/Enter/Esc or D-pad/A/B. Changes show up at once in the key list (F5).
   - Walking (F; controller: hold LS + Y): get out and walk around on foot, with collision
     (trees, walls, buildings). WASD walk, arrows look, Shift run, Space jump; controller
@@ -124,7 +124,7 @@ NEW IN V6
   - Runs next to the official Extra Options (FH2MP-compatible, no winmm.dll swap).
   - Only what the others don't have: Gripline's own wheel, force feedback, weather,
     time of day and creator mode are gone - Azimuth and Extra Options do those now.
-  - Cockpit wheel turns 1:1, cockpit view 2, More Traffic with real traffic data,
+  - Cockpit wheel turns 1:1, dashboard cam, More Traffic with real traffic data,
     key list (F5), problem report, Azimuth Mapper detection, cards in a window over the game.
 
 
@@ -137,7 +137,7 @@ Online, traffic comes from the session and nitro is off.
 
 Credits: RokkuDayo (Extra Options, base of Gripline's code), Trinculo54 (FH2 Mod Platform
 API, MIT), Lancaster, qiangqiang101 (NitroSystem), bigdamnhero6 (Azimuth Mapper), a YouTube
-viewer (cockpit view 2 idea), MRAlexis99 and the Discord community (ideas for V7),
+viewer (dashboard cam idea), MRAlexis99 and the Discord community (ideas for V7),
 Sounds From The Lab (car door sounds, royalty-free, soundsfromthelab.com).
 
 ----------------------------------------------------------------------------------------

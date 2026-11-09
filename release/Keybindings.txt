@@ -14,11 +14,11 @@ FAHREN / DRIVING
 
 KAMERA & BLICK / CAMERA & LOOK
   Pfeiltasten        Kamera bewegen (beim Fahren) Arrow keys: camera (while driving)
-  Tab                Kamera wechseln (+Cockpit 2) Change camera (incl. cockpit 2)
+  Tab                Kamera wechseln (+Dashboard-Cam) Change camera (incl. dashboard cam)
   C oder Num2        Blick zurück                 Look back
   Num4 / Num6        Blick links / rechts         Look left / right
   N                  Nitro (nur mit NitroSystem)  Nitro (only with NitroSystem)
-  V                  Cockpit-Ansicht 2 ein/aus    Cockpit view 2 on/off
+  V                  Dashboard-Cam ein/aus    Dashboard cam on/off
 
 FUNKTIONEN / FUNCTIONS
   R                  Zurückspulen                 Rewind

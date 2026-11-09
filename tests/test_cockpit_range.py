@@ -101,7 +101,7 @@ check(abs(e.rf(GAME + 0x2c5c58c) - math.pi / 2) < 1e-6, 'Konstante pi/2 des Spie
 worst = max(abs(wheel_shown(e, s, 900) - s * 450) for s in (-1, -0.5, -0.1, 0, 0.05, 0.2, 0.5, 0.8, 1))
 check(worst < 0.05, f'Lenkrad im Spiel = echtes Rad (max Abweichung {worst:.3f} Grad)')
 
-print('Zweite Cockpit-Ansicht: Lenkrad-Teil der Animation')
+print('Dashboard-Cam: Lenkrad-Teil der Animation')
 site = bytes(e.mu.mem_read(GAME + 0xf7c745, 6))
 check(site[0] == 0xe8 and site[5] == 0x90, f'Turn-Aufruf umgeleitet: {site.hex()}')
 stub = GAME + 0xf7c745 + 5 + struct.unpack('<i', site[1:5])[0]
@@ -121,7 +121,7 @@ same = all((0.3 < turn(v) < 0.7) == (0.3 < game_turn(v) < 0.7) for v in vs) and 
 check(same, 'Fahrer-Logik des Spiels (0.3/0.7, Mitte 0.5) unverändert')
 e.call('Fh2TestCockpitView', 0, 1, 35, -5)
 worst = max(abs(turn(v) - 0.03) for v in vs)
-check(worst < 1e-4, f'Cockpit 2: feste Zeit ohne Lenkrad 0.03 (Abw. {worst:.6f})')
+check(worst < 1e-4, f'Dashboard-Cam: feste Zeit ohne Lenkrad 0.03 (Abw. {worst:.6f})')
 e.call('Fh2TestCockpitView', 0, 1, 35, -5)
 
 print('Mit Patch (1080 Grad):')

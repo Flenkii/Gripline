@@ -20,7 +20,7 @@ Fork of https://github.com/RokkuDayo/ForzaHorizon2_ExtraOptions – modified in 
 - `features/platform_link.c/.h`, `platform/gripline_mod.c` (V5) – FH2 Mod Platform module (`fh2-mods\Gripline.dll`) and the GRIPLINE tile page
 - `features/cockpit.c/.h` (V5) – full steering animation built in (own Deflate, Oodle1 and GR2 code; port of `tools/fh2_lenkrad.py`); V6: the game's ±90° clamp and divisor patched so the wheel turns 1:1
 - `features/mod_scan.c/.h` (V6) – start card with the mods found, Azimuth Mapper detection (its named event `AzimuthMapper.ShowWindow`, no process list)
-- `features/cockpit_view.c/.h` (V6) – cockpit view 2: camera moved to the gauges, wheel and driver hidden live
+- `features/cockpit_view.c/.h` (V6) – dashboard cam: camera moved to the gauges, wheel and driver hidden live
 - `features/creator_mode.c/.h` (V6) – creator mode: HUD, minimap, prompts and Gripline cards hidden (key H / wheel function 16)
 - `features/time_of_day.c/.h` (V6) – fixed time of day or slow day in free roam, offline only, through the game's own clock
 - `features/noclip.c/.h` (V6.4) – noclip: key F6 flies the own car through the map (the car's CCarDynamics body state set through its own setter around the car update, hooked through the platform), offline only; live card with speed and height
@@ -58,7 +58,7 @@ Removed (October 29, 2026):
 - the "mods found" start card and the fh2wheels check – the platform's MODS tab lists the mods; fh2wheels does not load on Azimuth 1.0.x
 
 Kept and changed:
-- keyboard, steering animation (rotation now from Azimuth's `data\azimuth.ini`), cockpit view 2, More Traffic, nitro key,
+- keyboard, steering animation (rotation now from Azimuth's `data\azimuth.ini`), dashboard cam, More Traffic, nitro key,
   key list, cards, Azimuth Mapper check, problem report (adds `azimuth.log` and `mods\loadorder.txt`)
 - settings: `Gripline.ini` ([Traffic], [Gripline]; old `Weather`/`TimeOfDay` keys are ignored) and `FH2_Keyboard.ini`
 - `build.py` builds only `Gripline.dll`; tests run against its `--test` build
@@ -69,7 +69,7 @@ Plugin build on Azimuth 1.0.3 (October 29, 2026, tested in the game by Flenkii):
     with `get_Gamepads` pointed at the Gripline pad, then puts `get_Gamepads` back (`keyboard_pad.c`)
   - cards and key list: Azimuth drops its D3D12 device when anything else draws into its back buffers, so the cards
     are drawn by the CPU into a transparent, click-through window over the game window (`notify.c`)
-  - cockpit view 2: the driver camera's FOV slot (game+0x2e78120, slot 0x70) is chained in front of Extra Options' own
+  - dashboard cam: the driver camera's FOV slot (game+0x2e78120, slot 0x70) is chained in front of Extra Options' own
 - start card "Gripline V6 active"
 - traffic: amounts 30/45/70/100/200 cars, faster spawning; presets Original / Much More Traffic / No Traffic /
   Drivatars Only, chosen by name on the platform page *Traffic* (MODS > Installed mods > Gripline)

@@ -138,10 +138,10 @@ def check_two_parts(got, ref, label):
     kind, sk, sc = ours[('boneSteeringWheelSpindle', 'ScaleShearCurve')]
     check(kind == 'CurveDataHeader_DaK32fC32f' and sc[0::9][2:] == (1.0, 1.0) and max(sc[0::9][:2]) < 0.001 and
           abs(sk[1] - 0.06 * dur) < 1e-4 and abs(sk[2] - 0.10 * dur) < 1e-4,
-          f'{label}: Lenkrad-Größe ~0 für Cockpit 2 (bis 0.06), 1 ab 0.10')
+          f'{label}: Lenkrad-Größe ~0 für Dashboard-Cam (bis 0.06), 1 ab 0.10')
     hips = ours[('Hips', 'ScaleShearCurve')]
     check(hips[0] == 'CurveDataHeader_DaK32fC32f' and max(hips[2][0::9][:2]) < 0.001,
-          f'{label}: Fahrer für Cockpit 2 auch geschrumpft (keine Füße mehr)')
+          f'{label}: Fahrer für Dashboard-Cam auch geschrumpft (keine Füße mehr)')
 
 
 here = os.path.dirname(os.path.abspath(__file__))

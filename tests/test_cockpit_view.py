@@ -36,17 +36,17 @@ e.mu.mem_write(cam2 + 0x190, struct.pack('<3f', 0, 0.3, 0))
 e.call('Fh2TestCockpitView', cam2, 0, 40, -10)
 check(struct.unpack('<3f', e.mu.mem_read(cam2 + 0x190, 12)) == (0.0, f32(0.3), 0.0), 'another camera: normal view untouched')
 
-print('Kamerawechsel: Cockpit -> Cockpit 2 -> nächste Kamera')
+print('Kamerawechsel: Cockpit -> Dashboard-Cam -> nächste Kamera')
 btn = lambda held: e.call('Fh2TestCockpitCameraButton', held)
 e.tick = 10000
 e.call('Fh2TestCockpitView', cam, 0, 35, -5)  # driver camera active now, normal view
 put(0.0, 0.4, -0.5); e.call('Fh2TestCockpitView', cam, 0, 35, -5)
-check(btn(1) == 0b11, 'Fahrerkamera aktiv: Druck wird geschluckt, Cockpit 2 an')
+check(btn(1) == 0b11, 'Fahrerkamera aktiv: Druck wird geschluckt, Dashboard-Cam an')
 check(btn(1) == 0b11, 'gehalten: bleibt geschluckt')
 check(btn(0) == 0b10, 'losgelassen')
 e.call('Fh2TestCockpitView', cam, 0, 35, -5)
-check(near(get(), (0.0, 0.35, -0.15)), f'Cockpit 2: 35 cm vor, 5 cm runter {get()}')
-check(btn(1) == 0b00, 'zweiter Druck: geht ans Spiel (nächste Kamera), Cockpit 2 aus')
+check(near(get(), (0.0, 0.35, -0.15)), f'Dashboard-Cam: 35 cm vor, 5 cm runter {get()}')
+check(btn(1) == 0b00, 'zweiter Druck: geht ans Spiel (nächste Kamera), Dashboard-Cam aus')
 btn(0)
 e.call('Fh2TestCockpitView', cam, 0, 35, -5)
 check(near(get(), (0.0, 0.4, -0.5)), f'Versatz wieder original {get()}')
@@ -54,7 +54,7 @@ e.tick += 5000  # another camera for 5 s
 check(btn(1) == 0b00, 'andere Kamera aktiv: Druck geht ans Spiel'); btn(0)
 e.call('Fh2TestCockpitView', cam, 0, 35, -5)  # back in the cockpit
 e.call('Fh2TestCockpitView', cam, 1, 35, -5)  # V
-check(btn(0) & 2, 'V schaltet Cockpit 2 an')
+check(btn(0) & 2, 'V schaltet Dashboard-Cam an')
 e.tick += 5000
 e.call('Fh2TestCockpitView', cam, 0, 35, -5)
 check(not (btn(0) & 2), 'nach einer anderen Kamera zurück: wieder normales Cockpit')
