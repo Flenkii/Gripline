@@ -238,10 +238,10 @@ static void *slot(void *object, unsigned offset) {
 
 static void *find_local_car(void) {
     void *manager, *player, *local = NULL;
-    if (!memory_read_pointer(game + GAME_RVA_PLAYER_MANAGER, &manager) || !manager) return NULL;
-    player = ((PlayerGetter)(game + GAME_RVA_GET_LOCAL_PLAYER))(manager, 0);
+    if (!memory_read_pointer(game + FH2_RVA_PLAYER_MANAGER, &manager) || !manager) return NULL;
+    player = ((PlayerGetter)(game + FH2_RVA_GET_LOCAL_PLAYER))(manager, 0);
     if (!player) return NULL;
-    ((CarGetter)(game + GAME_RVA_GET_PLAYER_CAR))(player, &local);
+    ((CarGetter)(game + FH2_RVA_GET_PLAYER_CAR))(player, &local);
     if (!local) return NULL;
     ObjectFn release = (ObjectFn)slot(local, 0x18);
     if (release) release(local);
@@ -255,7 +255,7 @@ static ULONGLONG local_checked;
 
 static int is_local_car(void *car) {
     void *vtable;
-    if (!memory_read_pointer(car, &vtable) || vtable != game + GAME_RVA_PLAYER_CAR_VTABLE) return 0;
+    if (!memory_read_pointer(car, &vtable) || vtable != game + FH2_RVA_PLAYER_CAR_VTABLE) return 0;
     ULONGLONG now = GetTickCount64();
     if (now - local_checked >= 250) {
         local_checked = now;

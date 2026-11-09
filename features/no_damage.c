@@ -39,7 +39,7 @@ static int build_matches(void) {
     static const unsigned char helper[] = {0x33, 0xc0, 0x48, 0x89, 0x81, 0xe8, 0x5a, 0x00, 0x00};
     void *reset = NULL;
     unsigned char code[sizeof(helper)];
-    if (!memory_read_pointer(game + GAME_RVA_PLAYER_CAR_VTABLE + NO_DAMAGE_RESET_SLOT, &reset) ||
+    if (!memory_read_pointer(game + FH2_RVA_PLAYER_CAR_VTABLE + NO_DAMAGE_RESET_SLOT, &reset) ||
         reset != game + NO_DAMAGE_RESET_RVA || !memory_read(game + NO_DAMAGE_HELPER_RVA, code, sizeof(code)))
         return 0;
     for (unsigned i = 0; i < sizeof(code); ++i)
@@ -89,7 +89,7 @@ void no_damage_after_update(void *car, int own, int driving) {
         }
     }
     void *vtable, *present;
-    if (!memory_read_pointer(car, &vtable) || vtable != game + GAME_RVA_PLAYER_CAR_VTABLE) return;
+    if (!memory_read_pointer(car, &vtable) || vtable != game + FH2_RVA_PLAYER_CAR_VTABLE) return;
     if (!memory_read_pointer((unsigned char *)car + NO_DAMAGE_PRESENT_OFFSET, &present) ||
         !memory_read_pointer(present, &vtable))
         return; /* not fully built (or being taken down): the reset would reach a missing object */

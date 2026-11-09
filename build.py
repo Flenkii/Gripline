@@ -1,217 +1,202 @@
-"""Build Gripline (fh2-mods/Gripline.dll, an FH2 Mod Platform mod) with Zig 0.15.2, also on Linux.
-Usage: python build.py /path/to/zig [--test] [--output FOLDER]
+"""Build Gripline (fh2-mods/Gripline.dll, an FH2 Mod Platform mod) with Zig 0.15.2, on Windows or Linux.
+
+    python build.py /path/to/zig [--test] [--output FOLDER] [--build-dir FOLDER] [--jobs N] [--rebuild]
+
+Objects are cached: a source is compiled again only when its command line, itself, any header it
+includes or the compiler changed. --test adds the Fh2Test* exports the emulator tests call.
 """
 
 import argparse
-from concurrent.futures import ThreadPoolExecutor
 import hashlib
 import json
 import os
-from pathlib import Path
-import subprocess
 import re
 import struct
+import subprocess
 import time
+from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
 
-SOURCE = Path(__file__).resolve().parent
-PLUGIN_SOURCES = [
-    "support.c",
-    "logging.c",
-    "settings.c",
-    "plugin/gripline_plugin.c",
-    "features/game_language.c",
-    "features/traffic_tunables.c",
-    "features/traffic_files.c",
-    "features/world_files.c",
-    "features/telemetry.c",
-    "features/logbook.c",
-    "features/cruise.c",
-    "features/records.c",
-    "features/ini_edit.c",
-    "features/ini_migrate.c",
-    "features/rig_settings.c",
-    "features/wheel_buttons.c",
-    "features/keyboard_pad.c",
-    "features/key_menu.c",
-    "features/mod_scan.c",
-    "features/report.c",
-    "features/cockpit_view.c",
-    "features/nitro_link.c",
-    "features/noclip.c",
-    "features/walking.c",
-    "features/summon.c",
-    "features/walk_gauge.c",
-    "features/drive_look.c",
-    "features/menu_mouse.c",
-    "features/focus_guard.c",
-    "features/no_damage.c",
-    "features/trip.c",
-    "features/wheel_watch.c",
-    "features/version_check.c",
-    "features/update_check.c",
-    "features/game_units.c",
-    "features/notify.c",
-    "features/cockpit.c",
+ROOT = Path(__file__).resolve().parent
+
+# every .c file that goes into the DLL
+SOURCES = [
+    "support.c", "logging.c", "settings.c", "plugin/gripline_plugin.c",
+    # world and traffic
+    "features/game_language.c", "features/game_units.c", "features/traffic_tunables.c",
+    "features/traffic_files.c", "features/world_files.c",
+    # driving tools
+    "features/telemetry.c", "features/logbook.c", "features/records.c", "features/cruise.c",
+    "features/trip.c", "features/noclip.c", "features/no_damage.c", "features/drive_look.c",
+    # walking
+    "features/walking.c", "features/summon.c", "features/walk_gauge.c",
+    # cockpit, wheel and keyboard
+    "features/cockpit.c", "features/cockpit_view.c", "features/wheel_buttons.c",
+    "features/wheel_watch.c", "features/keyboard_pad.c", "features/nitro_link.c",
+    # menu, cards and housekeeping
+    "features/key_menu.c", "features/menu_mouse.c", "features/focus_guard.c", "features/notify.c",
+    "features/rig_settings.c", "features/ini_edit.c", "features/ini_migrate.c",
+    "features/mod_scan.c", "features/version_check.c", "features/update_check.c", "features/report.c",
 ]
 
 
-def parse_arguments():
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("zig", type=Path)
-    parser.add_argument("--test", action="store_true")
-    parser.add_argument("--plugin", action="store_true", help="Accepted for old scripts; always on")
-    parser.add_argument("--output", type=Path)
-    parser.add_argument("--build-dir", type=Path)
+def read_arguments():
+    parser = argparse.ArgumentParser(description="Build Gripline.dll")
+    parser.add_argument("zig", type=Path, help="path of the zig executable")
+    parser.add_argument("--test", action="store_true", help="add the Fh2Test* exports for tests/")
+    parser.add_argument("--plugin", action="store_true", help="accepted for old scripts, always on")
+    parser.add_argument("--output", type=Path, help="folder that receives fh2-mods/Gripline.dll")
+    parser.add_argument("--build-dir", type=Path, help="folder for objects and libraries")
     parser.add_argument("--jobs", type=int, default=min(8, os.cpu_count() or 1))
-    parser.add_argument("--rebuild", action="store_true", help="Ignore cached build inputs")
-    arguments = parser.parse_args()
-    if arguments.jobs < 1:
-        parser.error("--jobs must be positive")
-    return arguments
+    parser.add_argument("--rebuild", action="store_true", help="ignore cached objects")
+    args = parser.parse_args()
+    if args.jobs < 1:
+        parser.error("--jobs must be at least 1")
+    return args
 
 
-def compiler_arguments(compiler, options):
-    arguments = [
-        str(compiler),
-        "clang",
-        "-target",
-        "x86_64-w64-windows-gnu",
-        "-c",
-        "-ffreestanding",
-        "-fno-builtin",
-        "-fno-stack-protector",
-        "-fms-extensions",
-        "-funwind-tables",
-        "-O2",
-        "-Wall",
-        "-Wextra",
-        "-Werror",
-        "-I",
-        str(SOURCE),
-        "-isystem",
-        str(compiler.parent / "lib/include"),
-        "-isystem",
-        str(compiler.parent / "lib/libc/include/any-windows-any"),
-    ]
-    if options.test:
-        arguments.append("-DFH2_TWEAKS_TEST=1")
-    arguments.append("-DFH2_AZIMUTH=1")
-    arguments.append("-DFH2_GRIPLINE_PLUGIN=1")
-    return arguments
+def release_info():
+    """(version text like 'V7.1', major, minor, patch) from gripline.h"""
+    header = (ROOT / "gripline.h").read_text(encoding="utf-8")
+    text = re.search(r'#define\s+GRIPLINE_VERSION\s+"([^"]+)"', header).group(1)
+    number = lambda name: int(re.search(rf"#define\s+GRIPLINE_RELEASE_{name}\s+(\d+)", header).group(1))
+    return text, number("MAJOR"), number("MINOR"), number("PATCH")
 
 
-def version_resource(filename):
-    version = "7.0.0"
-    numbers = [int(part) for part in version.split(".")]
-    numbers += [0] * (4 - len(numbers))
+def compile_flags(zig, test):
+    include = zig.parent / "lib" / "include"
+    windows_libc = zig.parent / "lib" / "libc" / "include" / "any-windows-any"
+    flags = [str(zig), "clang", "-target", "x86_64-w64-windows-gnu", "-c",
+             "-ffreestanding", "-fno-builtin", "-fno-stack-protector", "-fms-extensions", "-funwind-tables",
+             "-O2", "-Wall", "-Wextra", "-Werror",
+             "-I", str(ROOT), "-isystem", str(include), "-isystem", str(windows_libc),
+             "-DFH2_AZIMUTH=1", "-DFH2_GRIPLINE_PLUGIN=1"]
+    if test:
+        flags.append("-DFH2_TWEAKS_TEST=1")
+    return flags
 
-    def padded(data):
+
+# ---------------------------------------------------------------- the version resource
+
+def version_resource(file_name):
+    """A .res with the DLL's version info (Explorer > Properties > Details)."""
+    text, major, minor, patch = release_info()
+
+    def pad4(data):
         return data + bytes(-len(data) % 4)
 
-    def wide(text):
-        return (text + "\0").encode("utf-16le")
+    def utf16(value):
+        return (value + "\0").encode("utf-16le")
 
-    def block(key, value=b"", children=b"", text=False):
-        header = padded(struct.pack("<HHH", 0, len(value) // 2 if text else len(value), int(text)) + wide(key))
-        data = header + value
+    def node(key, value=b"", children=b"", is_text=False):
+        head = pad4(struct.pack("<HHH", 0, len(value) // 2 if is_text else len(value), int(is_text)) + utf16(key))
+        body = head + value
         if children:
-            data = padded(data) + children
-        return struct.pack("<H", len(data)) + data[2:]
+            body = pad4(body) + children
+        return struct.pack("<H", len(body)) + body[2:]
 
-    strings = {"FileDescription": "Gripline V7 - The Big Update - FH2 Mod Platform mod",
-               "FileVersion": version, "InternalName": "Gripline",
-               "OriginalFilename": filename, "ProductName": "Gripline",
-               "ProductVersion": "V7",
-               "LegalCopyright": "Flenkii, GPL-3.0; based on Extra Options by Arthur (RokkuDayo)"}
-    entries = b"".join(padded(block(key, wide(value), text=True)) for key, value in strings.items())
-    string_info = block("StringFileInfo", children=block("040904b0", children=entries))
-    variable_info = block("VarFileInfo", children=block("Translation", struct.pack("<HH", 0x409, 1200)))
-    high, low = numbers[0] << 16 | numbers[1], numbers[2] << 16 | numbers[3]
-    fixed = struct.pack("<13I", 0xfeef04bd, 0x10000, high, low, high, low,
-                        0x3f, 0, 0x40004, 2, 0, 0, 0)
-    data = block("VS_VERSION_INFO", fixed, padded(string_info) + variable_info)
-    null_header = struct.pack("<IIHHHHIHHII", 0, 32, 0xffff, 0, 0xffff, 0, 0, 0, 0, 0, 0)
-    header = struct.pack("<IIHHHHIHHII", len(data), 32, 0xffff, 16, 0xffff, 1, 0, 0x30, 0x409, 0, 0)
-    return null_header + header + padded(data)
-
-
-def input_signature(command, paths, compiler):
-    digest = hashlib.sha256()
-    digest.update(json.dumps(command).encode())
-    for path in sorted(set(paths)):
-        digest.update(str(path).encode())
-        digest.update(path.read_bytes())
-    tool = compiler.stat()
-    digest.update(f"{compiler}:{tool.st_size}:{tool.st_mtime_ns}".encode())
-    return digest.hexdigest()
+    dotted = f"{major}.{minor}.{patch}"
+    fields = {
+        "FileDescription": f"Gripline {text} - FH2 Mod Platform mod",
+        "FileVersion": dotted,
+        "InternalName": "Gripline",
+        "OriginalFilename": file_name,
+        "ProductName": "Gripline",
+        "ProductVersion": text,
+        "LegalCopyright": "Flenkii, GPL-3.0 (started as a fork of Extra Options by RokkuDayo)",
+    }
+    rows = b"".join(pad4(node(k, utf16(v), is_text=True)) for k, v in fields.items())
+    strings = node("StringFileInfo", children=node("040904b0", children=rows))
+    translation = node("VarFileInfo", children=node("Translation", struct.pack("<HH", 0x409, 1200)))
+    ms, ls = major << 16 | minor, patch << 16
+    fixed = struct.pack("<13I", 0xfeef04bd, 0x10000, ms, ls, ms, ls, 0x3f, 0, 0x40004, 2, 0, 0, 0)
+    info = node("VS_VERSION_INFO", fixed, pad4(strings) + translation)
+    empty = struct.pack("<IIHHHHIHHII", 0, 32, 0xffff, 0, 0xffff, 0, 0, 0, 0, 0, 0)
+    entry = struct.pack("<IIHHHHIHHII", len(info), 32, 0xffff, 16, 0xffff, 1, 0, 0x30, 0x409, 0, 0)
+    return empty + entry + pad4(info)
 
 
-def project_dependencies(path, seen=None):
-    seen = set() if seen is None else seen
-    if path in seen:
-        return seen
-    seen.add(path)
-    for name in re.findall(r'^\s*#\s*include\s*"([^"]+)"', path.read_text(encoding="utf-8"), re.M):
-        included = path.parent / name
-        if not included.is_file():
-            included = SOURCE / name
-        project_dependencies(included.resolve(), seen)
-    return seen
+# ---------------------------------------------------------------- object cache
+
+def includes_of(source, found=None):
+    """the project headers a file pulls in, directly or not"""
+    found = set() if found is None else found
+    if source in found:
+        return found
+    found.add(source)
+    for name in re.findall(r'^\s*#\s*include\s*"([^"]+)"', source.read_text(encoding="utf-8"), re.M):
+        header = source.parent / name
+        if not header.is_file():
+            header = ROOT / name
+        includes_of(header.resolve(), found)
+    return found
 
 
-def cached_command(command, inputs, target, compiler, rebuild):
+def fingerprint(command, files, zig):
+    h = hashlib.sha256(json.dumps(command).encode())
+    for path in sorted(files):
+        h.update(str(path).encode())
+        h.update(path.read_bytes())
+    info = zig.stat()
+    h.update(f"{zig}:{info.st_size}:{info.st_mtime_ns}".encode())
+    return h.hexdigest()
+
+
+def run_cached(command, files, target, zig, force):
+    """run command unless target is still current; True when it ran"""
     stamp = target.with_suffix(target.suffix + ".inputs")
-    signature = input_signature(command, inputs, compiler)
-    if not rebuild and target.is_file() and stamp.is_file() and stamp.read_text() == signature:
+    wanted = fingerprint(command, files, zig)
+    if not force and target.is_file() and stamp.is_file() and stamp.read_text() == wanted:
         return False
     stamp.unlink(missing_ok=True)
     subprocess.run(command, check=True)
-    stamp.write_text(signature)
+    stamp.write_text(wanted)
     return True
 
 
-def build_plugin(compiler, output, directory, options):
-    """output = the folder that gets fh2-mods/Gripline.dll"""
+# ---------------------------------------------------------------- the build
+
+def import_library(zig, definition, build_dir, force):
+    library = build_dir / (Path(definition).stem + ".lib")
+    source = ROOT / definition
+    run_cached([str(zig), "dlltool", "-m", "i386:x86-64", "-d", str(source), "-l", str(library)],
+               [source], library, zig, force)
+    return library
+
+
+def build(zig, output, build_dir, args):
     started = time.monotonic()
-    directory.mkdir(parents=True, exist_ok=True)
-    arguments = compiler_arguments(compiler, options)
+    build_dir.mkdir(parents=True, exist_ok=True)
+    flags = compile_flags(zig, args.test)
 
-    def compile_source(filename):
-        object_file = directory / (Path(filename).stem + ".obj")
-        command = [*arguments, str(SOURCE / filename), "-o", str(object_file)]
-        compiled = cached_command(command, project_dependencies(SOURCE / filename), object_file,
-                                  compiler, options.rebuild)
-        return str(object_file), compiled
+    def compile_one(name):
+        obj = build_dir / (Path(name).stem + ".obj")
+        ran = run_cached([*flags, str(ROOT / name), "-o", str(obj)], includes_of(ROOT / name), obj, zig, args.rebuild)
+        return obj, ran
 
-    with ThreadPoolExecutor(max_workers=options.jobs) as workers:
-        results = list(workers.map(compile_source, PLUGIN_SOURCES))
-    import_library = directory / "kernel32.lib"
-    cached_command([str(compiler), "dlltool", "-m", "i386:x86-64", "-d", str(SOURCE / "kernel32.def"),
-                    "-l", str(import_library)], [SOURCE / "kernel32.def"], import_library, compiler,
-                   options.rebuild)
-    exception_library = directory / "ntdll.lib"
-    cached_command([str(compiler), "dlltool", "-m", "i386:x86-64", "-d", str(SOURCE / "ntdll.def"),
-                    "-l", str(exception_library)], [SOURCE / "ntdll.def"], exception_library, compiler,
-                   options.rebuild)
+    with ThreadPoolExecutor(max_workers=args.jobs) as pool:
+        objects = list(pool.map(compile_one, SOURCES))
+
+    libraries = [import_library(zig, d, build_dir, args.rebuild) for d in ("kernel32.def", "ntdll.def")]
+    resource = build_dir / "version.res"
+    resource.write_bytes(version_resource("Gripline.dll"))
+
     mods = output / "fh2-mods"
     mods.mkdir(parents=True, exist_ok=True)
-    resource = directory / "version.res"
-    resource.write_bytes(version_resource("Gripline.dll"))
-    link = [str(compiler), "lld-link", "/dll", "/entry:DllMain", "/machine:x64", "/nodefaultlib",
-            "/dynamicbase", "/nxcompat", "/Brepro"]
-    subprocess.run([*link, "/out:" + str(mods / "Gripline.dll"), "/implib:" + str(directory / "gripline.lib"),
-                    *[path for path, _ in results], str(import_library), str(exception_library),
-                    str(resource)], check=True)
-    print(f"Compiled {sum(compiled for _, compiled in results)}/{len(PLUGIN_SOURCES)} objects; "
-          f"{time.monotonic() - started:.1f}s", flush=True)
+    subprocess.run([str(zig), "lld-link", "/dll", "/entry:DllMain", "/machine:x64", "/nodefaultlib",
+                    "/dynamicbase", "/nxcompat", "/Brepro",
+                    f"/out:{mods / 'Gripline.dll'}", f"/implib:{build_dir / 'gripline.lib'}",
+                    *[str(o) for o, _ in objects], *[str(lib) for lib in libraries], str(resource)], check=True)
+    fresh = sum(ran for _, ran in objects)
+    print(f"Compiled {fresh}/{len(SOURCES)} objects; {time.monotonic() - started:.1f}s", flush=True)
 
 
 def main():
-    options = parse_arguments()
-    compiler = options.zig.resolve()
-    output = (options.output or SOURCE.parent / "gripline-plugin").resolve()
-    directory = options.build_dir or SOURCE.parent / ".build" / ("plugin-test" if options.test else "plugin")
-    build_plugin(compiler, output, directory.resolve(), options)
+    args = read_arguments()
+    zig = args.zig.resolve()
+    output = (args.output or ROOT.parent / "gripline-plugin").resolve()
+    build_dir = args.build_dir or ROOT.parent / ".build" / ("plugin-test" if args.test else "plugin")
+    build(zig, output, build_dir.resolve(), args)
     print(output)
 
 

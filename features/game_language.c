@@ -6,7 +6,7 @@ int game_language_is_german(unsigned char *game_image) {
     void *manager;
     unsigned char code[32];
     size_t length, capacity;
-    if (!game_image || !memory_read(game_image + GAME_RVA_TEXT_TABLES, &manager, sizeof(manager)) ||
+    if (!game_image || !memory_read(game_image + FH2_RVA_TEXT_TABLES, &manager, sizeof(manager)) ||
         !manager || !memory_read((unsigned char *)manager + 0x30, code, sizeof(code))) {
         return 0;
     }
