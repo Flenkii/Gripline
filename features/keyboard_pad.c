@@ -147,8 +147,8 @@ static Binding bindings[] = {
     {L"Freecam", KIND_NOCLIP, 0, L"F7", {0}},
     {L"KeyMenu", KIND_MENU, 0, L"F8", {0}},
     {L"CruiseControl", KIND_NOCLIP, 0, L"K", {0}}, /* cruise.c reads it through keyboard_held */
-    {L"Walk", KIND_NOCLIP, 0, L"F", {0}},          /* walking.h: out of / into the car (V7 test) */
-    {L"Summon", KIND_NOCLIP, 0, L"G", {0}},        /* summon.h: while walking the car drives to you (V7.1 test) */
+    {L"Walk", KIND_NOCLIP, 0, L"F", {0}},          /* walking.h: out of / into the car (V7) */
+    {L"Summon", KIND_NOCLIP, 0, L"G", {0}},        /* summon.h: while walking the car drives to you (V7.1) */
 };
 
 static const struct {

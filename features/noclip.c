@@ -165,7 +165,7 @@ void noclip_pad_input(unsigned user, unsigned char *gamepad) {
         if (pressed & XI_DPAD_UP) InterlockedExchange(&pad_request, MODE_NOCLIP);
         if (pressed & XI_DPAD_DOWN) InterlockedExchange(&pad_request, MODE_FREECAM);
         if (pressed & XI_DPAD_LEFT) cruise_request_toggle();
-        if (pressed & XI_Y) InterlockedExchange(&pad_request, MODE_WALK); /* LS + Y: get out (V7 test) */
+        if (pressed & XI_Y) InterlockedExchange(&pad_request, MODE_WALK); /* LS + Y: get out (V7) */
         buttons &= (unsigned short)~(XI_DPAD_UP | XI_DPAD_DOWN | XI_DPAD_LEFT | XI_Y);
         memory_copy(gamepad, &buttons, sizeof(buttons));
     }

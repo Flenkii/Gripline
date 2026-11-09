@@ -1,7 +1,7 @@
 #ifndef FH2_WALKING_H
 #define FH2_WALKING_H
 
-/* Walking (V7 test): get out of the car and walk around on foot, invisible, with collision.
+/* Walking (V7): get out of the car and walk around on foot, invisible, with collision.
    Key Walk (FH2_Keyboard.ini, default F; controller: LS held + Y) gets out, offline only
    like noclip. The car stays where it is (noclip.c holds it). Walk key / controller Y near the car
    (WALK_ENTER_DISTANCE) gets back in. The game's HUD is hidden while walking, a Gripline card at the

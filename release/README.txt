@@ -1,11 +1,11 @@
-GRIPLINE V7.1 – keyboard, cockpit, walking & more for Forza Horizon 2 (Azimuth)
+GRIPLINE V7.1 - Immersion for Forza Horizon 2 (Azimuth)
 =========================================================================================
-An add-on next to Azimuth, the official Extra Options and FH2MP.
+One mod file, one in-game menu (F8). Works offline and online with FH2MP.
 
-*** NEW IN V7: WALKING MODE ***
-Press F (controller: hold LS + Y) to get out of your car and walk around on foot -
-with collision (trees, walls, buildings), run, jump, fade to black and door sounds.
-Your car stays parked; F / Y near it gets you back in. Offline only.
+  - WALKING: get out of the car (F / LS + Y) and walk the open world, with real collision.
+  - COCKPIT: dashboard cam (V), steering wheel that turns 1:1, keyboard and mouse driving.
+  - DRIVING TOOLS: live telemetry, cruise control, noclip, freecam, no damage on cars.
+  - WORLD: traffic presets, speed cameras / names / event icons off, calm Drivatars.
 
 Source code: https://github.com/Flenkii/Gripline
 
@@ -41,17 +41,13 @@ after removing Gripline? Delete the folder mods\Gripline - then everything is or
 2. WHAT GRIPLINE DOES - AND WHAT THE OTHERS DO
 ---------------------------------------------
 Gripline:
-  - Keyboard driving (WASD, arrows = camera), works together with a controller.
-  - Cockpit: the steering wheel turns 1:1 with your real wheel (rotation from the Azimuth
-    launcher), dashboard cam like in FH5 (Tab or V).
-  - More Traffic: Original, Much More Traffic, No Traffic or Drivatars Only, picked by name
-    (MODS > Installed mods > Gripline > Traffic), 30-100 cars, rush hour all day (restart needed).
-  - Nitro key N for the mod NitroSystem (off online), key list F5, Gripline cards,
-    problem report (Gripline_Report.zip).
-  - V7: Gripline menu (F8), walking (F), freecam (F7), noclip (F6), cruise control (K),
-    live telemetry, logbook, records, no damage on cars, world options, update notice.
+  - Walking (F), dashboard cam (V), 1:1 cockpit wheel, keyboard and mouse driving.
+  - Live telemetry, cruise control (K), noclip (F6), freecam (F7), no damage on cars.
+  - Traffic presets and world options, Gripline cards, Gripline menu (F8), problem report.
+  - Nitro key N for the mod NitroSystem (off online), key list F5.
 Azimuth (its launcher): wheel, pedals, buttons, rotation and force feedback.
 Extra Options: weather, time of day, hiding the HUD (F1), autodrive (F2).
+All settings: press F8 in the game. A short list is also under Pause > Settings > MODS.
 
 
 NEW IN V7.1
