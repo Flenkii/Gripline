@@ -197,11 +197,11 @@ static void release_shared(Shared *value) {
 /* the own car, with a reference (release_car when done) */
 static void *get_car(void) {
     void *manager, *car = NULL;
-    if (!memory_read_pointer(game + GAME_RVA_PLAYER_MANAGER, &manager) || !manager) return NULL;
-    void *player = ((PlayerGetter)(game + GAME_RVA_GET_LOCAL_PLAYER))(manager, 0);
+    if (!memory_read_pointer(game + FH2_RVA_PLAYER_MANAGER, &manager) || !manager) return NULL;
+    void *player = ((PlayerGetter)(game + FH2_RVA_GET_LOCAL_PLAYER))(manager, 0);
     if (!player) return NULL;
-    ((CarGetter)(game + GAME_RVA_GET_PLAYER_CAR))(player, &car);
-    if (car && !has_vtable(car, GAME_RVA_PLAYER_CAR_VTABLE)) {
+    ((CarGetter)(game + FH2_RVA_GET_PLAYER_CAR))(player, &car);
+    if (car && !has_vtable(car, FH2_RVA_PLAYER_CAR_VTABLE)) {
         ActionFn release = (ActionFn)method(car, 0x18);
         if (release) release(car);
         return NULL;
@@ -218,7 +218,7 @@ static void release_car(void *car) {
 static int driver_mode(void *car) {
     void *holder, *driver;
     int mode = -1;
-    if (!has_vtable(car, GAME_RVA_PLAYER_CAR_VTABLE) || !memory_read_pointer((unsigned char *)car + CAR_DRIVER_HOLDER, &holder) ||
+    if (!has_vtable(car, FH2_RVA_PLAYER_CAR_VTABLE) || !memory_read_pointer((unsigned char *)car + CAR_DRIVER_HOLDER, &holder) ||
         !holder || !memory_read_pointer(holder, &driver) || !method(driver, 0x48) ||
         !memory_read((unsigned char *)car + CAR_DRIVER_MODE, &mode, 4))
         return -1;
@@ -345,15 +345,15 @@ static int nearest_road(unsigned char *car, float out[3], float forward[3]) {
     unsigned char *node;
     int mode;
     float node_position[3];
-    if (!has_vtable(car, GAME_RVA_PLAYER_CAR_VTABLE) || !memory_read(car + CAR_ROAD_MODE, &mode, 4) ||
+    if (!has_vtable(car, FH2_RVA_PLAYER_CAR_VTABLE) || !memory_read(car + CAR_ROAD_MODE, &mode, 4) ||
         !memory_is_writable(car + CAR_ROAD_MODE, 4) || !memory_read_pointer(car + CAR_ROAD_BINDINGS, &bindings) ||
-        !has_vtable(bindings, GAME_RVA_ROAD_BINDINGS_VTABLE) || !memory_read_pointer((unsigned char *)bindings + 0xa8, &outer) ||
+        !has_vtable(bindings, FH2_RVA_ROAD_BINDINGS_VTABLE) || !memory_read_pointer((unsigned char *)bindings + 0xa8, &outer) ||
         !outer || !memory_read_pointer(outer, &inner) || !inner || !memory_read_pointer((unsigned char *)inner + 0x10, (void **)&node) ||
         !node || !node_ok(node, node_position))
         return 0;
     _Alignas(16) float position[4] = {0}, basis[12] = {0};
     *(volatile int *)(car + CAR_ROAD_MODE) = 0;
-    unsigned char found = ((NearestRoadFn)(game + GAME_RVA_NEAREST_ROAD))(car, position, basis, 0);
+    unsigned char found = ((NearestRoadFn)(game + FH2_RVA_NEAREST_ROAD))(car, position, basis, 0);
     *(volatile int *)(car + CAR_ROAD_MODE) = mode;
     if (!found) return 0;
     for (unsigned i = 0; i < 3; ++i)
@@ -916,7 +916,7 @@ int summon_start(unsigned char *game_image) {
         return 0;
     }
     static const unsigned char road_code[] = {0x48, 0x8b, 0xc4, 0x56, 0x57, 0x41, 0x54, 0x41, 0x56, 0x41, 0x57, 0x48, 0x81, 0xec};
-    road_ok = memory_equal(game + GAME_RVA_NEAREST_ROAD, road_code, sizeof(road_code));
+    road_ok = memory_equal(game + FH2_RVA_NEAREST_ROAD, road_code, sizeof(road_code));
     if (!road_ok) log_append("SUMMON: nearest-road code differs - a car off the road is not put onto it.\r\n");
     if (!chain(RVA_TRACKER_UPDATE_SLOT, RVA_TRACKER_UPDATE, (void *)(uintptr_t)tracker_update, &previous_tracker_update) ||
         !chain(RVA_TRACKER_DESTROY_SLOT, RVA_TRACKER_DESTROY, (void *)(uintptr_t)tracker_destroy, &previous_tracker_destroy) ||

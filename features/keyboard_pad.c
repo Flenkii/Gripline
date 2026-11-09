@@ -569,7 +569,7 @@ static int game_has_focus(void) {
 static int simulation_running(void) {
     void *manager, *simulation;
     unsigned char paused;
-    return game_base && memory_read_pointer(game_base + GAME_RVA_PLAYER_MANAGER, &manager) && manager &&
+    return game_base && memory_read_pointer(game_base + FH2_RVA_PLAYER_MANAGER, &manager) && manager &&
            memory_read_pointer((unsigned char *)manager + 0x48, &simulation) && simulation &&
            memory_read((unsigned char *)simulation + 0x28, &paused, 1) && !paused;
 }

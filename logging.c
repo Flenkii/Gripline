@@ -3,122 +3,127 @@
 #include "settings.h"
 #include "support.h"
 
-static wchar_t runtime_log_path[PATH_CAPACITY];
-static wchar_t startup_log_path[PATH_CAPACITY];
+static wchar_t log_path[PATH_CAPACITY];
 
 void log_reset(void) {
-    runtime_log_path[0] = 0;
+    log_path[0] = 0;
 }
 
 void log_set_directory(const wchar_t *directory) {
-    if (!path_join(runtime_log_path, directory, MOD_LOG_NAME)) {
-        runtime_log_path[0] = 0;
+    if (!path_join(log_path, directory, MOD_LOG_NAME)) log_path[0] = 0;
+}
+
+/* ---------------------------------------------------------------- small text builder */
+
+typedef struct {
+    char data[448];
+    size_t used;
+} Line;
+
+static void line_text(Line *line, const char *text) {
+    for (; *text && line->used + 1 < sizeof(line->data); ++text) line->data[line->used++] = *text;
+}
+
+static void line_number(Line *line, int value) {
+    char digits[12];
+    unsigned count = 0, rest = value < 0 ? 0u - (unsigned)value : (unsigned)value;
+    do {
+        digits[count++] = (char)('0' + rest % 10);
+        rest /= 10;
+    } while (rest);
+    if (value < 0) line_text(line, "-");
+    while (count && line->used + 1 < sizeof(line->data)) line->data[line->used++] = digits[--count];
+}
+
+static void line_hex(Line *line, uintptr_t value) {
+    int digits = 1;
+    while (digits < 16 && (value >> (4 * digits))) ++digits;
+    while (digits-- && line->used + 1 < sizeof(line->data)) {
+        unsigned nibble = (unsigned)(value >> (4 * digits)) & 15u;
+        line->data[line->used++] = (char)(nibble < 10 ? '0' + nibble : 'a' + (nibble - 10));
     }
+}
+
+/* ---------------------------------------------------------------- writing */
+
+static void write_to(HANDLE file, const char *text, size_t length) {
+    DWORD written;
+    WriteFile(file, text, (DWORD)length, &written, NULL);
+}
+
+static HANDLE open_for_append(void) {
+    if (!log_path[0]) return INVALID_HANDLE_VALUE;
+    return CreateFileW(log_path, FILE_APPEND_DATA, FILE_SHARE_READ | FILE_SHARE_WRITE, NULL, OPEN_ALWAYS,
+                       FILE_ATTRIBUTE_NORMAL, NULL);
+}
+
+static void flush_line(const Line *line) {
+    HANDLE file = open_for_append();
+    if (file == INVALID_HANDLE_VALUE) return;
+    write_to(file, line->data, line->used);
+    CloseHandle(file);
 }
 
 void log_append(const char *message) {
-    if (!runtime_log_path[0]) {
-        return;
-    }
-    HANDLE file =
-        CreateFileW(runtime_log_path, FILE_APPEND_DATA, FILE_SHARE_READ | FILE_SHARE_WRITE, NULL,
-                    OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
-    if (file == INVALID_HANDLE_VALUE) {
-        return;
-    }
-    DWORD bytes_written;
-    WriteFile(file, message, (DWORD)text_length(message), &bytes_written, NULL);
+    HANDLE file = open_for_append();
+    if (file == INVALID_HANDLE_VALUE) return;
+    write_to(file, message, text_length(message));
     CloseHandle(file);
-}
-
-static void write_text(HANDLE file, const char *text) {
-    DWORD bytes_written;
-    WriteFile(file, text, (DWORD)text_length(text), &bytes_written, NULL);
-}
-
-static void write_number(HANDLE file, int value) {
-    char number[12];
-    char *cursor = number + sizeof(number) - 1;
-    unsigned magnitude = value < 0 ? 0u - (unsigned)value : (unsigned)value;
-    *cursor = 0;
-    do {
-        *--cursor = (char)('0' + magnitude % 10);
-        magnitude /= 10;
-    } while (magnitude);
-    if (value < 0) {
-        *--cursor = '-';
-    }
-    write_text(file, cursor);
 }
 
 void log_append_value(const char *label, int value) {
-    if (!runtime_log_path[0]) {
-        return;
-    }
-    HANDLE file =
-        CreateFileW(runtime_log_path, FILE_APPEND_DATA, FILE_SHARE_READ | FILE_SHARE_WRITE, NULL,
-                    OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
-    if (file != INVALID_HANDLE_VALUE) {
-        write_text(file, label);
-        write_number(file, value);
-        write_text(file, "\r\n");
-        CloseHandle(file);
-    }
+    if (!log_path[0]) return;
+    Line line = {{0}, 0};
+    line_text(&line, label);
+    line_number(&line, value);
+    line_text(&line, "\r\n");
+    flush_line(&line);
 }
+
+/* "<label><module file>+0x<offset>" for a code or data address; for finding which DLL hooked what */
+void log_append_module(const char *label, const void *address) {
+    Line line = {{0}, 0};
+    line_text(&line, label);
+
+    HMODULE module = NULL;
+    wchar_t file_name[MAX_PATH];
+    const DWORD flags = GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT;
+    if (address && GetModuleHandleExW(flags, (LPCWSTR)address, &module) &&
+        GetModuleFileNameW(module, file_name, MAX_PATH)) {
+        const wchar_t *base = file_name;
+        for (const wchar_t *p = file_name; *p; ++p)
+            if (*p == L'\\' || *p == L'/') base = p + 1;
+        for (; *base && line.used < 300; ++base) line.data[line.used++] = *base < 128 ? (char)*base : '?';
+    } else {
+        line_text(&line, "(no module)");
+    }
+    line_text(&line, "+0x");
+    line_hex(&line, (uintptr_t)address - (uintptr_t)module);
+    line_text(&line, "\r\n");
+    flush_line(&line);
+}
+
+/* ---------------------------------------------------------------- start of a new log */
 
 void log_start(const wchar_t *directory, const ModOptions *options) {
-    if (!path_join(startup_log_path, directory, MOD_LOG_NAME)) {
-        return;
-    }
-    HANDLE file = CreateFileW(startup_log_path, GENERIC_WRITE, FILE_SHARE_READ, NULL, CREATE_ALWAYS,
-                              FILE_ATTRIBUTE_NORMAL, NULL);
-    if (file == INVALID_HANDLE_VALUE) {
-        return;
-    }
-    write_text(file, "Gripline " GRIPLINE_VERSION " - FH2 Mod Platform mod next to the official Extra Options\r\n");
-    write_text(file, status_get());
-    for (size_t index = 0; index < setting_count; ++index) {
-        const SettingDefinition *definition = &setting_definitions[index];
-        int value = settings_value(options, definition);
-        write_text(file, "\r\n");
-        write_text(file, definition->log_name);
-        write_text(file, "=");
-        write_number(file, value);
-    }
-    write_text(file, "\r\n");
-    CloseHandle(file);
-}
+    static wchar_t path[PATH_CAPACITY]; /* static: 64 KB would need the stack probe the DLL does not link */
+    if (!path_join(path, directory, MOD_LOG_NAME)) return;
+    HANDLE file = CreateFileW(path, GENERIC_WRITE, FILE_SHARE_READ, NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+    if (file == INVALID_HANDLE_VALUE) return;
 
-/* diagnostics: "<label><module>+0x<offset>" for a code or data address */
-void log_append_module(const char *label, const void *address) {
-    char line[400];
-    size_t n = 0;
-    for (const char *p = label; *p && n < 200; ++p) line[n++] = *p;
-    HMODULE module = NULL;
-    wchar_t path[MAX_PATH];
-    if (address && GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
-                                      (LPCWSTR)address, &module) &&
-        GetModuleFileNameW(module, path, MAX_PATH)) {
-        const wchar_t *name = path;
-        for (const wchar_t *p = path; *p; ++p)
-            if (*p == L'\\' || *p == L'/') name = p + 1;
-        for (; *name && n < 300; ++name) line[n++] = *name < 128 ? (char)*name : '?';
-    } else {
-        for (const char *p = "(no module)"; *p; ++p) line[n++] = *p;
+    Line head = {{0}, 0};
+    line_text(&head, "Gripline " GRIPLINE_VERSION " - FH2 Mod Platform mod next to the official Extra Options\r\n");
+    write_to(file, head.data, head.used);
+    write_to(file, status_get(), text_length(status_get())); /* up to 511 characters: not through Line */
+
+    for (size_t i = 0; i < setting_count; ++i) {
+        Line row = {{0}, 0};
+        line_text(&row, "\r\n");
+        line_text(&row, setting_definitions[i].log_name);
+        line_text(&row, "=");
+        line_number(&row, settings_value(options, &setting_definitions[i]));
+        write_to(file, row.data, row.used);
     }
-    uintptr_t offset = (uintptr_t)address - (uintptr_t)module;
-    line[n++] = '+';
-    line[n++] = '0';
-    line[n++] = 'x';
-    int started = 0;
-    for (int shift = 60; shift >= 0; shift -= 4) {
-        unsigned digit = (unsigned)(offset >> shift) & 15;
-        if (!digit && !started && shift) continue;
-        started = 1;
-        line[n++] = (char)(digit < 10 ? '0' + digit : 'a' + digit - 10);
-    }
-    line[n++] = '\r';
-    line[n++] = '\n';
-    line[n] = 0;
-    log_append(line);
+    write_to(file, "\r\n", 2);
+    CloseHandle(file);
 }
