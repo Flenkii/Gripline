@@ -155,7 +155,7 @@ All keys can be changed in **F8** or `FH2_Keyboard.ini`.
 
 ## Building and license
 See [BUILD.md](BUILD.md): `python build.py /path/to/zig --output out` makes `out/fh2-mods/Gripline.dll` (Zig 0.15.2).
-GPL-3.0 (see [LICENSE](LICENSE)). History: [CHANGES_FORK.md](CHANGES_FORK.md).
+GPL-3.0 (see [LICENSE](LICENSE)). Changes: [CHANGELOG.md](CHANGELOG.md) · developer history: [docs/TECHNICAL_HISTORY.md](docs/TECHNICAL_HISTORY.md).
 
 ## AI disclosure
 The code of Gripline was written with the help of an AI (Claude by Anthropic) and tested in an emulator and in the game.

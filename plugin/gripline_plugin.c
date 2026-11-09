@@ -515,7 +515,7 @@ static void start_features(void) {
     nitro_link_start(game);
     cockpit_view_start(game);
     walking_start(game);
-    summon_start(game); /* V7.1 test: the car drives to the walker (GPS + the game's AI) */
+    summon_start(game); /* V7.1: the car drives to the walker (GPS + the game's AI) */
     summon_set_style(options.summon_style);
     summon_set_sounds(options.summon_sounds);
     walking_set_handheld(options.walk_handheld);
@@ -587,9 +587,9 @@ FH2MOD_EXPORT int fh2mod_init(const FH2ModApi *platform) {
     info.github_repo = "Flenkii/Gripline";
     info.platform_version = "2.7.4";
     info.check_updates = 0;
-    info.description = "Keyboard driving, 1:1 cockpit wheel, dashboard cam, noclip, freecam, live telemetry and no damage "
-                       "for Forza Horizon 2. Gripline menu: F8. Runs next to Extra Options and Azimuth's wheel. "
-                       "Settings: Pause > Settings > MODS.";
+    info.description = "Immersion for Forza Horizon 2: walk on foot, dashboard cam and 1:1 wheel, keyboard and mouse, "
+                       "live telemetry, world options. Runs next to Extra Options and FH2MP. "
+                       "Short list of settings here - press F8 in the game for all of them.";
     mod = api->register_mod(&info);
     if (!mod) return 1;
     if (!find_folders()) {

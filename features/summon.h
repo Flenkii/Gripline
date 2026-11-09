@@ -1,7 +1,7 @@
 #ifndef FH2_SUMMON_H
 #define FH2_SUMMON_H
 
-/* V7.1 test: summon the car while walking (Marvin 08.11.2026, "like Tesla's summon").
+/* V7.1: summon the car while walking (Marvin 08.11.2026, "like Tesla's summon").
    Key Summon (FH2_Keyboard.ini, default G; controller X while walking): the game's own AI driver
    drives the parked car along a GPS route to the walker and stops next to him. Again = stop.
    Offline only, only while walking.

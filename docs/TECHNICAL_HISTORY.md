@@ -1,6 +1,8 @@
-# Changes in this fork compared to Extra Options 0.2.98
+# Gripline – technical history (files and hooks per version)
 
-Fork of https://github.com/RokkuDayo/ForzaHorizon2_ExtraOptions – modified in October 2026 by Flenkii.
+For the short, player-facing list see [CHANGELOG.md](../CHANGELOG.md). This file is the developer's log: which source files came or went and how the hooks work.
+
+Gripline started in October 2026 as a fork of [Extra Options](https://github.com/RokkuDayo/ForzaHorizon2_ExtraOptions) 0.2.98 by RokkuDayo (GPL-3.0). Since V6 it is a stand-alone FH2 Mod Platform mod, and with V7.1 the last source files that came from Extra Options were rewritten.
 
 ## New files
 - `features/wheel_bridge.c` – G920 wheel as an Xbox wheel, force feedback (the game's own wheel programs; the old own FFB only as fallback), reconnect, log
