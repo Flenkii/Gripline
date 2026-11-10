@@ -19,7 +19,7 @@ KEYS = ['TrafficLevel', 'RushHourAllDay', 'Notifications', 'SteeringAnimation', 
         'CockpitViewUp', 'CardColor', 'CardStyle', 'UpdateCheck', 'SpeedCameras', 'CarLabels', 'Telemetry',
         'TelemetryShow', 'EventIcons', 'NewsSeen', 'NoDamage', 'CardsHidden', 'CruiseCrashOff', 'CruiseMinSpeed', 'CruiseSlowOff',
         'TelemetryPosition', 'TelemetryOpacity', 'TelemetrySize', 'WalkHandheld', 'CalmDrivatars', 'WalkGauge',
-        'SummonStyle', 'SummonSounds']
+        'SummonStyle', 'SummonSounds', 'NitroOnline']
 
 
 def read(text):

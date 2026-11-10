@@ -43,14 +43,24 @@ static int session_online(void) {
     return state == 1;
 }
 
-/* Online: nitro off (NitroSystem would give an unfair boost to the other players' races). */
+static volatile LONG nitro_online_setting = 1;
+
+void nitro_online_remember(int allowed) {
+    InterlockedExchange(&nitro_online_setting, allowed ? 1 : 0);
+}
+
+int nitro_online_allowed(void) {
+    return (int)nitro_online_setting;
+}
+
+/* Online with NitroOnline=0: nitro off (the player chose to keep Gripline's nitro out of online races). */
 static int nitro_blocked(void) {
     ULONGLONG now = GetTickCount64();
     if (now >= next_online_check) {
         next_online_check = now + 500;
         LONG online = session_online();
         LONG before = InterlockedExchange(&online_state, online);
-        if (before != online && (before != -1 || online)) {
+        if (before != online && (before != -1 || online) && !nitro_online_setting) {
             if (online) {
                 log_append("NITRO: online session - nitro off.\r\n");
                 if (linked_module && notify_kind_on(NOTIFY_KIND_WHEEL)) {
@@ -67,7 +77,7 @@ static int nitro_blocked(void) {
             }
         }
     }
-    return online_state == 1;
+    return online_state == 1 && !nitro_online_setting;
 }
 
 static const struct {
@@ -248,6 +258,10 @@ __declspec(dllexport) int Fh2TestNitroLink(void *module, const wchar_t *ini) {
 
 __declspec(dllexport) void Fh2TestNitroSet(unsigned source, int held) {
     nitro_link_set(source, held);
+}
+
+__declspec(dllexport) void Fh2TestNitroOnline(int allowed) {
+    nitro_online_remember(allowed);
 }
 
 __declspec(dllexport) void Fh2TestNitroGame(void *image) {

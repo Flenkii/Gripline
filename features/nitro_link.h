@@ -15,7 +15,12 @@ enum { NITRO_SOURCE_KEYBOARD = 1, NITRO_SOURCE_WHEEL = 2 };
    FnFNitro.dll (at most once per second) and links to it. */
 void nitro_link_set(unsigned source, int held);
 
-/* Game mapped: enables the online check (nitro is switched off in an FH2MP session). */
+/* [Gripline] NitroOnline (F8 > Settings): 1 = the nitro key works in an FH2MP session too (default, NitroSystem
+   is a separate mod and the FH2MP servers judge the car), 0 = Gripline switches nitro off online. */
+void nitro_online_remember(int allowed);
+int nitro_online_allowed(void);
+
+/* Game mapped: starts the online check (nitro is switched off in an FH2MP session only when NitroOnline=0). */
 void nitro_link_start(unsigned char *game_image);
 
 /* 1 while a network session (FH2MP) is up. Also used by noclip.c. Safe from any thread. */
