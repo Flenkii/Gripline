@@ -1,7 +1,7 @@
 #ifndef FH2_WALKING_H
 #define FH2_WALKING_H
 
-/* Walking (V7 test): get out of the car and walk around on foot, invisible, with collision.
+/* Walking (V7): get out of the car and walk around on foot, invisible, with collision.
    Key Walk (FH2_Keyboard.ini, default F; controller: LS held + Y) gets out, offline only
    like noclip. The car stays where it is (noclip.c holds it). Walk key / controller Y near the car
    (WALK_ENTER_DISTANCE) gets back in. The game's HUD is hidden while walking, a Gripline card at the
@@ -44,6 +44,10 @@ int walking_speed_kmh(void);
 int walking_has_collision(void);
 /* 1 while the walker is where the game has no floor collision loaded (walks on flat, no falling) */
 int walking_no_floor(void);
+/* V7.1 summon (summon.h): the walker's place (sphere centre, 0 = not walking yet) and the car's new
+   place after it drove (noclip.c, car update thread). */
+int walking_walker_position(float out[3]);
+void walking_move_car(const float position[3], const float right[3], const float forward[3]);
 /* The game loads floor collision only around the car (~65 m, Gripline.log 06.11.2026). Farther
    than WALK_HIDE_FROM m from the car, noclip.c holds the car under the ground below the walker, so
    the collision comes along; nearer than WALK_HIDE_BACK m it stands at its place again.
@@ -53,13 +57,35 @@ int walking_car_hidden(float out[3]);
 /* Input of one step (noclip.c fills it from the keyboard and the controllers). */
 typedef struct {
     float ahead, side, yaw, pitch; /* -1..1 */
-    int run, jump;
+    int run, jump, crouch;
+    float mouse_x, mouse_y; /* mouse counts this step (already times WalkMouseLook %) */
 } WalkInput;
 void noclip_walk_input(WalkInput *input);
+
+/* V7.1: the hooked camera the game views through now (index into walking.c's list, -1 = none of
+   them / not known), and 1 when it is one of the follow (outside) cameras. */
+int walking_view_camera(void);
+int walking_view_outside(void);
+
+/* V7.1 handheld camera (Marvin 07.11.2026): the walking camera moves like a phone held in the hand
+   (slow drift, breathing, a dip at each step, a little lag when turning). 0 off, 1 light, 2 medium,
+   3 strong; Gripline.ini [Gripline] WalkHandheld, F8 menu. */
+#define WALK_HANDHELD_COUNT 4
+void walking_set_handheld(int level);
+int walking_handheld(void);
+
+/* V7.1 walking gauge (walk_gauge.h): 1 while it is to be shown (walking, the game running, not in
+   a menu), with what it shows. Any thread. */
+#include "walk_gauge.h"
+int walking_gauge_data(WalkGaugeData *out);
+/* V7.1: blue arrow over the hidden car's place (see walking.c) */
+int walking_car_marker(float *tx, float *ty, float *ahead, float *fov, float *distance);
 
 /* Door sounds of the fade when getting out / in (Marvin 06.11.2026, his own sound file, cut in two,
    built into the DLL): 0 = door opens, 1 = door shuts. Played through Windows (winmm PlaySoundW,
    loaded only when needed), so at the Windows volume, not the game's. Silent when winmm is missing. */
 void walking_door_sound(int shut);
+/* a whole WAV file in memory, once, at Windows volume (any thread; a new sound ends the one playing) */
+void walking_play_wav(const void *wav);
 
 #endif

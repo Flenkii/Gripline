@@ -64,6 +64,9 @@ static wchar_t ini_path[PATH_CAPACITY];
 static int mouse_sensitivity; /* [Keyboard] MouseSteering, 0 = off */
 static int mouse_dead = 30;   /* [Keyboard] MouseDeadZone: percent of the game's stick dead zone the mouse skips */
 static int mouse_center;      /* [Keyboard] MouseCenter: seconds without mouse movement until the wheel turns back straight, 0 = never */
+static volatile int walk_mouse = 100;  /* [Keyboard] WalkMouseLook: walking's mouse look in percent, 0 = off (V7.1) */
+static volatile int drive_mouse = 100; /* [Keyboard] DriveMouseLook: mouse look in the car in percent, 0 = off (V7.1) */
+static int menu_mouse = 1;    /* [Keyboard] MenuMouse: mouse in the game's menus, 1 = on, 0 = off (V7.1) */
 static volatile LONG values[KEY_SETTING_COUNT];
 static int loaded;
 static const wchar_t *const setting_keys[KEY_SETTING_COUNT] = {L"Enabled", L"SteerTime", L"ReturnTime",
@@ -144,7 +147,8 @@ static Binding bindings[] = {
     {L"Freecam", KIND_NOCLIP, 0, L"F7", {0}},
     {L"KeyMenu", KIND_MENU, 0, L"F8", {0}},
     {L"CruiseControl", KIND_NOCLIP, 0, L"K", {0}}, /* cruise.c reads it through keyboard_held */
-    {L"Walk", KIND_NOCLIP, 0, L"F", {0}},          /* walking.h: out of / into the car (V7 test) */
+    {L"Walk", KIND_NOCLIP, 0, L"F", {0}},          /* walking.h: out of / into the car (V7) */
+    {L"Summon", KIND_NOCLIP, 0, L"G", {0}},        /* summon.h: while walking the car drives to you (V7.1) */
 };
 
 static const struct {
@@ -258,7 +262,8 @@ static const char default_ini[] =
     ";   It saves its changes into this file.\r\n"
     "; CruiseControl: keeps the speed of the moment, again/brake = off (controller: LS + D-pad left; settings: F8).\r\n"
     "; Walk: get out and walk (offline only, controller: LS + Y), again near the car = get in (or Y).\r\n"
-    ";   Throttle/Brake/SteerLeft/SteerRight walk, arrow keys look, NoclipFast runs, NoclipUp jumps.\r\n";
+    ";   Throttle/Brake/SteerLeft/SteerRight walk, arrow keys look, NoclipFast runs, NoclipUp jumps.\r\n"
+    "; Summon: while walking your car drives to you by itself (controller: X), again = stop.\r\n";
 
 /* Default file text including the key bindings (also used by ini_migrate.c). Returns the
    length, 0 if it does not fit. */
@@ -297,22 +302,22 @@ static const wchar_t *const labels_german[ARRAY_COUNT(bindings)] = {
     L"Gas", L"Bremse", L"Links lenken", L"Rechts lenken", L"Handbremse", L"Hochschalten", L"Runterschalten",
     L"Kupplung", L"Kamera wechseln", L"Zurückspulen", L"Telemetrie (halten)", L"Fotomodus (halten)", L"Radio: zurück",
     L"Radio: weiter", L"Blick zurück", L"Blick links", L"Blick rechts", L"Nitro (NitroSystem)",
-    L"Cockpit-Ansicht 2", L"Tastenliste ein/aus", L"Licht", L"Karte", L"Pause",
+    L"Dashboard-Cam", L"Tastenliste ein/aus", L"Licht", L"Karte", L"Pause",
     L"Bestätigen (A)", L"Zurück (B)", L"Taste X", L"Taste Y", L"Reiter links (LB)", L"Reiter rechts (RB)",
     L"Menü/Kamera hoch", L"Menü/Kamera runter", L"Menü/Kamera links", L"Menü/Kamera rechts",
     L"Steuerkreuz hoch", L"Steuerkreuz runter", L"Steuerkreuz links", L"Steuerkreuz rechts",
     L"Noclip ein/aus", L"Noclip: steigen", L"Noclip: sinken", L"Noclip: schneller (halten)", L"Freecam ein/aus",
-    L"Tastenmenü öffnen", L"Tempomat ein/aus", L"Walking: aus-/einsteigen"};
+    L"Tastenmenü öffnen", L"Tempomat ein/aus", L"Walking: aus-/einsteigen", L"Walking: Auto rufen"};
 static const wchar_t *const labels_english[ARRAY_COUNT(bindings)] = {
     L"Throttle", L"Brake", L"Steer left", L"Steer right", L"Handbrake", L"Shift up", L"Shift down",
     L"Clutch", L"Change camera", L"Rewind", L"Telemetry (hold)", L"Photo mode (hold)", L"Radio: previous",
     L"Radio: next", L"Look back", L"Look left", L"Look right", L"Nitro (NitroSystem)",
-    L"Cockpit view 2", L"Key list on/off", L"Lights", L"Map", L"Pause",
+    L"Dashboard cam", L"Key list on/off", L"Lights", L"Map", L"Pause",
     L"Confirm (A)", L"Back (B)", L"Button X", L"Button Y", L"Tab left (LB)", L"Tab right (RB)",
     L"Menu/camera up", L"Menu/camera down", L"Menu/camera left", L"Menu/camera right",
     L"D-pad up", L"D-pad down", L"D-pad left", L"D-pad right",
     L"Noclip on/off", L"Noclip: rise", L"Noclip: sink", L"Noclip: faster (hold)", L"Freecam on/off",
-    L"Open key menu", L"Cruise control on/off", L"Walking: get out / in"};
+    L"Open key menu", L"Cruise control on/off", L"Walking: get out / in", L"Walking: summon car"};
 _Static_assert(ARRAY_COUNT(bindings) + 1 <= NOTIFY_PANEL_ROWS, "key list rows");
 
 static unsigned char *game_base;
@@ -455,6 +460,11 @@ static void settings_load(void) {
     mouse_dead = read_int(L"MouseDeadZone", 30);
     if (mouse_dead < 0 || mouse_dead > 60) mouse_dead = 30;
     if (mouse_center < 0 || mouse_center > 30) mouse_center = 0;
+    walk_mouse = read_int(L"WalkMouseLook", 100);
+    if (walk_mouse < 0 || walk_mouse > 300) walk_mouse = 100;
+    drive_mouse = read_int(L"DriveMouseLook", 100);
+    if (drive_mouse < 0 || drive_mouse > 300) drive_mouse = 100;
+    menu_mouse = read_int(L"MenuMouse", 1);
     for (unsigned i = 0; i < ARRAY_COUNT(bindings); ++i) {
         wchar_t text[96];
         GetPrivateProfileStringW(L"Keyboard", bindings[i].key, bindings[i].defaults, text, 96, ini_path);
@@ -496,6 +506,22 @@ int keyboard_mouse_center(void) {
 void keyboard_set_mouse_center(int seconds) {
     if (seconds < 0 || seconds > 30) return;
     mouse_center = seconds;
+}
+
+int keyboard_walk_mouse_look(void) {
+    return walk_mouse;
+}
+
+void keyboard_set_walk_mouse_look(int percent) {
+    if (percent >= 0 && percent <= 300) walk_mouse = percent;
+}
+
+int keyboard_drive_mouse_look(void) {
+    return drive_mouse;
+}
+
+void keyboard_set_drive_mouse_look(int percent) {
+    if (percent >= 0 && percent <= 300) drive_mouse = percent;
 }
 
 const wchar_t *keyboard_ini_path(void) {
@@ -543,7 +569,7 @@ static int game_has_focus(void) {
 static int simulation_running(void) {
     void *manager, *simulation;
     unsigned char paused;
-    return game_base && memory_read_pointer(game_base + GAME_RVA_PLAYER_MANAGER, &manager) && manager &&
+    return game_base && memory_read_pointer(game_base + FH2_RVA_PLAYER_MANAGER, &manager) && manager &&
            memory_read_pointer((unsigned char *)manager + 0x48, &simulation) && simulation &&
            memory_read((unsigned char *)simulation + 0x28, &paused, 1) && !paused;
 }
@@ -695,16 +721,29 @@ static int di_open(HWND window) {
     return 1;
 }
 
-/* mouse counts left/right since the last call */
-static LONG di_dx(void) {
+/* mouse counts since the last call. Mouse steering (input thread) and walking's mouse look (camera
+   thread) take turns: only one of them reads at a time (they never both want it, but the switch
+   between driving and walking could overlap for a frame). */
+static volatile LONG di_busy;
+
+static void di_read(LONG *x, LONG *y) {
+    *x = 0, *y = 0;
+    if (InterlockedCompareExchange(&di_busy, 1, 0)) return;
     DiMouseState state;
     memory_copy(&state, &(DiMouseState){0}, sizeof(state));
     HRESULT hr = ((DiStateFn)DI_SLOT(di.device, 9))(di.device, sizeof(state), &state);
     if (FAILED(hr)) { /* lost or not acquired: once more next reading */
         ((DiDeviceFn)DI_SLOT(di.device, 7))(di.device);
-        return 0;
+    } else {
+        *x = state.x, *y = state.y;
     }
-    return state.x;
+    InterlockedExchange(&di_busy, 0);
+}
+
+static LONG di_dx(void) {
+    LONG x, y;
+    di_read(&x, &y);
+    return x;
 }
 
 typedef struct { LONG x, y; } MousePoint;
@@ -825,10 +864,135 @@ static double mouse_steer(int focused, double dt) {
     return mouse.out;
 }
 
+/* V7.1 mouse look (walking and driving): the mouse's counts since the last call, 0 when the game
+   window is not in front or the simulation is paused. The cursor stays parked in the middle of the
+   window like with mouse steering. Only one caller per frame (walking.c or drive_look.c, both on the
+   camera thread, never both: walking takes it while walking, driving otherwise). */
+static int mouse_look_read(float *dx, float *dy) {
+    static int parked;
+    *dx = 0.0f, *dy = 0.0f;
+    if (!mouse_ready()) return 0;
+    HWND window = (game_has_focus() && !input_blocked && driving_now()) ? foreground() : NULL;
+    RECT rect;
+    MousePoint centre = {0, 0}, now;
+    if (window && mouse.client_rect(window, &rect) && rect.right > 0 && rect.bottom > 0) {
+        centre.x = rect.right / 2;
+        centre.y = rect.bottom / 2;
+        if (!mouse.to_screen(window, &centre)) window = NULL;
+    } else {
+        window = NULL;
+    }
+    if (window && !di_open(window)) window = NULL;
+    if (!window) {
+        parked = 0;
+        return 0;
+    }
+    LONG x, y;
+    di_read(&x, &y);
+    if (!parked) { /* first reading: forget older movement */
+        parked = 1;
+        x = y = 0;
+    }
+    if (mouse.get_pos(&now) && (now.x != centre.x || now.y != centre.y)) mouse.set_pos((int)centre.x, (int)centre.y);
+    *dx = (float)x, *dy = (float)y;
+    return 1;
+}
+
+/* walking: works whether mouse steering is on or not (mouse_steer only runs while noclip/freecam/walking is off) */
+int keyboard_walk_mouse(float *dx, float *dy) {
+    *dx = 0.0f, *dy = 0.0f;
+    if (!walk_mouse || !mouse_look_read(dx, dy)) return 0;
+    *dx *= (float)walk_mouse / 100.0f, *dy *= (float)walk_mouse / 100.0f;
+    return 1;
+}
+
+/* driving: not while mouse steering is on (the mouse steers then) */
+int keyboard_drive_mouse(float *dx, float *dy) {
+    *dx = 0.0f, *dy = 0.0f;
+    if (!drive_mouse || mouse_sensitivity || !mouse_look_read(dx, dy)) return 0;
+    *dx *= (float)drive_mouse / 100.0f, *dy *= (float)drive_mouse / 100.0f;
+    return 1;
+}
+
+/* V7.1 mouse in the menus (menu_mouse.c): the real Windows cursor's place in the game window, buttons
+   and wheel, while the game window is in front and the simulation does NOT run (menus, pause menu).
+   The cursor is NOT held (Marvin 07.11.2026: Azimuth's own menu needs the Windows mouse). */
+typedef struct { DWORD size, flags; HCURSOR cursor; MousePoint position; } CursorInfo_;
+typedef BOOL(WINAPI *CursorInfoFn)(CursorInfo_ *);
+typedef BOOL(WINAPI *ScreenToClientFn)(HWND, MousePoint *);
+
+int keyboard_menu_mouse(int *x, int *y, int *buttons, int *wheel, int *client_w, int *client_h, int *system_shown) {
+    static CursorInfoFn cursor_info;
+    static ScreenToClientFn to_client;
+    *x = *y = *buttons = *wheel = 0;
+    *client_w = *client_h = 0;
+    *system_shown = 0;
+    if (!menu_mouse || !mouse_ready()) return 0;
+    if (!to_client) {
+        to_client = (ScreenToClientFn)(uintptr_t)GetProcAddress(user32, "ScreenToClient");
+        cursor_info = (CursorInfoFn)(uintptr_t)GetProcAddress(user32, "GetCursorInfo");
+        if (!to_client) return 0;
+    }
+    HWND window = (game_has_focus() && !input_blocked && !driving_now()) ? foreground() : NULL;
+    RECT rect;
+    MousePoint now;
+    if (!window || !mouse.client_rect(window, &rect) || rect.right <= 0 || rect.bottom <= 0) return 0;
+    if (!mouse.get_pos(&now) || !to_client(window, &now)) return 0;
+    if (now.x < 0 || now.y < 0 || now.x >= rect.right || now.y >= rect.bottom) return 0; /* outside the game */
+    if (!di_open(window)) return 0;
+    /* buttons and wheel from DirectInput (the game window may not get the clicks), the position from Windows */
+    if (InterlockedCompareExchange(&di_busy, 1, 0)) return 0;
+    DiMouseState state;
+    memory_copy(&state, &(DiMouseState){0}, sizeof(state));
+    HRESULT hr = ((DiStateFn)DI_SLOT(di.device, 9))(di.device, sizeof(state), &state);
+    if (FAILED(hr)) ((DiDeviceFn)DI_SLOT(di.device, 7))(di.device);
+    InterlockedExchange(&di_busy, 0);
+    if (FAILED(hr)) return 0;
+    if (cursor_info) {
+        CursorInfo_ info;
+        memory_copy(&info, &(CursorInfo_){0}, sizeof(info));
+        info.size = sizeof(info);
+        *system_shown = cursor_info(&info) && (info.flags & 1) && info.cursor; /* CURSOR_SHOWING */
+    }
+    *x = (int)now.x, *y = (int)now.y;
+    *wheel = (int)state.z;
+    *buttons = ((state.buttons[0] & 0x80) ? 1 : 0) | ((state.buttons[1] & 0x80) ? 2 : 0) | ((state.buttons[2] & 0x80) ? 4 : 0);
+    *client_w = (int)rect.right, *client_h = (int)rect.bottom;
+    return 1;
+}
+
 static struct {
     double steer, pedal[ARRAY_COUNT(bindings)];
     LARGE_INTEGER last;
 } kb;
+
+/* V7.1 menu mouse: short presses of controller inputs (wheel -> tabs / up / down, right click -> B),
+   pressed for PULSE_MS, then let go for PULSE_MS before the next one */
+#define PULSE_MS 70u
+#define PULSE_INPUTS 16
+static volatile LONG pulse_pending[PULSE_INPUTS];
+static int pulse_phase[PULSE_INPUTS]; /* 0 idle, 1 down, 2 up (pad thread) */
+static ULONGLONG pulse_until[PULSE_INPUTS];
+
+void keyboard_menu_pulse(unsigned input) {
+    if (input < PULSE_INPUTS && pulse_pending[input] < 8) InterlockedIncrement(&pulse_pending[input]);
+}
+
+static void pulses_apply(PadReading *r) {
+    ULONGLONG now = GetTickCount64();
+    for (unsigned i = 0; i < PULSE_INPUTS; ++i) {
+        if (pulse_phase[i] && now >= pulse_until[i]) {
+            pulse_phase[i] = pulse_phase[i] == 1 ? 2 : 0;
+            pulse_until[i] = now + PULSE_MS;
+        }
+        if (!pulse_phase[i] && pulse_pending[i] > 0) {
+            InterlockedDecrement(&pulse_pending[i]);
+            pulse_phase[i] = 1;
+            pulse_until[i] = now + PULSE_MS;
+        }
+        if (pulse_phase[i] == 1) apply_input(r, i, 1.0);
+    }
+}
 
 static void keyboard_reading(PadReading *r) {
     LARGE_INTEGER now, frequency;
@@ -908,6 +1072,7 @@ static void keyboard_reading(PadReading *r) {
     if (ms > 0.003) ms = MOUSE_DEAD_ZONE + (1.0 - MOUSE_DEAD_ZONE) * ms;
     else if (ms < -0.003) ms = -MOUSE_DEAD_ZONE + (1.0 - MOUSE_DEAD_ZONE) * ms;
     else ms = 0.0;
+    pulses_apply(r);
     double lx = clamp1(kb.steer + nav_x + ms);
     if (lx != 0.0) r->lx = lx;
     if (nav_y != 0.0) r->ly = clamp1(nav_y);
@@ -1406,7 +1571,8 @@ int keyboard_held(unsigned which) {
                                                               L"SteerRight", L"NoclipUp", L"NoclipDown",
                                                               L"NoclipFast", L"Noclip", L"Freecam",
                                                               L"ArrowUp", L"ArrowDown", L"ArrowLeft",
-                                                              L"ArrowRight", L"CruiseControl", L"Walk"};
+                                                              L"ArrowRight", L"CruiseControl", L"Walk",
+                                                              L"Summon"};
     static int index[KEYBOARD_HOLD_COUNT];
     if (which >= KEYBOARD_HOLD_COUNT || !loaded || !user32_ready()) return 0;
     if (!index[which]) {

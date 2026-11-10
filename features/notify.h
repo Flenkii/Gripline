@@ -33,6 +33,8 @@ void notify_show_deferred_call(NotifyTextFn make);
    swap chain). host = azimuth.exe image. Returns 1 when hooked. */
 int notify_install(unsigned char *host);
 int notify_install_late(void); /* after the game made its swap chain (plugin build) */
+/* plugin build, before notify_install: always the window over the game (it has the walking gauge and the fade) */
+void notify_prefer_window(void);
 
 /* On/off (menu, INI). Off hides cards at once; messages are still logged. */
 void notify_set_enabled(int enabled);
@@ -40,6 +42,9 @@ int notify_enabled(void);
 /* V7 walking: darkens the whole game picture, 0 = off .. 1000 = black, reached smoothly in ms
    (the fade when getting out and in). Shown even with cards switched off. Safe from any thread. */
 void notify_fade_black(int permille, unsigned ms);
+/* V7.1 menu mouse pointer: shown at client pixel (x, y) of the game window (tip of the arrow), also
+   with cards switched off. Card window only (the build Gripline ships). Safe from any thread. */
+void notify_cursor(int show, int x, int y);
 
 /* Card colour (menu, INI [Gripline] CardColor): bar, logo and title. Safe from any thread. */
 enum {
@@ -80,7 +85,7 @@ int notify_kind_on(int kind);
 /* Key list panel (keyboard_pad.c, key Keybinds): a tall card at the right edge of the picture,
    one row per key, shown until it is switched off; cards move to its left meanwhile. It is only
    drawn, the game keeps every input. count 0 hides it. Safe from any thread. */
-#define NOTIFY_PANEL_ROWS 46
+#define NOTIFY_PANEL_ROWS 47
 enum {
     NOTIFY_ROW_NORMAL,   /* label left, keys right */
     NOTIFY_ROW_SELECTED, /* key menu: the row the arrows stand on (highlighted) */

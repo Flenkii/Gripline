@@ -80,7 +80,7 @@ def press(*vk):
     tick()
     return level
 def selected():
-    b = e.alloc(64)
+    b = e.alloc(256)
     i = e.call('Fh2TestKeyMenuSelected', b)
     return e.wstr(b) if i != 0xffffffff and i < 64 else None
 def panel():
@@ -109,7 +109,7 @@ def binding(index, k=0):
 
 LEVEL_CLOSED, LEVEL_GROUPS, LEVEL_LIST, LEVEL_BINDING, LEVEL_CAPTURE = 0, 1, 2, 3, 4
 
-check(e.call('Fh2TestKeyMenuCover') == 45, 'jede der 45 Tasten steht genau einmal im Menue')
+check(e.call('Fh2TestKeyMenuCover') == 46, 'jede der 46 Tasten steht genau einmal im Menue')
 check(tick() == LEVEL_CLOSED and panel() == 0, 'Menue anfangs zu')
 card = e.alloc(256)
 ok = e.call('Fh2TestKeyMenuStartCard', card, 256)
@@ -118,7 +118,8 @@ check(ok == 1 and card_text == 'Press F8 to change your keys\nKey menu: arrows, 
 check(e.call('Fh2TestKeyboardBinding', 42, 0) == F8, 'KeyMenu = F8 (Standard)')
 
 press(F8)
-check(tick() == LEVEL_GROUPS and panel() == 22, f'F8 oeffnet das Menue (4 Abschnitte + 4 Seiten + Maus + Telemetrie + Tempomat + Fahrtenbuch + Rekorde + Welt + Verkehr + Kein Schaden + Einstellungen + Karten & Hinweise + Karten-Design + Problem-Bericht + Alle Tasten + Hinweis): {panel()}')
+check(tick() == LEVEL_GROUPS and panel() == 25, f'F8 oeffnet das Menue (4 Abschnitte + 4 Seiten + Maus + Maus-Blick + Telemetrie + Tempomat + Fahrtenbuch + Rekorde + Welt + Verkehr + Kein Schaden + Einstellungen + Handkamera + Lauf-Tacho + Karten & Hinweise + Karten-Design + Problem-Bericht + Alle Tasten + Hinweis): {panel()}')
+check(e.call('Fh2TestNotifyPanelPixels', 1080) >= 76 + 25 * 26, f'V7.1 Hauptseite mit Lauf-Tacho behaelt die grossen Zeilen: {e.call("Fh2TestNotifyPanelPixels", 1080)} px')
 top = panel_rows()
 check(top.get('Keys & controls') == '' and top.get('Driving & data') == '' and top.get('World & cars') == '' and top.get('Gripline') == '',
       f'vier Abschnitte: {list(top)}')
@@ -260,6 +261,29 @@ check('MouseSteering=0\r\n' in ini(), 'wieder Aus')
 press(ESC); press(ESC)
 check(tick() == LEVEL_CLOSED, 'Maus: Esc, Esc: zu')
 
+# mouse look page (V7.1): walking / driving sensitivity, arrows change, Enter steps on, FH2_Keyboard.ini
+press(0x79)
+check(goto('Mouse look: sensitivity'), selected())
+press(ENTER)
+rows = panel_rows()
+check(selected() == 'While walking' and rows.get('While walking') == '100 %' and rows.get('While driving') == '100 %', f'Maus-Blick-Seite: {rows}')
+press(0x27)  # right arrow
+check(panel_rows().get('While walking') == '110 %' and 'WalkMouseLook=110\r\n' in ini(), f'Laufen 110 % gespeichert: {ini()!r}')
+for _ in range(20): press(0x27)
+check(panel_rows().get('While walking') == '300 %' and 'WalkMouseLook=300\r\n' in ini(), 'Laufen hoert bei 300 % auf')
+press(ENTER)
+check(panel_rows().get('While walking') == 'Off' and 'WalkMouseLook=0\r\n' in ini(), 'Enter am Ende: wieder Aus')
+press(DOWN); press(0x25); press(0x25)  # left arrow twice
+check(panel_rows().get('While driving') == '80 %' and 'DriveMouseLook=80\r\n' in ini(), 'Fahren 80 % gespeichert')
+press(DOWN); press(ENTER)
+rows = panel_rows()
+check(rows.get('While walking') == '100 %' and rows.get('While driving') == '100 %' and 'WalkMouseLook=100\r\n' in ini()
+      and 'DriveMouseLook=100\r\n' in ini(), f'beide auf Standard: {rows}')
+press(ESC)
+check(tick() == LEVEL_GROUPS and selected() == 'Mouse look: sensitivity', 'Esc: zurueck zur Hauptseite')
+press(ESC)
+check(tick() == LEVEL_CLOSED, 'Maus-Blick: zu')
+
 # telemetry page: Turn rate on -> Gripline.ini TelemetryShow, dead zone 40 % -> FH2_Keyboard.ini
 press(0x79)
 goto('Live telemetry')
@@ -282,7 +306,7 @@ press(DOWN); press(0x25)
 check(panel_rows().get('Background opacity') == '90 %' and b'TelemetryOpacity=90' in open(os.path.join(root, 'Gripline.ini'), 'rb').read(), 'Deckkraft 90 % gespeichert')
 press(DOWN); press(ENTER)
 check(panel_rows().get('Size') == '115 %' and b'TelemetrySize=115' in open(os.path.join(root, 'Gripline.ini'), 'rb').read(), 'Groesse 115 % gespeichert')
-press(ESC); press(UP); press(ENTER)
+press(ESC); press(UP); press(UP); press(ENTER)
 for _ in range(10): press(DOWN)
 check(selected() == '40 %', selected())
 press(ENTER)
@@ -292,8 +316,8 @@ check(tick() == LEVEL_CLOSED, 'Telemetrie/Totzone: zu')
 
 # world page: three on/off rows, restart note
 press(0x79)
-goto('World: cameras, names, icons')
-check(selected() == 'World: cameras, names, icons', selected())
+goto('World: cameras, Drivatars …')
+check(selected() == 'World: cameras, Drivatars …', selected())
 press(ENTER)
 rows = panel_rows()
 check(selected() == 'Speed cameras' and 'Names above cars' in rows and 'Event icons on the road' in rows
@@ -326,6 +350,27 @@ check(panel_rows().get('No damage on cars') == 'Off', 'Hauptseite zeigt Aus')
 press(ESC)
 check(tick() == LEVEL_CLOSED, 'Schaden: zu')
 
+# V7.1 walking speedometer: Step pulse is the default, Racing bar chosen -> Gripline.ini WalkGauge=2, then Off
+press(0x79)
+goto('Walking: speedometer')
+check(panel_rows().get('Walking: speedometer') == 'Step pulse', f'Tacho-Zeile zeigt Schritt-Puls: {panel_rows().get("Walking: speedometer")!r}')
+press(ENTER)
+rows = panel_rows()
+check(selected() == 'Step pulse' and rows.get('Step pulse') == '\u2713 active' and rows.get('Off') == '' and rows.get('Ring') == ''
+      and 'Racing bar' in rows and 'Bottom right while on foot' in rows, f'Tacho-Seite: {rows}')
+press(UP); press(ENTER)
+gi = open(os.path.join(root, 'Gripline.ini'), 'rb').read()
+check(b'WalkGauge=2' in gi and panel_rows().get('Racing bar') == '\u2713 active' and panel_rows().get('Step pulse') == 'default',
+      f'Racing-Leiste gewaehlt und gespeichert: {gi!r}')
+press(UP); press(UP); press(ENTER)
+check(b'WalkGauge=0' in open(os.path.join(root, 'Gripline.ini'), 'rb').read(), 'Tacho aus gespeichert')
+press(DOWN); press(DOWN); press(DOWN); press(ENTER)
+check(b'WalkGauge=3' in open(os.path.join(root, 'Gripline.ini'), 'rb').read(), 'wieder Schritt-Puls')
+press(ESC)
+check(panel_rows().get('Walking: speedometer') == 'Step pulse', 'Hauptseite zeigt Schritt-Puls')
+press(ESC)
+check(tick() == LEVEL_CLOSED, 'Tacho: zu')
+
 # logbook page: totals, nothing driven yet
 press(0x79)
 goto('Logbook')
@@ -351,15 +396,15 @@ check('Own sprints' not in panel_rows(), 'Eigene Sprints nicht mehr im Menue')
 press(ESC)
 check(tick() == LEVEL_CLOSED, 'Rekorde: zu')
 
-# settings page (V7): card colour with preview, cockpit view 2, update notice
+# settings page (V7): card colour with preview, dashboard cam, update notice
 gpath = os.path.join(root, 'Gripline.ini')
 open(gpath, 'wb').write(b'[Gripline]\r\nCardColor=0\r\nUpdateCheck=1\r\n')
 press(0x79)
 check(goto('Settings'), selected())
 press(ENTER)
 rows = panel_rows()
-check(selected() == 'Card colour' and 'Steering animation 1:1' in rows and 'Cockpit view 2: forward' in rows
-      and 'Cockpit view 2: height' in rows and rows.get('Update notice at start') == 'On', f'Einstellungen: {rows}')
+check(selected() == 'Card colour' and 'Steering animation 1:1' in rows and 'Dashboard cam: forward' in rows
+      and 'Dashboard cam: height' in rows and rows.get('Update notice at start') == 'On', f'Einstellungen: {rows}')
 press(ENTER)
 check(selected() == 'Blue (original)' and panel_rows().get('Blue (original)') == '\u2713 active', f'Farbseite: {panel_rows()}')
 press(DOWN)
@@ -369,7 +414,7 @@ check(e.call('Fh2TestNotifyColorGet') == 0 and selected() == 'Card colour', 'Esc
 press(ENTER); press(DOWN); press(DOWN); press(ENTER)
 check(e.call('Fh2TestNotifyColorGet') == 2 and panel_rows().get('Green') == '\u2713 active', 'Gruen gewaehlt')
 press(ESC)
-check(goto('Cockpit view 2: forward'), selected())
+check(goto('Dashboard cam: forward'), selected())
 press(ENTER)
 check(selected() == '35 cm', f'nach vorn: aktueller Wert gewaehlt {selected()}')
 press(DOWN); press(ENTER)

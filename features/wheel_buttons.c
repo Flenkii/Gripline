@@ -129,7 +129,7 @@ static void log_table(uint64_t id) {
     static const char *const labels[WHEEL_FUNCTION_COUNT] = {
         "", "Camera", "Look back", "Look left", "Look right", "Rewind", "Telemetry",
         "Photo mode", "Radio previous", "Radio next", "Handbrake", "Clutch", "Shift up",
-        "Shift down", "Nitro", "Cockpit view"};
+        "Shift down", "Nitro", "Dashboard cam"};
     char line[700];
     size_t length = 0;
     char number[4] = {(char)('0' + (id % 100) / 10), (char)('0' + id % 10), 0, 0};

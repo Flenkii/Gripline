@@ -52,6 +52,7 @@ enum {
     KEYBOARD_HOLD_LOOK_RIGHT,
     KEYBOARD_HOLD_CRUISE, /* CruiseControl (on/off), cruise.c */
     KEYBOARD_HOLD_WALK,   /* Walk (out of / into the car), walking.h */
+    KEYBOARD_HOLD_SUMMON, /* Summon (while walking), summon.h */
     KEYBOARD_HOLD_COUNT
 };
 int keyboard_held(unsigned which);
@@ -85,7 +86,23 @@ void keyboard_set_mouse_steering(int sensitivity);
 /* [Keyboard] MouseDeadZone: 0..60 percent */
 int keyboard_mouse_dead_zone(void);
 void keyboard_set_mouse_dead_zone(int percent);
+/* V7.1 walking: mouse movement (counts * WalkMouseLook %) since the last call; 0 = no reading */
+int keyboard_walk_mouse(float *dx, float *dy);
+/* V7.1 mouse look in the car: same, DriveMouseLook %; 0 while mouse steering is on */
+int keyboard_drive_mouse(float *dx, float *dy);
+/* V7.1 mouse in the menus: the Windows cursor in client pixels, buttons (1 left, 2 right, 4 middle), wheel,
+   the client size and whether Windows shows its cursor; 0 while driving, unfocused, outside the window or MenuMouse=0 */
+int keyboard_menu_mouse(int *x, int *y, int *buttons, int *wheel, int *client_w, int *client_h, int *system_shown);
+/* V7.1 menu mouse: one short press of a controller input (wheel_buttons.c numbering: 0 dpad up, 1 dpad down,
+   8 LB, 9 RB, 12 A, 13 B), queued; safe from any thread */
+void keyboard_menu_pulse(unsigned input);
 int keyboard_mouse_center(void);
 void keyboard_set_mouse_center(int seconds);
+/* V7.1 mouse look sensitivity in percent (0 = off, max 300): walking (WalkMouseLook) and in the car
+   (DriveMouseLook), FH2_Keyboard.ini; the F8 menu changes them, they work at once */
+int keyboard_walk_mouse_look(void);
+void keyboard_set_walk_mouse_look(int percent);
+int keyboard_drive_mouse_look(void);
+void keyboard_set_drive_mouse_look(int percent);
 
 #endif

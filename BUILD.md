@@ -27,6 +27,10 @@ python test_ini_migrate.py ../out-test/fh2-mods/Gripline.dll
 python test_cockpit_view.py ../out-test/fh2-mods/Gripline.dll
 python test_nitro.py ../out-test/fh2-mods/Gripline.dll
 python test_cockpit.py ../out-test/fh2-mods/Gripline.dll
+python test_walking.py ../out-test/fh2-mods/Gripline.dll
+python test_walk_gauge.py ../out-test/fh2-mods/Gripline.dll
+python test_summon.py ../out-test/fh2-mods/Gripline.dll path/to/forza_durango_release_final.exe
+python test_drive_look.py ../out-test/fh2-mods/Gripline.dll
 python test_no_damage.py ../out-test/fh2-mods/Gripline.dll path/to/forza_durango_release_final.exe
 ```
 
@@ -36,5 +40,5 @@ python test_no_damage.py ../out-test/fh2-mods/Gripline.dll path/to/forza_durango
 ## Release ZIP
 
 ```text
-python tools/make_release.py out Gripline_V7.zip
+python tools/make_release.py out Gripline_V7.1.zip
 ```

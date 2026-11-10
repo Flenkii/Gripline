@@ -37,6 +37,9 @@
 #include "features/game_language.h"
 #include "features/noclip.h"
 #include "features/walking.h"
+#include "features/summon.h"
+#include "features/menu_mouse.h"
+#include "features/focus_guard.h"
 #include "features/no_damage.h"
 #include "features/version_check.h"
 #include "features/update_check.h"
@@ -513,12 +516,19 @@ static void start_features(void) {
     nitro_link_start(game);
     cockpit_view_start(game);
     walking_start(game);
+    summon_start(game); /* V7.1: the car drives to the walker (GPS + the game's AI) */
+    summon_set_style(options.summon_style);
+    summon_set_sounds(options.summon_sounds);
+    walking_set_handheld(options.walk_handheld);
+    walk_gauge_set_style(options.walk_gauge);
+    menu_mouse_start(game); /* after walking: both chain the UI frame */
+    focus_guard_start();    /* Azimuth may miss "window active" at the start -> pause menu again and again */
     no_damage_bind(game);
     no_damage_set_mode(options.no_damage);
     noclip_install();
     gripline_set_output_root(media_dir);
     traffic_files_start(mount_dir, options.traffic_level);
-    world_files_start(mount_dir, options.speed_cameras, options.car_labels, options.event_icons);
+    world_files_start(mount_dir, options.speed_cameras, options.car_labels, options.event_icons, options.calm_drivatars);
     cockpit_start(game, mount_dir, options.steering_animation, azimuth_rotation(), 10 /* linear */);
     notify_set_enabled(options.notifications);
     notify_set_style(options.card_style);
@@ -536,7 +546,8 @@ static void start_features(void) {
     telemetry_set_show(options.telemetry_show);
     logbook_start(game, directory, mount_dir, options.news_seen);
     records_start(game, directory);
-    rig_settings_world(options.speed_cameras, options.car_labels, options.telemetry, options.event_icons);
+    rig_settings_world(options.speed_cameras, options.car_labels, options.telemetry, options.event_icons,
+                       options.calm_drivatars);
     rig_settings_start(directory);
     /* the platform may have loaded Gripline after Azimuth set up gamepads and swap chain */
     if (!keyboard_pad_late()) platform_log("keyboard: not active (off in FH2_Keyboard.ini, Mapper running, or no hook)");
@@ -610,9 +621,9 @@ FH2MOD_EXPORT int fh2mod_init(const FH2ModApi *platform) {
     info.github_repo = "Flenkii/Gripline";
     info.platform_version = "2.7.4";
     info.check_updates = 0;
-    info.description = "Keyboard driving, 1:1 cockpit wheel, cockpit view 2, noclip, freecam, live telemetry and no damage "
-                       "for Forza Horizon 2. Gripline menu: F8. Runs next to Extra Options and Azimuth's wheel. "
-                       "Settings: Pause > Settings > MODS.";
+    info.description = "Immersion for Forza Horizon 2: walk on foot, dashboard cam and 1:1 wheel, keyboard and mouse, "
+                       "live telemetry, world options. Runs next to Extra Options and FH2MP. "
+                       "Short list of settings here - press F8 in the game for all of them.";
     mod = api->register_mod(&info);
     if (!mod) return 1;
     if (!find_folders()) {
@@ -626,6 +637,7 @@ FH2MOD_EXPORT int fh2mod_init(const FH2ModApi *platform) {
     unsigned char *host = (unsigned char *)GetModuleHandleW(NULL);
     if (host) {
         int keys = keyboard_pad_arm(host, directory); /* before Azimuth sets up its gamepads */
+        notify_prefer_window();                       /* the window has the walking gauge and the fade */
         int cards = notify_install(host);             /* game picture cards */
         platform_log(keys ? "early keyboard hook: yes" : "early keyboard hook: no");
         platform_log(cards ? "early card hook: yes" : "early card hook: no");

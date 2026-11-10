@@ -5,6 +5,12 @@
 #include "support.h"
 #include "walking.h"
 #include "keyboard_pad.h"
+#include "drive_look.h"
+#include "walk_gauge.h"
+#include "game_language.h"
+#include "game_units.h"
+#include "summon.h"
+#include "notify.h"
 
 /* ------------------------------------------------------------------ game addresses */
 
@@ -60,17 +66,56 @@ static float fall;           /* vertical speed, m/s (+ = up) */
 static int grounded, bob_on, no_floor, recovered_logged, jump_logged;
 static float last_ground;
 static float bob_phase;
+/* V7.1 smoothing state */
+static float vel[2];               /* horizontal velocity, m/s (world x, z) */
+static float yaw_rate, pitch_rate; /* rad/s, eased */
+static float mouse_yaw, mouse_pitch; /* mouse turn still to do, rad */
+static float crouch;               /* 0 standing .. 1 crouched */
+static float bob_amount;           /* 0..1 */
+static float eye_y;                /* the eased eye height */
+static int eye_y_set;
+static float look[3] = {0, 0, 1};
+/* V7.1 handheld camera: level (any thread), wave phases (camera thread) */
+static volatile LONG handheld = 2;
+/* V7.1b (Marvin 07.11.2026: "not natural yet - too even, every step the same"): random, never
+   repeating movement (smooth noise) and steps that each differ, pushed into a small spring */
+typedef struct { float from, to, t; } HandNoise;
+static HandNoise hand_noise[6];
+static unsigned hand_seed = 0x9e3779b9u;
+static float step_gain = 1.0f, step_gain_to = 1.0f; /* this step's strength, eased */
+static int step_half = -1;
+static float spring_pitch, spring_pitch_v, spring_yaw, spring_yaw_v, spring_up, spring_up_v;
+#ifdef FH2_TWEAKS_TEST
+static float test_mouse[2]; /* tests: mouse counts for the next step */
+#endif  /* the direction given to the camera (with the stride's small sway) */
 static float car_place[3], car_right[3], car_forward[3];
 static LARGE_INTEGER last_step;
 static int stepped;
 
 /* read on other threads */
 static volatile LONG distance_cm = -100, speed_x10, collision_ok;
+static SRWLOCK gauge_lock = SRWLOCK_INIT; /* V7.1 walking gauge data (step -> card window) */
+static WalkGaugeData gauge;
 static float smooth_speed;
 static float eye[3];
 static float head[3]; /* the head sphere's centre (WALK_HEAD above the body, lower or aside under branches) */
 
 static _Alignas(16) unsigned char params_free[0x40], params_floor[0x40];
+
+/* Diagnostics (Marvin 08.11.2026: at ~50 m the car goes and the camera rises a little). The car is
+   hidden on purpose (WALK_HIDE_FROM); why the camera rises is not known yet. Gripline.log gets, for
+   the first switches of a session: the walker's floor and eye height at the switch and one second
+   later, the camera the game looks through, sudden floor jumps and what the floor was. */
+typedef float (*FovFn)(void *);
+static _Alignas(16) float walk_view[16]; /* the camera's own picture this frame (camera_view) */
+static float walk_fov;
+static void *walk_view_camera;
+static int walk_view_ok;
+static volatile LONG diag_switch; /* 1 = the car was just hidden, 2 = put back (car thread -> walker) */
+static void *floor_hit;           /* what the last floor check hit */
+static unsigned diag_count;
+static int diag_kind;             /* the switch being watched */
+static float diag_time, diag_floor, diag_eye;
 static void *world;
 static int world_tried; /* tests: no lookup */
 
@@ -83,10 +128,28 @@ static int world_tried; /* tests: no lookup */
 #define WALK_JUMP 4.2f       /* m/s up: about 0.9 m high */
 #define WALK_GRAVITY 9.81f
 #define WALK_LOOK 1.6f       /* rad/s */
+/* V7.1 smooth walking (Marvin 07.11.2026), own values: every change eases in over a short time
+   instead of jumping. Times in seconds until about two thirds of the way. */
+#define WALK_CROUCH_SPEED 1.1f  /* m/s while crouching (no running then) */
+#define WALK_EASE_START 0.17f   /* speeding up (also walk <-> run) */
+#define WALK_EASE_STOP 0.11f    /* slowing down / stopping */
+#define WALK_EASE_AIR 0.9f      /* in the air: little control */
+#define WALK_EASE_LOOK 0.07f    /* arrows / right stick: turning starts and stops softly */
+#define WALK_EASE_MOUSE 0.03f   /* mouse: follows a little behind instead of snapping */
+#define WALK_MOUSE_RAD 0.0018f  /* rad per mouse count at WalkMouseLook=100 */
+#define WALK_EASE_CROUCH 0.13f
+#define WALK_CROUCH_DROP 0.65f  /* the head this much lower when crouched: eye ~0.97 m above the ground */
+#define WALK_EASE_EYE 0.08f     /* steps, curbs, landing: the eye follows the body softly */
+#define WALK_EYE_BELOW 0.4f     /* ... but never more than this below / above where it belongs */
+#define WALK_EYE_ABOVE 0.12f
+#define WALK_EASE_BOB 0.3f      /* head bob fades in and out */
 #define WALK_PITCH_MAX 1.4f
 #define WALK_MAX_DISTANCE 2000.0f /* from the car */
 #define WALK_HIDE_FROM 45.0f /* the game loads floor collision only ~65 m around the car: farther away the car */
 #define WALK_HIDE_BACK 40.0f /* goes along under the walker (under the ground), back at its place nearer */
+/* Marvin 08.11.2026: beyond 45 m the camera seemed to rise and the horizon to lean. The log showed
+   the eye Gripline gives the camera does not move; 6.5 m deep instead of 30 m did not change it
+   (video 08.11.), so it stays 30 m deep (safer under bridges). Floor checks ignore the car (slide()). */
 #define WALK_HIDE_BELOW 30.0f
 #define WALK_FALL_LIMIT 150.0f   /* below the car: fell through the world, back to the car */
 #define WALK_STEP 0.4f     /* steps and curbs up to 40 cm */
@@ -95,7 +158,7 @@ static int world_tried; /* tests: no lookup */
 #define WALK_RECOVER 1.5f  /* sunk into the floor: looked for again from this far above */
 #define WALK_SLIDE_SLACK 0.3f /* a slide result may be this much farther than the move itself */
 #define WALK_RECOVER_MAX 0.6f /* the floor found again lifts the walker at most this much */
-#define WALK_PROBE 25.0f   /* looks this far down for a floor (less than WALK_HIDE_BELOW: not the car) */
+#define WALK_PROBE 25.0f   /* looks this far down for a floor (the hidden car is not counted, slide()) */
 #define WALK_NO_FLOOR 4.0f /* metres of falling without any floor: no collision loaded there */
 
 int walking_ready(void) {
@@ -111,7 +174,7 @@ int walking_ready(void) {
 typedef int(WINAPI *PlaySoundWFn)(const void *, void *, unsigned long);
 typedef unsigned(WINAPI *GetSystemDirectoryWFn)(wchar_t *, unsigned);
 
-void walking_door_sound(int shut) {
+void walking_play_wav(const void *wav) {
     static PlaySoundWFn play;
     static int tried;
     if (!tried) {
@@ -128,9 +191,13 @@ void walking_door_sound(int shut) {
             HMODULE winmm = LoadLibraryExW(path, NULL, 0);
             if (winmm) play = (PlaySoundWFn)(uintptr_t)GetProcAddress(winmm, "PlaySoundW");
         }
-        log_append(play ? "WALKING: door sounds ready.\r\n" : "WALKING: winmm PlaySoundW not found - no door sounds.\r\n");
+        log_append(play ? "WALKING: sounds ready.\r\n" : "WALKING: winmm PlaySoundW not found - no sounds.\r\n");
     }
-    if (play) play(shut ? door_close_wav : door_open_wav, NULL, SND_ASYNC_ | SND_NODEFAULT_ | SND_MEMORY_);
+    if (play && wav) play(wav, NULL, SND_ASYNC_ | SND_NODEFAULT_ | SND_MEMORY_); /* a new sound ends the one playing */
+}
+
+void walking_door_sound(int shut) {
+    walking_play_wav(shut ? door_close_wav : door_open_wav);
 }
 
 int walking_active(void) {
@@ -155,12 +222,30 @@ static volatile LONG hiding;
 static float hide_at[3];
 int walking_car_hidden(float out[3]) {
     if (!active || !entered || !stepped) return 0;
+    if (summon_phase() != SUMMON_IDLE) { /* summoned: the car drives from its place (summon.h) */
+        InterlockedExchange(&hiding, 0);
+        return 0;
+    }
     float d = walking_car_distance();
+    LONG was = hiding;
     if (d > WALK_HIDE_FROM) InterlockedExchange(&hiding, 1);
     else if (d >= 0.0f && d < WALK_HIDE_BACK) InterlockedExchange(&hiding, 0);
+    if (hiding != was) InterlockedExchange(&diag_switch, hiding ? 1 : 2); /* the walker's thread logs it */
     if (!hiding) return 0;
     out[0] = hide_at[0], out[1] = hide_at[1], out[2] = hide_at[2];
     return 1;
+}
+
+/* V7.1 summon (summon.h): the walker's place (sphere centre), any thread */
+int walking_walker_position(float out[3]) {
+    if (!active || !entered || !stepped) return 0;
+    out[0] = centre[0], out[1] = centre[1], out[2] = centre[2];
+    return float_is_finite(out[0]) && float_is_finite(out[1]) && float_is_finite(out[2]);
+}
+
+/* V7.1 summon: the car stands somewhere else now (noclip.c, car update thread) */
+void walking_move_car(const float position[3], const float right[3], const float forward[3]) {
+    for (unsigned i = 0; i < 3; ++i) car_place[i] = position[i], car_right[i] = right[i], car_forward[i] = forward[i];
 }
 
 int walking_no_floor(void) {
@@ -180,6 +265,49 @@ static void sin_cos(float a, float *s, float *c) {
     float a2 = a * a; /* |a| <= 1.6 */
     *s = a * (1.0f - a2 / 6.0f * (1.0f - a2 / 20.0f * (1.0f - a2 / 42.0f * (1.0f - a2 / 72.0f))));
     *c = 1.0f - a2 / 2.0f * (1.0f - a2 / 12.0f * (1.0f - a2 / 30.0f * (1.0f - a2 / 56.0f)));
+}
+
+/* any angle (the bob's phases): back to -pi..pi, then mirrored into the range above */
+static void sin_cos_wide(float a, float *s, float *c) {
+    while (a > 3.14159265f) a -= 6.2831853f;
+    while (a < -3.14159265f) a += 6.2831853f;
+    if (a > 1.5707963f) {
+        sin_cos(3.14159265f - a, s, c), *c = -*c;
+    } else if (a < -1.5707963f) {
+        sin_cos(-3.14159265f - a, s, c), *c = -*c;
+    } else {
+        sin_cos(a, s, c);
+    }
+}
+
+void walking_set_handheld(int level) {
+    InterlockedExchange(&handheld, level < 0 ? 0 : level >= WALK_HANDHELD_COUNT ? WALK_HANDHELD_COUNT - 1 : level);
+}
+
+int walking_handheld(void) {
+    return (int)handheld;
+}
+
+/* -1..1, a new number each call (xorshift) */
+static float hand_random(void) {
+    hand_seed ^= hand_seed << 13, hand_seed ^= hand_seed >> 17, hand_seed ^= hand_seed << 5;
+    return (float)(hand_seed & 0xffffu) / 32767.5f - 1.0f;
+}
+
+/* smooth noise: from one random value to the next in 1/rate s, eased (no corners), never the same */
+static float hand_noise_step(HandNoise *n, float dt, float rate) {
+    if (n->from == 0.0f && n->to == 0.0f) n->from = hand_random(), n->to = hand_random(); /* first use */
+    n->t += dt * rate;
+    while (n->t >= 1.0f) n->t -= 1.0f, n->from = n->to, n->to = hand_random();
+    float t = n->t, e = t * t * t * (t * (t * 6.0f - 15.0f) + 10.0f);
+    return n->from + (n->to - n->from) * e;
+}
+
+/* a small spring (the hand holding the phone): pushed by the steps, swings back softly */
+static void hand_spring(float *x, float *v, float dt, float hz, float damping) {
+    float w = 6.2831853f * hz;
+    *v += (-w * w * *x - 2.0f * damping * w * *v) * dt;
+    *x += *v * dt;
 }
 
 void walking_enter(const float position[3], const float right[3], const float forward[3]) {
@@ -296,13 +424,113 @@ static int slide(const float from[3], const float to[3], int floor, float out[3]
         }
         return 1;
     }
-    out[0] = p[0], out[1] = p[1], out[2] = p[2];
     void *hit = NULL;
     memory_copy(&hit, result + 0x10, 8);
+    if (hit && hiding) {
+        /* the hidden car right under the walker is no floor (a box around its place, below the ground) */
+        float hx = p[0] - hide_at[0], hz = p[2] - hide_at[2], hy = p[1] - hide_at[1];
+        if (hx * hx + hz * hz < 16.0f && hy > -2.0f && hy < 3.5f) {
+            for (unsigned i = 0; i < 3; ++i) out[i] = to[i];
+            return 0;
+        }
+    }
+    out[0] = p[0], out[1] = p[1], out[2] = p[2];
+    if (floor && hit) floor_hit = hit;
     return hit != NULL;
 }
 
 /* ------------------------------------------------------------------ the walker */
+
+/* one Gripline.log line: text and whole numbers (cm, m) */
+static void diag_put(char *line, unsigned *n, const char *text) {
+    while (*text && *n < 200) line[(*n)++] = *text++;
+}
+static void diag_num(char *line, unsigned *n, int v) {
+    char digits[12];
+    unsigned k = 0, u = v < 0 ? (unsigned)(-v) : (unsigned)v;
+    if (v < 0) diag_put(line, n, "-");
+    do digits[k++] = (char)('0' + u % 10), u /= 10;
+    while (u && k < 11);
+    while (k && *n < 200) line[(*n)++] = digits[--k];
+}
+static int diag_cm(float metres) {
+    return (int)(metres * 100.0f + (metres < 0.0f ? -0.5f : 0.5f));
+}
+
+/* end of step(): watches the second after the car was hidden or put back */
+static void diag_frame(float dt, float before_y) {
+    static unsigned jumps;
+    LONG sw = InterlockedExchange(&diag_switch, 0);
+    if (sw == 1 || sw == 2) { /* Marvin 08.11.2026: why the car is gone - and when it is back */
+        int de = game_language_is_german(game);
+        if (sw == 1)
+            notify_show_tinted(de ? "Auto au\xc3\x9f""er Sicht\nVersteckt, damit der Boden geladen bleibt"
+                                  : "Car out of sight\nHidden so the ground stays loaded",
+                               NOTIFY_COLOR_ORANGE, de ? "HINWEIS" : "NOTE", 0);
+        else
+            notify_show_tinted(de ? "Auto wieder da\nUnter 40 m steht es an seinem Platz"
+                                  : "Car back\nWithin 40 m it stands at its place",
+                               NOTIFY_COLOR_GREEN, de ? "HINWEIS" : "NOTE", 0);
+    }
+    char line[240];
+    unsigned n = 0;
+    if (sw && diag_count < 6) {
+        ++diag_count;
+        diag_kind = (int)sw, diag_time = 0.0f, diag_floor = centre[1], diag_eye = eye[1], jumps = 0;
+        diag_put(line, &n, sw == 1 ? "WALKING DIAG: car hidden under the walker at " : "WALKING DIAG: car back at its place at ");
+        diag_num(line, &n, (int)walking_car_distance());
+        diag_put(line, &n, " m - floor ");
+        diag_num(line, &n, diag_cm(centre[1] - car_place[1]));
+        diag_put(line, &n, " cm, eye ");
+        diag_num(line, &n, diag_cm(eye[1] - car_place[1]));
+        diag_put(line, &n, " cm above the car's place, camera ");
+        diag_num(line, &n, walking_view_camera());
+        diag_put(line, &n, grounded ? ", on the ground" : ", in the air");
+        diag_put(line, &n, no_floor ? ", no floor collision\r\n" : "\r\n");
+        line[n] = 0;
+        log_append(line);
+        log_class("WALKING DIAG: floor at the switch: ", floor_hit);
+        return;
+    }
+    if (!diag_kind || !(dt > 0.0f)) return;
+    diag_time += dt;
+    float jump = centre[1] - before_y;
+    if ((jump > 0.15f || jump < -0.15f) && jumps < 3) { /* curbs are up to 0.4 m: only logged here */
+        ++jumps;
+        diag_put(line, &n, "WALKING DIAG: floor height jumped in one frame, cm: ");
+        diag_num(line, &n, diag_cm(jump));
+        diag_put(line, &n, "\r\n");
+        line[n] = 0;
+        log_append(line);
+        log_class("WALKING DIAG: floor now: ", floor_hit);
+    }
+    if (diag_time >= 1.0f) {
+        diag_put(line, &n, "WALKING DIAG: one second later - floor ");
+        diag_num(line, &n, diag_cm(centre[1] - diag_floor));
+        diag_put(line, &n, " cm, eye ");
+        diag_num(line, &n, diag_cm(eye[1] - diag_eye));
+        diag_put(line, &n, " cm moved, camera ");
+        diag_num(line, &n, walking_view_camera());
+        diag_put(line, &n, no_floor ? ", no floor collision\r\n" : "\r\n");
+        line[n] = 0;
+        log_append(line);
+        log_class("WALKING DIAG: floor then: ", floor_hit);
+        diag_kind = 0;
+    }
+}
+
+
+/* share of the way to a target after dt with ease time tau (1 - e^(-dt/tau), series of e^x) */
+static float ease(float dt, float tau) {
+    if (!(dt > 0.0f)) return 0.0f;
+    float x = dt / tau;
+    if (x > 8.0f) return 1.0f;
+    return 1.0f - 1.0f / (1.0f + x + x * x / 2.0f + x * x * x / 6.0f + x * x * x * x / 24.0f);
+}
+
+static float clampf(float v, float lo, float hi) {
+    return v < lo ? lo : v > hi ? hi : v;
+}
 
 static void turn(float a) {
     float s, c;
@@ -319,6 +547,8 @@ static void spawn(void) {
     mirror = car_right[0] * dir[1] - car_right[2] * dir[0] >= 0.0f ? 1.0f : -1.0f;
     pitch = 0.0f, pitch_sin = 0.0f, pitch_cos = 1.0f;
     fall = 0.0f, grounded = 0, no_floor = 0;
+    vel[0] = vel[1] = 0.0f, yaw_rate = pitch_rate = 0.0f, mouse_yaw = mouse_pitch = 0.0f;
+    crouch = 0.0f, bob_amount = 0.0f, bob_phase = 0.0f, eye_y_set = 0;
     if (!world && !world_tried) { /* again at every getting out until found */
         make_params();
         __try {
@@ -344,16 +574,46 @@ static void spawn(void) {
 static void step(float dt) {
     WalkInput in = {0};
     noclip_walk_input(&in);
-    if (in.yaw != 0.0f) turn(in.yaw * WALK_LOOK * dt);
-    if (in.pitch != 0.0f) {
-        pitch += in.pitch * WALK_LOOK * dt;
-        if (pitch > WALK_PITCH_MAX) pitch = WALK_PITCH_MAX;
-        if (pitch < -WALK_PITCH_MAX) pitch = -WALK_PITCH_MAX;
-    }
+    /* V7.1 summon: while the car is far away and coming, the walker stands (floor collision is only
+       loaded around the car); looking around still works */
+    int freeze = summon_walker_frozen();
+    if (freeze) in.ahead = in.side = 0.0f, in.jump = 0, vel[0] = vel[1] = 0.0f;
+#ifdef FH2_TWEAKS_TEST
+    in.mouse_x += test_mouse[0], in.mouse_y += test_mouse[1];
+    test_mouse[0] = test_mouse[1] = 0.0f;
+#endif
+    /* looking: arrows / stick turn at an eased rate, the mouse turn is handed out over a few frames */
+    /* Marvin 07.11.2026: "strong feels light" - light is the former strong, medium and strong more */
+    float hand = handheld == 1 ? 1.7f : handheld == 2 ? 2.8f : handheld >= 3 ? 4.2f : 0.0f;
+    float lag = hand < 1.7f ? hand : 1.7f; /* the turning lag stays as before (more feels sluggish) */
+    float kl = ease(dt, WALK_EASE_LOOK * (1.0f + 0.7f * lag)); /* the hand turns a little behind */
+    yaw_rate += (in.yaw * WALK_LOOK - yaw_rate) * kl;
+    pitch_rate += (in.pitch * WALK_LOOK - pitch_rate) * kl;
+    mouse_yaw = clampf(mouse_yaw - in.mouse_x * WALK_MOUSE_RAD, -1.5f, 1.5f);
+    mouse_pitch = clampf(mouse_pitch - in.mouse_y * WALK_MOUSE_RAD, -1.5f, 1.5f);
+    float km = ease(dt, WALK_EASE_MOUSE * (1.0f + 1.2f * lag));
+    float myaw = mouse_yaw * km, mpitch = mouse_pitch * km;
+    mouse_yaw -= myaw, mouse_pitch -= mpitch;
+    float yaw_step = yaw_rate * dt + myaw;
+    if (yaw_step > 1e-6f || yaw_step < -1e-6f) turn(yaw_step);
+    pitch = clampf(pitch + pitch_rate * dt + mpitch, -WALK_PITCH_MAX, WALK_PITCH_MAX);
+    if (pitch >= WALK_PITCH_MAX || pitch <= -WALK_PITCH_MAX) mouse_pitch = 0.0f;
     sin_cos(pitch, &pitch_sin, &pitch_cos);
-    float speed = in.run ? WALK_RUN : WALK_SPEED;
+    /* crouching: eases down and up; the head sphere below keeps it low under something */
+    crouch += ((in.crouch ? 1.0f : 0.0f) - crouch) * ease(dt, WALK_EASE_CROUCH);
+    int crouching = in.crouch || crouch > 0.5f;
+    /* moving: the velocity eases to the wanted one (speeding up, slowing down, walk <-> run) */
+    float speed = crouching ? WALK_CROUCH_SPEED : in.run ? WALK_RUN : WALK_SPEED;
     float rx = mirror * dir[1], rz = -mirror * dir[0];
-    float mx = (dir[0] * in.ahead + rx * in.side) * speed * dt, mz = (dir[1] * in.ahead + rz * in.side) * speed * dt;
+    float ia = in.ahead, is = in.side, il = root(ia * ia + is * is);
+    if (il > 1.0f) ia /= il, is /= il; /* diagonally not faster */
+    float want[2] = {(dir[0] * ia + rx * is) * speed, (dir[1] * ia + rz * is) * speed};
+    float v2 = vel[0] * vel[0] + vel[1] * vel[1], w2 = want[0] * want[0] + want[1] * want[1];
+    float kv = ease(dt, !grounded && world ? WALK_EASE_AIR : w2 >= v2 ? WALK_EASE_START : WALK_EASE_STOP);
+    vel[0] += (want[0] - vel[0]) * kv, vel[1] += (want[1] - vel[1]) * kv;
+    if (w2 == 0.0f && vel[0] * vel[0] + vel[1] * vel[1] < 0.0004f) vel[0] = vel[1] = 0.0f;
+    float mx = vel[0] * dt, mz = vel[1] * dt;
+    float head_up = WALK_HEAD - WALK_CROUCH_DROP * crouch;
     float before[3] = {centre[0], centre[1], centre[2]};
 
     /* along the ground: first up by a step (curbs, stairs), then forward sliding along walls; the
@@ -371,7 +631,7 @@ static void step(float dt) {
             if (world) {
                 /* the head first: where it is stopped (a slanted trunk, a branch, a roof edge) the body
                    stops too. Under something low the head ducks. */
-                float body_top[3] = {raised[0], raised[1] + WALK_HEAD, raised[2]}, hf[3];
+                float body_top[3] = {raised[0], raised[1] + head_up, raised[2]}, hf[3];
                 slide(raised, body_top, 0, hf);
                 if (hf[1] - raised[1] > 0.3f) {
                     float ht[3] = {hf[0] + mx, hf[1], hf[2] + mz}, hd[3];
@@ -385,10 +645,12 @@ static void step(float dt) {
         }
     }
     /* gravity and jumping: stops on a floor */
-    if (in.jump && grounded) fall = WALK_JUMP, grounded = 0, lifted = 0.0f;
+    if (in.jump && grounded && !crouching) fall = WALK_JUMP, grounded = 0, lifted = 0.0f;
     fall -= WALK_GRAVITY * dt;
     if (fall < -50.0f) fall = -50.0f;
-    if (world) {
+    if (freeze) {
+        fall = 0.0f, grounded = 1; /* stays exactly where he is */
+    } else if (world) {
         float dy = fall * dt - lifted;
         if (grounded && dy > -(lifted + WALK_SNAP)) dy = -(lifted + WALK_SNAP); /* down a slope or a step */
         float to[3] = {centre[0], centre[1] + dy, centre[2]}, end[3];
@@ -448,32 +710,118 @@ static void step(float dt) {
     if (centre[1] < car_place[1] - WALK_FALL_LIMIT) { /* fell out of the world: back to the car */
         log_append("WALKING: fell through the world - back at the car.\r\n");
         spawn();
+        before[0] = centre[0], before[1] = centre[1], before[2] = centre[2];
     }
     float dx = centre[0] - before[0], dz = centre[2] - before[2];
     float moved = dt > 0.0f ? root(dx * dx + dz * dz) / dt : 0.0f;
     smooth_speed += (moved - smooth_speed) * (dt * 6.0f > 1.0f ? 1.0f : dt * 6.0f);
     InterlockedExchange(&speed_x10, (LONG)(smooth_speed * 36.0f + 0.5f));
-    /* a little head bob while walking on the ground */
-    if (grounded && moved > 0.3f) bob_phase += dt * (in.run ? 13.0f : 9.0f), bob_on = 1;
-    else bob_on = 0;
-    float bob = 0.0f;
+    /* blocked by a wall: the velocity is only what was really walked (no run-up against the wall) */
+    if (dt > 0.0f) {
+        float ax = dx / dt, az = dz / dt, va = vel[0] * vel[0] + vel[1] * vel[1];
+        if (ax * ax + az * az < va) vel[0] = ax, vel[1] = az;
+    }
+    /* head bob: fades in with the speed and out when standing or in the air; one stride = two steps
+       (the eye goes down at each step, a little to the side of the stepping foot, the look sways gently) */
+    float hs = root(vel[0] * vel[0] + vel[1] * vel[1]);
+    float bob_want = grounded ? clampf(hs / WALK_SPEED, 0.0f, 1.0f) : 0.0f;
+    bob_amount += (bob_want - bob_amount) * ease(dt, WALK_EASE_BOB);
+    if (bob_amount < 0.002f && bob_want == 0.0f) bob_amount = 0.0f;
+    bob_on = bob_amount > 0.0f;
+    float bob = 0.0f, side_sway = 0.0f, look_sway = 0.0f;
     if (bob_on) {
-        float t = bob_phase;
-        while (t > 3.14159265f) t -= 6.2831853f;
-        float s, c;
-        sin_cos(t > 1.5707963f ? 3.14159265f - t : t < -1.5707963f ? -3.14159265f - t : t, &s, &c);
-        bob = s * (in.run ? 0.05f : 0.03f);
+        float strides = 0.55f + 0.16f * hs; /* per second: ~0.9 walking, ~1.5 running */
+        bob_phase += dt * 6.2831853f * strides;
+        if (bob_phase > 6.2831853f) bob_phase -= 6.2831853f;
+        float s1, c1, s2, c2;
+        sin_cos_wide(bob_phase, &s1, &c1);
+        sin_cos_wide(2.0f * bob_phase, &s2, &c2);
+        float run_share = clampf((hs - WALK_SPEED) / (WALK_RUN - WALK_SPEED), 0.0f, 1.0f);
+        float height = (0.026f + 0.02f * run_share) * (1.0f - 0.5f * crouch);
+        bob = -height * c2 * bob_amount;
+        side_sway = (0.022f + 0.012f * run_share) * s1 * bob_amount;
+        look_sway = 0.0035f * (1.0f + run_share) * s1 * bob_amount;
     }
     if (world) { /* the eye inside the head sphere, under whatever is above */
-        float top[3] = {centre[0], centre[1] + WALK_HEAD, centre[2]};
+        float top[3] = {centre[0], centre[1] + head_up, centre[2]};
         slide(centre, top, 0, head);
     } else {
-        head[0] = centre[0], head[1] = centre[1] + WALK_HEAD, head[2] = centre[2];
+        head[0] = centre[0], head[1] = centre[1] + head_up, head[2] = centre[2];
     }
-    eye[0] = head[0], eye[1] = head[1] + (WALK_EYE - WALK_HEAD) + bob, eye[2] = head[2];
+    /* the eye height eases after the body (steps, curbs, landing), big jumps (teleports) at once */
+    float eye_want = head[1] + (WALK_EYE - WALK_HEAD);
+    if (!eye_y_set || eye_y - eye_want > 1.5f || eye_want - eye_y > 1.5f) eye_y = eye_want, eye_y_set = 1;
+    eye_y += (eye_want - eye_y) * ease(dt, WALK_EASE_EYE);
+    eye_y = clampf(eye_y, eye_want - WALK_EYE_BELOW, eye_want + WALK_EYE_ABOVE);
+    /* handheld camera: drift and breathing standing still, a hand that bounces with the steps */
+    float hand_yaw = 0.0f, hand_pitch = 0.0f, hand_side = 0.0f, hand_up = 0.0f;
+    if (hand > 0.0f && dt > 0.0f) {
+        float moving = bob_amount, run_share = clampf((hs - WALK_SPEED) / (WALK_RUN - WALK_SPEED), 0.0f, 1.0f);
+        float calm = 1.0f - 0.45f * crouch; /* crouched the hands are steadier */
+        /* standing: slow drift and breathing; walking and running: faster, stronger shake */
+        float slow = 0.35f + 0.25f * moving, fast = 1.4f + 1.6f * moving + 1.5f * run_share;
+        float shake = hand * calm * (0.4f + 0.6f * moving + 0.8f * run_share);
+        hand_yaw = hand * calm * 0.011f * hand_noise_step(&hand_noise[0], dt, slow) +
+                   shake * 0.0022f * hand_noise_step(&hand_noise[1], dt, fast);
+        hand_pitch = hand * calm * 0.007f * hand_noise_step(&hand_noise[2], dt, slow * 1.3f) +
+                     shake * 0.0018f * hand_noise_step(&hand_noise[3], dt, fast * 1.2f);
+        hand_side = hand * calm * 0.008f * hand_noise_step(&hand_noise[4], dt, slow * 0.8f);
+        hand_up = hand * calm * 0.005f * hand_noise_step(&hand_noise[5], dt, slow * 1.1f);
+        /* every footfall pushes the spring a little differently: strength, side, timing feel */
+        int half = bob_on ? (bob_phase >= 3.14159265f) : -1;
+        if (half >= 0 && step_half >= 0 && half != step_half) {
+            step_gain_to = 1.0f + 0.35f * hand_random();
+            float kick = hand * calm * moving * (0.7f + 0.5f * run_share) * (0.75f + 0.25f * hand_random());
+            spring_pitch_v -= kick * 0.09f;                              /* the phone dips at the footfall */
+            spring_yaw_v += kick * 0.05f * (half ? 1.0f : -1.0f) * (0.6f + 0.4f * hand_random()); /* to the foot's side */
+            spring_up_v -= kick * 0.12f;
+        }
+        step_half = half;
+        hand_spring(&spring_pitch, &spring_pitch_v, dt, 2.6f, 0.45f);
+        hand_spring(&spring_yaw, &spring_yaw_v, dt, 1.9f, 0.5f);
+        hand_spring(&spring_up, &spring_up_v, dt, 2.2f, 0.5f);
+        hand_pitch += spring_pitch, hand_yaw += spring_yaw, hand_up += spring_up;
+        /* the regular bob gets this step's strength too */
+        step_gain += (step_gain_to - step_gain) * ease(dt, 0.12f);
+        bob *= step_gain, side_sway *= step_gain, look_sway *= step_gain;
+    } else if (hand == 0.0f) {
+        step_gain = step_gain_to = 1.0f, step_half = -1;
+        spring_pitch = spring_pitch_v = spring_yaw = spring_yaw_v = spring_up = spring_up_v = 0.0f;
+    }
+    eye[0] = head[0] + rx * (side_sway + hand_side), eye[1] = eye_y + bob + hand_up,
+    eye[2] = head[2] + rz * (side_sway + hand_side);
+    {
+        float ss, sc, ps = pitch_sin, pc = pitch_cos;
+        sin_cos(look_sway + hand_yaw, &ss, &sc);
+        if (hand_pitch != 0.0f) sin_cos(clampf(pitch + hand_pitch, -WALK_PITCH_MAX, WALK_PITCH_MAX), &ps, &pc);
+        float lx = -mirror * dir[1], lz = mirror * dir[0]; /* left, as in turn() */
+        look[0] = pc * (dir[0] * sc + lx * ss), look[1] = ps, look[2] = pc * (dir[1] * sc + lz * ss);
+    }
     hide_at[0] = centre[0], hide_at[1] = centre[1] - WALK_HIDE_BELOW, hide_at[2] = centre[2];
     float cx = centre[0] - car_place[0], cz = centre[2] - car_place[2];
     InterlockedExchange(&distance_cm, (LONG)(root(cx * cx + cz * cz) * 100.0f));
+    diag_frame(dt, before[1]);
+    { /* V7.1 walking gauge (walk_gauge.h): what it shows, for the card window's thread */
+        WalkGaugeData g;
+        g.speed = smooth_speed;
+        g.mode = crouching ? WALK_MODE_CROUCH : hs < 0.25f ? WALK_MODE_STAND : in.run ? WALK_MODE_RUN : WALK_MODE_WALK;
+        g.distance = root(cx * cx + cz * cz);
+        float ahead = -(cx * dir[0] + cz * dir[1]), side = -(cx * rx + cz * rz), l = root(ahead * ahead + side * side);
+        g.car_ahead = l > 0.01f ? ahead / l : 1.0f, g.car_right = l > 0.01f ? side / l : 0.0f;
+        float foot = 0.0f;
+        if (bob_on) { /* the eye is lowest (a footfall) where cos(2 * phase) = 1 */
+            float s2, c2;
+            sin_cos_wide(2.0f * bob_phase, &s2, &c2);
+            float c = c2 > 0.0f ? c2 : 0.0f, c4 = c * c * c * c;
+            float run_share = clampf((hs - WALK_SPEED) / (WALK_RUN - WALK_SPEED), 0.0f, 1.0f);
+            foot = c4 * c4 * bob_amount * (0.55f + 0.45f * run_share) * (1.0f - 0.6f * crouch);
+        }
+        g.step = foot;
+        g.german = g.imperial = 0;
+        AcquireSRWLockExclusive(&gauge_lock);
+        gauge = g;
+        ReleaseSRWLockExclusive(&gauge_lock);
+    }
     stepped = 1;
 }
 
@@ -501,7 +849,7 @@ static void put_eye(void *camera, unsigned family) {
     float d[4];
     unsigned char *c = (unsigned char *)camera;
     if (!memory_read(c + dir_field[family], d, sizeof(d))) return;
-    d[0] = pitch_cos * dir[0], d[1] = pitch_sin, d[2] = pitch_cos * dir[1];
+    d[0] = look[0], d[1] = look[1], d[2] = look[2];
     memory_copy(c + eye_field[family], e, sizeof(e));
     memory_copy(c + dir_field[family], d, 12);
 }
@@ -517,19 +865,135 @@ static int camera_index(void *camera) {
 static void *camera_update(void *camera, float dt, uintptr_t a, uintptr_t b) {
     int i = camera_index(camera);
     if (i < 0) return NULL; /* not one of ours: cannot happen, the slot is only in our vtables */
+    unsigned family = cameras[i].family;
+    drive_look_restore(camera, (unsigned)i, eye_field[family], dir_field[family]); /* the game's own values first */
     void *result = ((CameraUpdateFn)previous_update[i])(camera, dt, a, b);
     if (active) {
         walk_frame();
-        put_eye(camera, cameras[i].family);
+        put_eye(camera, family);
+    } else {
+        drive_look_frame(); /* V7.1 mouse look in the car */
+        drive_look_apply(camera, (unsigned)i, family, eye_field[family], dir_field[family]);
     }
     return result;
 }
 
+/* V7.1: the camera the game looks through (its view getter runs for it), for the camera change
+   when getting out of / into the car (noclip.c, cockpit_view.c) */
+static volatile LONG view_index = -1;
+static volatile LONG64 view_tick;
+
+int walking_view_camera(void) {
+    LONG64 seen = view_tick;
+    if (!seen || GetTickCount64() - (ULONGLONG)seen > 300u) return -1;
+    return (int)view_index;
+}
+
+int walking_view_outside(void) {
+    int i = walking_view_camera();
+    return i >= 0 && cameras[i].family == 1;
+}
+
+static void marker_update(void);
 static void *camera_view(void *camera, void *out) {
     int i = camera_index(camera);
     if (i < 0) return out;
+    InterlockedExchange(&view_index, i);
+    InterlockedExchange64(&view_tick, (LONG64)GetTickCount64());
     if (active) put_eye(camera, cameras[i].family);
-    return ((CameraViewFn)previous_view[i])(camera, out);
+    void *result = ((CameraViewFn)previous_view[i])(camera, out);
+    if (active && entered && stepped && result) { /* the picture Gripline wants (multicam_update below) */
+        memory_copy(walk_view, result, sizeof(walk_view));
+        FovFn fov = (FovFn)slot_function(camera, 0x70);
+        walk_fov = fov ? fov(camera) : 0.0f;
+        walk_view_camera = camera;
+        walk_view_ok = 1;
+        if (hiding) marker_update();
+    }
+    return result;
+}
+
+/* Marvin 08.11.2026 (video + log): beyond 45 m, with the car hidden under the walker, the picture sat
+   higher and the horizon leaned - in every camera - while the eye Gripline gives the camera stayed
+   the same. So the game's multi camera (CMultiCam, vtable 0x2e70080, update slot 0x28) changes the
+   camera's picture after it (game+0xfe2230 rebuilds it under some condition, 0x1410314b0 ...). While
+   walking its picture (+0x260 matrix, +0x2a0 field of view, +0x240/+0x250 copies) is put back to the
+   camera's own, and the first differences are logged. */
+#define RVA_MULTICAM_VT 0x2c6c840u /* ForzaMultiCam (its slot 0x28 0x392a00 jumps into CMultiCam 0xfe26f0) */
+#define SLOT_MULTICAM_UPDATE 0x28u
+typedef void (*MultiCamUpdateFn)(void *, float, uintptr_t, uintptr_t);
+static void *previous_multicam;
+static void multicam_update(void *self, float dt, uintptr_t a, uintptr_t b) {
+    int was_ok = walk_view_ok;
+    walk_view_ok = 0;
+    ((MultiCamUpdateFn)previous_multicam)(self, dt, a, b);
+    {
+        static int seen;
+        if (!seen) seen = 1, log_append("WALKING DIAG: multi camera update runs through Gripline.\r\n");
+        static unsigned watched;
+        static LONG last_hiding = -1;
+        if (active && entered && hiding != last_hiding) last_hiding = hiding, watched = 0;
+        if (active && entered && watched < 400) { /* frames after each switch: what the picture really is */
+            if (watched == 0 || watched == 60 || watched == 240) {
+                _Alignas(16) float mm[16];
+                char line[240];
+                unsigned n = 0;
+                if (memory_read((unsigned char *)self + 0x260, mm, sizeof(mm))) {
+                    diag_put(line, &n, "WALKING DIAG: picture rows y (x1000): ");
+                    for (unsigned k = 0; k < 16; ++k) diag_num(line, &n, (int)(mm[k] * 1000.0f)), diag_put(line, &n, " ");
+                    diag_put(line, &n, walk_view_ok ? " view ok, hidden " : " NO walker view, hidden ");
+                    diag_num(line, &n, (int)hiding);
+                    diag_put(line, &n, "\r\n");
+                    line[n] = 0;
+                    log_append(line);
+                }
+            }
+            ++watched;
+        }
+    }
+    (void)was_ok;
+    if (!active || !entered || !walk_view_ok) return;
+    unsigned char *m = (unsigned char *)self;
+    void *current = NULL;
+    if (!memory_read_pointer(m + 0x208, &current)) return;
+    if (current != walk_view_camera) {
+        /* Marvin 08.11.2026: beyond 45 m the picture looked like the car's outside camera: the game may
+           look through another camera then - which one? */
+        static unsigned other_logged;
+        static void *last_other;
+        if (current != last_other && other_logged < 6) {
+            ++other_logged, last_other = current;
+            log_class("WALKING DIAG: the multi camera looks through another camera: ", current);
+            log_append_value("WALKING DIAG: ... car hidden: ", (int)hiding);
+        }
+        return;
+    }
+    _Alignas(16) float have[16], fov = 0.0f;
+    if (!memory_read(m + 0x260, have, sizeof(have)) || !memory_read(m + 0x2a0, &fov, 4)) return;
+    float most = 0.0f;
+    for (unsigned i = 0; i < 16; ++i) {
+        float x = have[i] - walk_view[i];
+        if (x < 0.0f) x = -x;
+        if (x > most) most = x;
+    }
+    float fov_off = fov - walk_fov;
+    if (fov_off < 0.0f) fov_off = -fov_off;
+    static unsigned logged;
+    static float logged_most;
+    if ((most > 0.001f || fov_off > 0.001f) && logged < 6 && (most > logged_most * 2.0f || fov_off > 0.001f)) {
+        ++logged, logged_most = most;
+        log_append_value("WALKING DIAG: the multi camera changed the picture, matrix (x1000): ", (int)(most * 1000.0f));
+        log_append_value("WALKING DIAG: ... field of view (x1000): ", (int)((fov - walk_fov) * 1000.0f));
+        log_append_value("WALKING DIAG: ... car hidden: ", (int)hiding);
+    }
+    if (most > 0.0f) {
+        memory_copy(m + 0x260, walk_view, sizeof(walk_view));
+        /* as the multi camera itself: +0x240 one column, +0x250 another */
+        float c0[3] = {walk_view[2], walk_view[6], walk_view[10]}, c1[3] = {walk_view[1], walk_view[5], walk_view[9]};
+        memory_copy(m + 0x240, c0, 12);
+        memory_copy(m + 0x250, c1, 12);
+    }
+    if (fov_off > 0.0f && walk_fov > 0.0f) memory_copy(m + 0x2a0, &walk_fov, 4);
 }
 
 /* The game's multi camera (game+0xfe61c0) moves a follow camera towards its car when something is
@@ -564,6 +1028,71 @@ static int hud_hidden(void) {
         InterlockedExchange(&running, game_simulation_running());
     }
     return running != 0;
+}
+
+/* V7.1 walking gauge: 1 = show it (walking, out of the car, the game running - not in a menu or
+   paused, where the game draws its HUD again) and *out filled */
+
+/* V7.1 car marker (Marvin 08.11.2026): while the car is hidden beyond 45 m a blue arrow shows where it
+   is parked. 1 = show it; tx / ty: the place seen from the eye (right / up per metre ahead), ahead:
+   metres in front of the eye (<= 0 behind), fov: the camera's vertical view angle (radians). */
+static SRWLOCK marker_lock = SRWLOCK_INIT;
+static float marker_tx, marker_ty, marker_ahead, marker_fov = 1.0f;
+static int marker_on;
+int walking_car_marker(float *tx, float *ty, float *ahead, float *fov, float *distance) {
+    if (!hud_hidden() || !hiding) return 0;
+    AcquireSRWLockShared(&marker_lock);
+    int on = marker_on;
+    *tx = marker_tx, *ty = marker_ty, *ahead = marker_ahead, *fov = marker_fov;
+    ReleaseSRWLockShared(&marker_lock);
+    *distance = walking_car_distance();
+    return on;
+}
+
+static void marker_update(void) {
+    /* the camera's axes: ahead = look, right level, up = right x ahead */
+    float fx = look[0], fy = look[1], fz = look[2];
+    float rl = root(fz * fz + fx * fx);
+    if (rl < 1e-4f) return;
+    float rx = -fz / rl, rz = fx / rl; /* right of the look, level (sign checked below with the walker's right) */
+    float wr = mirror * dir[1] * rx + (-mirror * dir[0]) * rz;
+    if (wr < 0.0f) rx = -rx, rz = -rz;
+    float ux = -(rz * fy), uy = rz * fx - rx * fz, uz = rx * fy;
+    if (uy < 0.0f) ux = -ux, uy = -uy, uz = -uz;
+    float vx = car_place[0] - eye[0], vy = car_place[1] + 2.2f - eye[1], vz = car_place[2] - eye[2];
+    float a = vx * fx + vy * fy + vz * fz, x = vx * rx + vz * rz, y = vx * ux + vy * uy + vz * uz;
+    float fov = walk_fov;
+    if (fov > 20.0f && fov < 140.0f) fov *= 0.0174533f; /* degrees */
+    if (!(fov > 0.3f && fov < 2.5f)) fov = 1.0f;
+    static int fov_logged;
+    if (!fov_logged) {
+        fov_logged = 1;
+        log_append_value("WALKING: car marker - camera view angle (x1000): ", (int)(walk_fov * 1000.0f));
+    }
+    AcquireSRWLockExclusive(&marker_lock);
+    marker_ahead = a;
+    marker_tx = a > 0.1f ? x / a : x;
+    marker_ty = a > 0.1f ? y / a : y;
+    marker_fov = fov;
+    marker_on = 1;
+    ReleaseSRWLockExclusive(&marker_lock);
+}
+
+int walking_gauge_data(WalkGaugeData *out) {
+    if (!hud_hidden() || distance_cm < 0) return 0;
+    static ULONGLONG units_next;
+    static volatile LONG german, imperial;
+    ULONGLONG now = GetTickCount64();
+    if (now >= units_next) { /* the game's language and speed unit, read now and then */
+        units_next = now + 3000;
+        InterlockedExchange(&german, game_language_is_german(game));
+        InterlockedExchange(&imperial, game_units_imperial(game));
+    }
+    AcquireSRWLockShared(&gauge_lock);
+    *out = gauge;
+    ReleaseSRWLockShared(&gauge_lock);
+    out->german = german != 0, out->imperial = imperial != 0;
+    return 1;
 }
 
 /* skipped draws give back what the game handed to them (as Extra Options' cinematic view) */
@@ -662,6 +1191,9 @@ int walking_start(unsigned char *game_image) {
         if (chain(ui_slots[i], ui_hooks[i], &previous_ui[i])) ++ui_hooked;
     }
     if (ui_hooked != 6) log_append_value("WALKING: UI draws hooked (of 6, HUD may stay): ", (int)ui_hooked);
+    /* The multi camera hook (multicam_update) is off: putting its picture back did not stop the rise
+       beyond 45 m (Marvin 08.11.2026), it only changed the field of view. Kept for later research. */
+    (void)multicam_update;
     ready = 1;
     log_append("WALKING: ready - key Walk (F) / LS + Y, offline only.\r\n");
     return 1;
@@ -670,6 +1202,11 @@ int walking_start(unsigned char *game_image) {
 #ifdef FH2_TWEAKS_TEST
 __declspec(dllexport) int Fh2TestWalkHidden(float *out) {
     return walking_car_hidden(out);
+}
+/* tests/test_walking.py: what the walking gauge would show (without the game-running check) */
+__declspec(dllexport) void Fh2TestWalkGaugeRaw(float *out) {
+    out[0] = gauge.speed, out[1] = (float)gauge.mode, out[2] = gauge.distance;
+    out[3] = gauge.car_ahead, out[4] = gauge.car_right, out[5] = gauge.step;
 }
 /* tests/test_walking.py: one step without a game world (no collision) */
 __declspec(dllexport) void Fh2TestWalkStep(unsigned char *game_image, int reset, unsigned dt_ms, float *out) {
@@ -684,8 +1221,15 @@ __declspec(dllexport) void Fh2TestWalkStep(unsigned char *game_image, int reset,
     }
     step((float)dt_ms / 1000.0f);
     out[0] = eye[0], out[1] = eye[1], out[2] = eye[2];
-    out[3] = pitch_cos * dir[0], out[4] = pitch_sin, out[5] = pitch_cos * dir[1];
+    out[3] = look[0], out[4] = look[1], out[5] = look[2];
     out[6] = walking_car_distance();
     out[7] = (float)walking_speed_kmh();
+}
+
+__declspec(dllexport) void Fh2TestWalkHandheld(int level) {
+    walking_set_handheld(level);
+}
+__declspec(dllexport) void Fh2TestWalkMouse(int dx, int dy) {
+    test_mouse[0] = (float)dx, test_mouse[1] = (float)dy;
 }
 #endif

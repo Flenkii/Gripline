@@ -13,6 +13,7 @@
 #include "logging.h"
 #include "support.h"
 #include "noclip.h"
+#include "walking.h"
 
 #define RVA_GET_STATE 0x106c320u
 #define ACTION_SWITCH_CAMERA 17
@@ -32,7 +33,9 @@ static unsigned char button_held[4], button_taken[4];
 #define DRIVER_SEARCH_MS 4000u
 #define PRESS_EVERY_MS 400u
 #define PRESS_MS 150u
-static volatile LONG want_driver;
+static volatile LONG want_driver; /* WANT_* */
+enum { WANT_NONE, WANT_DRIVER, WANT_OUTSIDE, WANT_CAMERA };
+static volatile LONG want_camera = -1, want_second; /* WANT_CAMERA: walking.c's camera index, dashboard cam */
 static volatile LONG64 want_since;
 static volatile LONG press_device = -1; /* user * 2 + wheel of the controller that gets the presses */
 
@@ -70,13 +73,56 @@ int cockpit_view_driver_active(void) {
 void cockpit_view_want_driver(int on) {
     InterlockedExchange(&press_device, -1);
     InterlockedExchange64(&want_since, (LONG64)GetTickCount64());
-    InterlockedExchange(&want_driver, on ? 1 : 0);
+    InterlockedExchange(&want_driver, on ? WANT_DRIVER : WANT_NONE);
     if (on && !driver_active()) log_append("COCKPIT VIEW: freecam - changing to the driver camera.\r\n");
+}
+
+/* V7.1 walking (Marvin 07.11.2026): getting out in a cockpit view shows the car from outside as the
+   game's cut interior model (no wheels). In the black of the fade the camera goes to an outside
+   view first; getting back in, the view the player had comes back. */
+void cockpit_view_want_outside(void) {
+    InterlockedExchange(&press_device, -1);
+    InterlockedExchange64(&want_since, (LONG64)GetTickCount64());
+    InterlockedExchange(&want_driver, WANT_OUTSIDE);
+    log_append("COCKPIT VIEW: getting out - changing to an outside camera.\r\n");
+}
+
+void cockpit_view_want_camera(int index, int second) {
+    InterlockedExchange(&press_device, -1);
+    InterlockedExchange(&want_camera, index);
+    InterlockedExchange(&want_second, second ? 1 : 0);
+    InterlockedExchange64(&want_since, (LONG64)GetTickCount64());
+    InterlockedExchange(&want_driver, WANT_CAMERA);
+    log_append_value("COCKPIT VIEW: back in the car - changing back to camera ", index);
+}
+
+/* 1 = the wished camera is there (or nothing is wished any more) */
+static int want_reached(void) {
+    switch (want_driver) {
+        case WANT_DRIVER: return driver_active();
+        case WANT_OUTSIDE: return walking_view_outside();
+        case WANT_CAMERA:
+            /* dashboard cam lives on the driver camera: the camera first, then the view */
+            if (walking_view_camera() != want_camera) return 0;
+            if (want_second && !second_view) set_view(1);
+            if (!want_second && second_view) set_view(0);
+            return 1;
+        default: return 1;
+    }
+}
+
+int cockpit_view_want_pending(void) {
+    if (want_driver == WANT_NONE || want_driver == WANT_DRIVER) return 0;
+    if (want_reached() || GetTickCount64() - (ULONGLONG)want_since >= DRIVER_SEARCH_MS) {
+        InterlockedExchange(&want_driver, WANT_NONE);
+        return 0;
+    }
+    return 1;
 }
 
 /* 1 = press the camera button in this reading (one controller only, so the camera changes once a press) */
 static int press_for_driver(DWORD user, int wheel) {
-    if (!want_driver || driver_active()) return 0;
+    if (!want_driver || want_reached()) return 0;
     ULONGLONG t = GetTickCount64() - (ULONGLONG)want_since;
     if (t >= DRIVER_SEARCH_MS) return 0;
     LONG device = (LONG)(user * 2 + (wheel ? 1 : 0));
@@ -95,9 +141,9 @@ static int camera_button(unsigned user, int held) {
     }
     if (press) {
         if (second_view) {
-            set_view(0); /* cockpit 2 -> the game's next camera */
+            set_view(0); /* dashboard cam -> the game's next camera */
         } else if (driver_active()) {
-            set_view(1); /* cockpit -> cockpit 2, the game stays on the driver camera */
+            set_view(1); /* cockpit -> dashboard cam, the game stays on the driver camera */
             button_taken[user] = 1;
         }
     }
@@ -168,7 +214,7 @@ void cockpit_view_start(unsigned char *game_image) {
         VirtualProtect(site, 5, old, &ignored);
         FlushInstructionCache(GetCurrentProcess(), site, 5);
     }
-    log_append("COCKPIT VIEW: camera button step ready (cockpit -> cockpit 2 -> next camera).\r\n");
+    log_append("COCKPIT VIEW: camera button step ready (cockpit -> dashboard cam -> next camera).\r\n");
 }
 
 /* The driver camera's vtable (game+0x2e78120) asks for its field of view every frame (slot 0x70);
@@ -188,13 +234,13 @@ static void hook_driver_camera(unsigned char *game_image) {
     void **slot = (void **)(game_image + RVA_DRIVER_CAMERA_VTABLE + FOV_SLOT);
     void *current = NULL;
     if (!memory_read_pointer(slot, &current) || !current) {
-        log_append("COCKPIT VIEW: driver camera not found - cockpit view 2 cannot move the camera.\r\n");
+        log_append("COCKPIT VIEW: driver camera not found - dashboard cam cannot move the camera.\r\n");
         return;
     }
     if (current == (void *)(uintptr_t)driver_fov) return;
     DWORD old, ignored;
     if (!VirtualProtect(slot, sizeof(void *), PAGE_READWRITE, &old)) {
-        log_append("COCKPIT VIEW: driver camera is write-protected - cockpit view 2 cannot move the camera.\r\n");
+        log_append("COCKPIT VIEW: driver camera is write-protected - dashboard cam cannot move the camera.\r\n");
         return;
     }
     previous_fov = (GetFovFn)current;

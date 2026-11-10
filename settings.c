@@ -28,6 +28,11 @@ const SettingDefinition setting_definitions[] = {
     SETTING("Gripline", "TelemetryPosition", telemetry_pos, SETTING_MASK),
     SETTING("Gripline", "TelemetryOpacity", telemetry_opacity, SETTING_MASK),
     SETTING("Gripline", "TelemetrySize", telemetry_size, SETTING_MASK),
+    SETTING("Gripline", "WalkHandheld", walk_handheld, SETTING_MASK),
+    SETTING("Gripline", "CalmDrivatars", calm_drivatars, SETTING_BOOLEAN),
+    SETTING("Gripline", "WalkGauge", walk_gauge, SETTING_MASK),
+    SETTING("Gripline", "SummonStyle", summon_style, SETTING_MASK),
+    SETTING("Gripline", "SummonSounds", summon_sounds, SETTING_MASK),
     SETTING("Gripline", "NitroOnline", nitro_online, SETTING_BOOLEAN),
 };
 
@@ -48,6 +53,10 @@ void settings_defaults(ModOptions *options) {
         .car_labels = 1,
         .event_icons = 1,
         .telemetry_show = -1, /* telemetry.c default */
+        .walk_handheld = 2, /* medium (V7.1) */
+        .summon_style = 1,  /* normal (V7.1) */
+        .summon_sounds = 1, /* on (V7.1, Marvin 08.11.2026) */
+        .walk_gauge = 3, /* step pulse (V7.1, Marvin 08.11.2026) */
         .cruise_crash_off = 1,
         .cruise_min_speed = 20,
         .cruise_slow_off = 1,
@@ -58,206 +67,186 @@ void settings_defaults(ModOptions *options) {
 }
 
 int settings_value(const ModOptions *options, const SettingDefinition *definition) {
-    const unsigned char *fields = (const unsigned char *)options;
-    return *(const int *)(fields + definition->field_offset);
+    int value;
+    memory_copy(&value, (const unsigned char *)options + definition->field_offset, sizeof(value));
+    return value;
 }
 
-static char *trim_whitespace(char *text) {
-    while (*text == ' ' || *text == '\t') {
-        ++text;
+/* ---------------------------------------------------------------- reading values */
+
+/* digits only, no sign, no more than `limit`; returns 0 for anything else */
+static int parse_count(const char *text, int limit, int *value) {
+    if (!*text) return 0;
+    int total = 0;
+    for (; *text; ++text) {
+        if (*text < '0' || *text > '9') return 0;
+        total = total * 10 + (*text - '0');
+        if (total > limit) return 0;
     }
-    size_t length = text_length(text);
-    while (length &&
-           (text[length - 1] == ' ' || text[length - 1] == '\t' || text[length - 1] == '\r')) {
-        text[--length] = 0;
+    *value = total;
+    return 1;
+}
+
+/* the highest allowed number of a type that is a single digit 0..top */
+static int digit_top(SettingType type) {
+    switch (type) {
+    case SETTING_TRAFFIC_LEVEL: return 7;
+    case SETTING_CARD_COLOR: return 9; /* 8 = black, 9 = rainbow (V7) */
+    case SETTING_CARD_STYLE:
+    case SETTING_NO_DAMAGE: return 2;
+    default: return 1; /* on/off */
     }
+}
+
+static int parse_value(const SettingDefinition *definition, const char *text, int *value) {
+    switch (definition->type) {
+    case SETTING_CENTIMETERS: { /* -100 .. 100 */
+        int negative = text[0] == '-';
+        int magnitude;
+        if (!parse_count(text + negative, 100, &magnitude)) return 0;
+        *value = negative ? -magnitude : magnitude;
+        return 1;
+    }
+    case SETTING_MASK: /* 0 .. 65535 */
+        return parse_count(text, 65535, value);
+    default: { /* one digit */
+        int top = digit_top(definition->type);
+        if (text[0] < '0' || text[0] > '0' + top || text[1]) return 0;
+        *value = text[0] - '0';
+        return 1;
+    }
+    }
+}
+
+/* ---------------------------------------------------------------- lines that were skipped */
+
+static unsigned skipped_lines;
+
+unsigned settings_ignored_lines(void) {
+    return skipped_lines;
+}
+
+/* One bad line does not drop the file (V7): it is skipped and named in Gripline.log, the other
+   settings still load. The first skip replaces "Not initialized" at the top of the log. */
+static void skip_line(unsigned number, const char *what) {
+    char note[128];
+    size_t used = 0;
+    const char *lead = skipped_lines ? ", line " : "IGNORED in Gripline.ini (other settings loaded): line ";
+    while (*lead) note[used++] = *lead++;
+    char digits[12];
+    unsigned count = 0;
+    do {
+        digits[count++] = (char)('0' + number % 10);
+        number /= 10;
+    } while (number && count < sizeof(digits));
+    while (count) note[used++] = digits[--count];
+    note[used++] = ' ';
+    note[used++] = '(';
+    for (; *what && used + 3 < sizeof(note); ++what) note[used++] = *what;
+    note[used++] = ')';
+    note[used] = 0;
+    ++skipped_lines;
+    if (skipped_lines == 1) status_set(note);
+    else if (skipped_lines <= 8) status_append(note);
+}
+
+/* ---------------------------------------------------------------- the INI text */
+
+static char *strip(char *text) {
+    while (*text == ' ' || *text == '\t') ++text;
+    char *end = text + text_length(text);
+    while (end > text && (end[-1] == ' ' || end[-1] == '\t' || end[-1] == '\r')) *--end = 0;
     return text;
 }
 
-static int known_section(const char *name) {
-    for (size_t index = 0; index < setting_count; ++index) {
-        if (text_equal_ignore_case(name, setting_definitions[index].section)) {
-            return 1;
-        }
-    }
-    return 0;
-}
-
-static const SettingDefinition *find_setting(const char *section, const char *key) {
-    for (size_t index = 0; index < setting_count; ++index) {
-        const SettingDefinition *definition = &setting_definitions[index];
-        if (text_equal_ignore_case(section, definition->section) &&
-            text_equal_ignore_case(key, definition->key)) {
-            return definition;
-        }
+static const SettingDefinition *lookup(const char *section, const char *key) {
+    for (size_t i = 0; i < setting_count; ++i) {
+        const SettingDefinition *entry = &setting_definitions[i];
+        if (text_equal_ignore_case(section, entry->section) && (!key || text_equal_ignore_case(key, entry->key)))
+            return entry;
     }
     return NULL;
 }
 
-static int parse_value(const SettingDefinition *definition, const char *text, int *value) {
-    if (definition->type == SETTING_CENTIMETERS) { /* -100 .. 100 */
-        const char *digit = text[0] == '-' ? text + 1 : text;
-        int number = 0;
-        if (!*digit) {
-            return 0;
-        }
-        for (; *digit; ++digit) {
-            if (*digit < '0' || *digit > '9' || number > 100) {
-                return 0;
-            }
-            number = number * 10 + (*digit - '0');
-        }
-        if (number > 100) {
-            return 0;
-        }
-        *value = text[0] == '-' ? -number : number;
-        return 1;
-    }
-    if (definition->type == SETTING_TRAFFIC_LEVEL || definition->type == SETTING_CARD_COLOR) {
-        char top = definition->type == SETTING_CARD_COLOR ? '9' : '7'; /* card colour 8 = black, 9 = rainbow (V7) */
-        if (text[0] >= '0' && text[0] <= top && !text[1]) {
-            *value = text[0] - '0';
-            return 1;
-        }
-        return 0;
-    }
-    if (definition->type == SETTING_MASK) { /* 0 .. 65535 */
-        int number = 0;
-        if (!*text) return 0;
-        for (const char *digit = text; *digit; ++digit) {
-            if (*digit < '0' || *digit > '9' || number > 65535) return 0;
-            number = number * 10 + (*digit - '0');
-        }
-        if (number > 65535) return 0;
-        *value = number;
-        return 1;
-    }
-    if (definition->type == SETTING_CARD_STYLE || definition->type == SETTING_NO_DAMAGE) {
-        if (text[0] >= '0' && text[0] <= '2' && !text[1]) {
-            *value = text[0] - '0';
-            return 1;
-        }
-        return 0;
-    }
-    if (text_equal_ignore_case(text, "0") || text_equal_ignore_case(text, "1")) {
-        *value = text[0] - '0';
-        return 1;
-    }
-    return 0;
+/* keys that older versions wrote (weather and time of day moved to Extra Options in V5) */
+static int retired_key(const char *section, const char *key) {
+    if (!text_equal_ignore_case(section, "Traffic")) return 0;
+    return text_equal_ignore_case(key, "Weather") || text_equal_ignore_case(key, "Wetter") ||
+           text_equal_ignore_case(key, "TimeOfDay");
 }
 
-static unsigned ignored_lines;
-
-unsigned settings_ignored_lines(void) {
-    return ignored_lines;
-}
-
-/* One bad line no longer drops the whole file (V7): it is skipped and named in Gripline.log,
-   the other settings still load. "IGNORED: Gripline.ini line 4 (CardColor)" */
-static void ignore_line(unsigned number, const char *what) {
-    char note[128];
-    size_t n = 0;
-    const char *head = ignored_lines ? ", line " : "IGNORED in Gripline.ini (other settings loaded): line ";
-    for (const char *p = head; *p; ++p) note[n++] = *p;
-    char digits[12];
-    unsigned d = 0;
-    do digits[d++] = (char)('0' + number % 10); while ((number /= 10) && d < sizeof(digits));
-    while (d) note[n++] = digits[--d];
-    note[n++] = ' ', note[n++] = '(';
-    for (const char *p = what; *p && n + 3 < sizeof(note); ++p) note[n++] = *p;
-    note[n++] = ')';
-    note[n] = 0;
-    ++ignored_lines;
-    if (ignored_lines == 1) status_set(note); /* replaces "Not initialized" at the top of Gripline.log */
-    else if (ignored_lines <= 8) status_append(note);
+/* cut a line at the first ; or # */
+static void drop_comment(char *line) {
+    for (; *line; ++line) {
+        if (*line == ';' || *line == '#') {
+            *line = 0;
+            return;
+        }
+    }
 }
 
 static int parse_ini(char *text, ModOptions *options) {
     char section[32] = {0};
-    unsigned line_number = 0;
-    int section_known = 1;
-    ignored_lines = 0;
-    if ((unsigned char)text[0] == 0xef && (unsigned char)text[1] == 0xbb &&
-        (unsigned char)text[2] == 0xbf) {
-        text += 3;
-    }
+    int in_known_section = 1;
+    unsigned number = 0;
+    skipped_lines = 0;
+
+    if ((unsigned char)text[0] == 0xef && (unsigned char)text[1] == 0xbb && (unsigned char)text[2] == 0xbf) text += 3;
 
     while (*text) {
         char *line = text;
-        ++line_number;
-        while (*text && *text != '\n') {
-            ++text;
-        }
-        if (*text) {
-            *text++ = 0;
-        }
-        for (char *cursor = line; *cursor; ++cursor) {
-            if (*cursor == ';' || *cursor == '#') {
-                *cursor = 0;
-                break;
-            }
-        }
-        line = trim_whitespace(line);
-        if (!*line) {
-            continue;
-        }
+        ++number;
+        while (*text && *text != '\n') ++text;
+        if (*text) *text++ = 0;
+        drop_comment(line);
+        line = strip(line);
+        if (!*line) continue;
 
-        if (*line == '[') {
-            char *closing = line;
-            while (*closing && *closing != ']') {
-                ++closing;
-            }
-            if (*closing != ']' || *trim_whitespace(closing + 1)) {
-                ignore_line(line_number, "section");
-                section_known = 0;
+        if (*line == '[') { /* [Section] */
+            char *close = line;
+            while (*close && *close != ']') ++close;
+            if (*close != ']' || *strip(close + 1)) {
+                skip_line(number, "section");
+                in_known_section = 0;
                 continue;
             }
-            *closing = 0;
-            char *name = trim_whitespace(line + 1);
+            *close = 0;
+            char *name = strip(line + 1);
             size_t length = text_length(name);
-            if (length >= sizeof(section) || !known_section(name)) {
-                ignore_line(line_number, "unknown section");
-                section_known = 0; /* its keys are skipped silently */
+            if (length >= sizeof(section) || !lookup(name, NULL)) {
+                skip_line(number, "unknown section");
+                in_known_section = 0; /* the keys below it are skipped without a note */
                 continue;
             }
             memory_copy(section, name, length + 1);
-            section_known = 1;
+            in_known_section = 1;
             continue;
         }
 
-        char *separator = line;
-        while (*separator && *separator != '=') {
-            ++separator;
-        }
-        if (!section_known) {
+        if (!in_known_section) continue;
+        char *equals = line;
+        while (*equals && *equals != '=') ++equals;
+        if (!*equals) {
+            skip_line(number, "no =");
             continue;
         }
-        if (!*separator) {
-            ignore_line(line_number, "no =");
-            continue;
-        }
-        *separator = 0;
-        char *key = trim_whitespace(line);
-        char *value = trim_whitespace(separator + 1);
+        *equals = 0;
+        char *key = strip(line);
+        char *text_value = strip(equals + 1);
+        if (retired_key(section, key)) continue;
 
-        // Retired keys (V5: weather and time of day, now Extra Options) are ignored so an older INI still loads.
-        if (text_equal_ignore_case(section, "Traffic") &&
-            (text_equal_ignore_case(key, "Weather") || text_equal_ignore_case(key, "Wetter") ||
-             text_equal_ignore_case(key, "TimeOfDay"))) {
+        const SettingDefinition *entry = lookup(section, key);
+        int value;
+        if (!entry || !parse_value(entry, text_value, &value)) {
+            skip_line(number, *key ? key : "?");
             continue;
         }
-
-        const SettingDefinition *definition = find_setting(section, key);
-        int parsed;
-        if (!definition || !parse_value(definition, value, &parsed)) {
-            ignore_line(line_number, *key ? key : "?");
-            continue;
-        }
-        int *field = (int *)((unsigned char *)options + definition->field_offset);
-        *field = parsed;
+        memory_copy((unsigned char *)options + entry->field_offset, &value, sizeof(value));
     }
-    return ignored_lines == 0;
+    return skipped_lines == 0;
 }
+
+/* ---------------------------------------------------------------- Gripline.ini on disk */
 
 int settings_read(const wchar_t *directory, ModOptions *options) {
     settings_defaults(options);
@@ -265,8 +254,7 @@ int settings_read(const wchar_t *directory, ModOptions *options) {
         status_set("REFUSED: INI path is too long.");
         return 0;
     }
-    HANDLE file = CreateFileW(ini_path, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING,
-                              FILE_ATTRIBUTE_NORMAL, NULL);
+    HANDLE file = CreateFileW(ini_path, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
     if (file == INVALID_HANDLE_VALUE) {
         if (GetLastError() == ERROR_FILE_NOT_FOUND) {
             status_set("Gripline.ini not found - defaults used.");
@@ -276,24 +264,23 @@ int settings_read(const wchar_t *directory, ModOptions *options) {
         return 0;
     }
     LARGE_INTEGER size;
-    DWORD bytes_read;
-    if (!GetFileSizeEx(file, &size) || size.QuadPart > INI_MAX_SIZE ||
-        !ReadFile(file, ini_buffer, (DWORD)size.QuadPart, &bytes_read, NULL) ||
-        bytes_read != size.QuadPart) {
-        CloseHandle(file);
+    DWORD got = 0;
+    int ok = GetFileSizeEx(file, &size) && size.QuadPart <= INI_MAX_SIZE &&
+             ReadFile(file, ini_buffer, (DWORD)size.QuadPart, &got, NULL) && got == size.QuadPart;
+    CloseHandle(file);
+    if (!ok) {
         status_set("REFUSED: INI read failed or file exceeds 8192 bytes.");
         return 0;
     }
-    CloseHandle(file);
-    ini_buffer[bytes_read] = 0;
-    for (unsigned index = 0; index < bytes_read; ++index) {
-        if (!ini_buffer[index]) {
+    ini_buffer[got] = 0;
+    for (DWORD i = 0; i < got; ++i) {
+        if (!ini_buffer[i]) { /* UTF-16 text has zero bytes between the letters */
             status_set("REFUSED: INI must use UTF-8 or ASCII, not UTF-16.");
             return 0;
         }
     }
     status_set("Gripline.ini read.");
-    return parse_ini(ini_buffer, options); /* a skipped line replaces the status (ignore_line) */
+    return parse_ini(ini_buffer, options); /* a skipped line replaces this status (skip_line) */
 }
 
 #ifdef FH2_TWEAKS_TEST

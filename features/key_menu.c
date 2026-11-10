@@ -16,6 +16,8 @@
 #include "nitro_link.h"
 #include "update_check.h"
 #include "cruise.h"
+#include "summon.h"
+#include "walking.h"
 
 #define VK_UP_ 0x26
 #define VK_LEFT_ 0x25
@@ -30,15 +32,15 @@
 #define MAX_ROWS (NOTIFY_PANEL_ROWS - 1)
 
 enum { LEVEL_CLOSED, LEVEL_GROUPS, LEVEL_LIST, LEVEL_BINDING, LEVEL_CAPTURE, LEVEL_RESET_ALL, LEVEL_STYLE, LEVEL_MOUSE, LEVEL_TELEMETRY, LEVEL_WORLD, LEVEL_LOGBOOK, LEVEL_RECORDS, LEVEL_DAMAGE,
-       LEVEL_SETTINGS, LEVEL_COLOR, LEVEL_VIEW_FORWARD, LEVEL_VIEW_UP, LEVEL_TRAFFIC, LEVEL_CARDS, LEVEL_CRUISE, LEVEL_COUNT };
+       LEVEL_SETTINGS, LEVEL_COLOR, LEVEL_VIEW_FORWARD, LEVEL_VIEW_UP, LEVEL_TRAFFIC, LEVEL_CARDS, LEVEL_CRUISE, LEVEL_HANDHELD, LEVEL_LOOK, LEVEL_GAUGE, LEVEL_COUNT };
 
 /* first page: rows after the binding pages */
 enum { TOP_STYLE = 100, TOP_RESET = 101, TOP_MOUSE = 102, TOP_TELEMETRY = 103, TOP_WORLD = 104, TOP_LOGBOOK = 105, TOP_RECORDS = 106, TOP_REPORT = 108, TOP_DAMAGE = 109,
-       TOP_SETTINGS = 110, TOP_CARDS = 111, TOP_TRAFFIC = 112, TOP_CRUISE = 113 };
+       TOP_SETTINGS = 110, TOP_CARDS = 111, TOP_TRAFFIC = 112, TOP_CRUISE = 113, TOP_HANDHELD = 114, TOP_LOOK = 115, TOP_GAUGE = 116 };
 
 /* settings page (V7): rows */
-enum { SET_COLOR, SET_STEERING, SET_VIEW_FORWARD, SET_VIEW_UP, SET_UPDATE, SET_NITRO };
-/* cockpit view 2 choices in cm (rig_settings.c ranges -20..80 and -20..30) */
+enum { SET_COLOR, SET_STEERING, SET_VIEW_FORWARD, SET_VIEW_UP, SET_UPDATE, SET_SUMMON_STYLE, SET_SUMMON_SOUNDS, SET_NITRO };
+/* dashboard cam choices in cm (rig_settings.c ranges -20..80 and -20..30) */
 #define VIEW_STEP 5
 #define VIEW_FORWARD_MIN (-20)
 #define VIEW_FORWARD_MAX 80
@@ -90,7 +92,7 @@ static const wchar_t *const group_driving[] = {L"Throttle", L"Brake", L"SteerLef
 static const wchar_t *const group_camera[] = {L"Camera", L"LookBack", L"LookLeft", L"LookRight", L"CockpitView",
                                               L"ArrowUp", L"ArrowDown", L"ArrowLeft", L"ArrowRight", NULL};
 static const wchar_t *const group_gripline[] = {L"Nitro", L"Noclip", L"NoclipUp", L"NoclipDown", L"NoclipFast",
-                                                L"Freecam", L"Keybinds", L"KeyMenu", L"CruiseControl", L"Walk", NULL};
+                                                L"Freecam", L"Keybinds", L"KeyMenu", L"CruiseControl", L"Walk", L"Summon", NULL};
 static const wchar_t *const group_menu[] = {L"Pause", L"Confirm", L"Back", L"ButtonX", L"ButtonY", L"TabLeft",
                                             L"TabRight", L"DpadUp", L"DpadDown", L"DpadLeft", L"DpadRight", NULL};
 static const struct {
@@ -313,16 +315,16 @@ static int save_mouse_now(const char *key, int value) {
     size_t length;
     char text[4];
     unsigned n = 0;
-    if (value >= 100) text[n++] = '1', text[n++] = '0', text[n++] = '0';
-    else {
-        if (value >= 10) text[n++] = (char)('0' + value / 10);
-        text[n++] = (char)('0' + value % 10);
-    }
+    if (value < 0) value = 0;
+    if (value > 999) value = 999;
+    if (value >= 100) text[n++] = (char)('0' + value / 100);
+    if (value >= 10) text[n++] = (char)('0' + value / 10 % 10);
+    text[n++] = (char)('0' + value % 10);
     text[n] = 0;
     if (!read_file_at(ini_path, &length)) return 0;
     size_t written = ini_set_value(file_text, length, "Keyboard", key, text, edit_text[0], FILE_LIMIT + 1);
     if (!written || written > FILE_LIMIT || !write_file_at(ini_path, edit_text[0], written)) {
-        log_append("KEYMENU: FH2_Keyboard.ini could not be written - mouse steering not saved.\r\n");
+        log_append("KEYMENU: FH2_Keyboard.ini could not be written - mouse setting not saved.\r\n");
         return 0;
     }
     return 1;
@@ -544,6 +546,69 @@ static void tele_look_step(int action, int dir) {
     notify_show_step(text, 0x7e1e00u, 2500);
 }
 
+/* V7.1 mouse look sensitivity (Marvin 08.11.2026): walking and in the car, FH2_Keyboard.ini WalkMouseLook /
+   DriveMouseLook in percent (100 = standard, 0 = off). Left / right change the selected row, Enter steps on
+   and starts again at the end, like the telemetry look; works at once */
+enum { LOOK_WALK = 70, LOOK_DRIVE, LOOK_RESET };
+static const int look_values[] = {0, 25, 40, 50, 60, 70, 80, 90, 100, 110, 120, 135, 150, 175, 200, 250, 300};
+
+static void look_value_text(int value, wchar_t out[16]) {
+    if (!value) wcopy(out, 0, 16, tr(L"Aus", L"Off"));
+    else percent_text(value, out);
+}
+
+static int look_set(int action, int value, int card) {
+    int walk = action == LOOK_WALK;
+    if (walk) keyboard_set_walk_mouse_look(value);
+    else keyboard_set_drive_mouse_look(value);
+    int saved = save_mouse(walk ? "WalkMouseLook" : "DriveMouseLook", value);
+    log_append_value(walk ? "KEYMENU: walking mouse look percent " : "KEYMENU: driving mouse look percent ", value);
+    if (!card) return saved;
+    wchar_t line[128], v[16];
+    look_value_text(value, v);
+    unsigned n = wcopy(line, 0, 128, walk ? tr(L"Maus-Blick Laufen: ", L"Mouse look walking: ") : tr(L"Maus-Blick Fahren: ", L"Mouse look driving: "));
+    n = wcopy(line, n, 128, v);
+    if (!saved) wcopy(line, n, 128, tr(L"\nNicht gespeichert (INI gesperrt?)", L"\nNot saved (INI locked?)"));
+    else if (!walk && value && keyboard_mouse_steering())
+        wcopy(line, n, 128, tr(L"\nAus, solange Maus-Lenkung an ist", L"\nOff while mouse steering is on"));
+    else wcopy(line, n, 128, tr(L"\nWirkt sofort", L"\nTakes effect at once"));
+    char text[192];
+    unsigned t = 0;
+    utf8(line, text, sizeof(text), &t);
+    text[t] = 0;
+    notify_show_step(text, 0x7e1e00u, 2500);
+    return saved;
+}
+
+static void look_step(int action, int dir) {
+    if (action == LOOK_RESET) {
+        int saved = look_set(LOOK_WALK, 100, 0) & look_set(LOOK_DRIVE, 100, 0);
+        notify_show_step(saved ? (m.german ? "Maus-Blick: Laufen und Fahren 100 %\nWirkt sofort" : "Mouse look: walking and driving 100 %\nTakes effect at once")
+                               : (m.german ? "Maus-Blick: 100 %\nNicht gespeichert (INI gesperrt?)" : "Mouse look: 100 %\nNot saved (INI locked?)"),
+                         0x7e1e00u, 2500);
+        return;
+    }
+    int now = action == LOOK_WALK ? keyboard_walk_mouse_look() : keyboard_drive_mouse_look();
+    int at = -1;
+    for (int i = 0; i < (int)ARRAY_COUNT(look_values); ++i)
+        if (look_values[i] == now) at = i;
+    int value;
+    if (at < 0) { /* own value from the INI: the next list value in that direction */
+        int count = (int)ARRAY_COUNT(look_values);
+        value = dir == -1 ? look_values[0] : dir == 2 ? look_values[0] : look_values[count - 1];
+        if (dir == -1) {
+            for (int i = 0; i < count; ++i)
+                if (look_values[i] < now) value = look_values[i];
+        } else {
+            for (int i = count - 1; i >= 0; --i)
+                if (look_values[i] > now) value = look_values[i];
+        }
+    } else {
+        value = step_in(look_values, (int)ARRAY_COUNT(look_values), now, dir);
+    }
+    look_set(action, value, 1);
+}
+
 /* "12,3 km" below 100, else "1234 km" (miles when the game shows mph) */
 static void distance_text(double metres, wchar_t out[32]) {
     int imperial = game_units_imperial(keyboard_game_image());
@@ -562,10 +627,23 @@ static void distance_text(double metres, wchar_t out[32]) {
 
 static int confirm_clear; /* records page: first Enter asks */
 
-static const unsigned world_ids[3] = {RIG_GRIP_SPEED_CAMERAS, RIG_GRIP_CAR_LABELS, RIG_GRIP_EVENT_ICONS};
-static const wchar_t *const world_german[3] = {L"Blitzer", L"Namen über Autos", L"Event-Symbole auf der Straße"};
-static const wchar_t *const world_english[3] = {L"Speed cameras", L"Names above cars", L"Event icons on the road"};
+#define WORLD_ROWS 4
+static const unsigned world_ids[WORLD_ROWS] = {RIG_GRIP_SPEED_CAMERAS, RIG_GRIP_CAR_LABELS, RIG_GRIP_EVENT_ICONS,
+                                               RIG_GRIP_CALM_DRIVATARS};
+static const wchar_t *const world_german[WORLD_ROWS] = {L"Blitzer", L"Namen über Autos", L"Event-Symbole auf der Straße",
+                                                        L"Drivatare fahren ruhig"};
+static const wchar_t *const world_english[WORLD_ROWS] = {L"Speed cameras", L"Names above cars", L"Event icons on the road",
+                                                         L"Calm Drivatars"};
 
+/* V7.1 summon: how the car drives itself (summon.h) */
+static const wchar_t *const summon_german[SUMMON_STYLE_COUNT] = {L"Gemütlich", L"Normal", L"Sportlich"};
+static const wchar_t *const summon_english[SUMMON_STYLE_COUNT] = {L"Calm", L"Normal", L"Sporty"};
+/* V7.1 walking: handheld camera levels (walking.h) */
+static const wchar_t *const hand_german[WALK_HANDHELD_COUNT] = {L"Aus (ruhig)", L"Leicht", L"Mittel", L"Stark"};
+static const wchar_t *const hand_english[WALK_HANDHELD_COUNT] = {L"Off (steady)", L"Light", L"Medium", L"Strong"};
+/* V7.1 walking gauge looks (walk_gauge.h) */
+static const wchar_t *const gauge_german[WALK_GAUGE_COUNT] = {L"Aus", L"Ring", L"Racing-Leiste", L"Schritt-Puls"};
+static const wchar_t *const gauge_english[WALK_GAUGE_COUNT] = {L"Off", L"Ring", L"Racing bar", L"Step pulse"};
 static const wchar_t *const damage_german[NO_DAMAGE_COUNT] = {L"Aus (wie im Spiel)", L"Andere Autos", L"Alle Autos"};
 static const wchar_t *const damage_english[NO_DAMAGE_COUNT] = {L"Off (as in the game)", L"Other cars", L"All cars"};
 static const wchar_t *const damage_short_german[NO_DAMAGE_COUNT] = {L"Aus", L"Andere", L"Alle"};
@@ -613,6 +691,7 @@ static void build_page(wchar_t *title) {
             for (unsigned g = 0; g < GROUP_COUNT; ++g) row_add(tr(groups[g].german, groups[g].english), L"›", 0, (int)g);
             row_add(tr(L"Maus-Lenkung (experimentell)", L"Mouse steering (experimental)"), tr(mouse_german[mouse_choice()], mouse_english[mouse_choice()]), 0,
                     TOP_MOUSE);
+            row_add(tr(L"Maus-Blick: Empfindlichkeit", L"Mouse look: sensitivity"), L"›", 0, TOP_LOOK);
             row_add(tr(L"Fahren & Daten", L"Driving & data"), L"", NOTIFY_ROW_SECTION, -1);
             row_add(tr(L"Live-Telemetrie", L"Live telemetry"), telemetry_enabled() ? tr(L"An", L"On") : tr(L"Aus", L"Off"), 0,
                     TOP_TELEMETRY);
@@ -632,12 +711,16 @@ static void build_page(wchar_t *title) {
             }
             row_add(tr(L"Rekorde", L"Records"), L"›", 0, TOP_RECORDS);
             row_add(tr(L"Welt & Autos", L"World & cars"), L"", NOTIFY_ROW_SECTION, -1);
-            row_add(tr(L"Welt: Blitzer, Namen, Symbole", L"World: cameras, names, icons"), L"›", 0, TOP_WORLD);
+            row_add(tr(L"Welt: Blitzer, Drivatare …", L"World: cameras, Drivatars …"), L"›", 0, TOP_WORLD);
             row_add(tr(L"Verkehr", L"Traffic"), traffic_name(rig_setting_get(RIG_TRAFFIC_PRESET)), 0, TOP_TRAFFIC);
             row_add(tr(L"Kein Schaden an Autos", L"No damage on cars"),
                     tr(damage_short_german[no_damage_mode()], damage_short_english[no_damage_mode()]), 0, TOP_DAMAGE);
             row_add(L"Gripline", L"", NOTIFY_ROW_SECTION, -1);
             row_add(tr(L"Einstellungen", L"Settings"), L"›", 0, TOP_SETTINGS);
+            row_add(tr(L"Laufen: Handkamera", L"Walking: handheld camera"),
+                    tr(hand_german[walking_handheld()], hand_english[walking_handheld()]), 0, TOP_HANDHELD);
+            row_add(tr(L"Laufen: Tacho", L"Walking: speedometer"),
+                    tr(gauge_german[walk_gauge_style()], gauge_english[walk_gauge_style()]), 0, TOP_GAUGE);
             row_add(tr(L"Karten & Hinweise", L"Cards & notices"), cards_preset_name(), 0, TOP_CARDS);
             row_add(tr(L"Karten-Design", L"Card design"), style_names[style_saved], 0, TOP_STYLE);
             row_add(tr(L"Problem-Bericht erstellen", L"Create problem report"), L"ZIP", 0, TOP_REPORT);
@@ -651,11 +734,15 @@ static void build_page(wchar_t *title) {
                     SET_STEERING);
             wchar_t cm[32];
             centimetres(rig_setting_get(RIG_GRIP_VIEW_FORWARD), cm);
-            row_add(tr(L"Cockpit-Ansicht 2: nach vorn", L"Cockpit view 2: forward"), cm, 0, SET_VIEW_FORWARD);
+            row_add(tr(L"Dashboard-Cam: nach vorn", L"Dashboard cam: forward"), cm, 0, SET_VIEW_FORWARD);
             centimetres(rig_setting_get(RIG_GRIP_VIEW_UP), cm);
-            row_add(tr(L"Cockpit-Ansicht 2: Höhe", L"Cockpit view 2: height"), cm, 0, SET_VIEW_UP);
+            row_add(tr(L"Dashboard-Cam: Höhe", L"Dashboard cam: height"), cm, 0, SET_VIEW_UP);
             row_add(tr(L"Update-Hinweis beim Start", L"Update notice at start"), update_check_enabled() ? tr(L"An", L"On") : tr(L"Aus", L"Off"), 0,
                     SET_UPDATE);
+            row_add(tr(L"Auto rufen: Fahrstil", L"Summon car: driving style"),
+                    tr(summon_german[summon_style()], summon_english[summon_style()]), 0, SET_SUMMON_STYLE);
+            row_add(tr(L"Auto rufen: Autopilot-Sounds", L"Summon car: autopilot sounds"), summon_sounds() ? tr(L"An", L"On") : tr(L"Aus", L"Off"), 0,
+                    SET_SUMMON_SOUNDS);
             row_add(tr(L"Nitro auch online", L"Nitro also online"), nitro_online_allowed() ? tr(L"An", L"On") : tr(L"Aus", L"Off"), 0, SET_NITRO);
             row_add(tr(L"Lenkrad-Animation, Update:", L"Steering animation, update:"), L"", NOTIFY_ROW_INFO, -1);
             row_add(tr(L"wirken nach Spiel-Neustart", L"take effect after a restart"), L"", NOTIFY_ROW_INFO, -1);
@@ -674,7 +761,7 @@ static void build_page(wchar_t *title) {
         case LEVEL_VIEW_UP: {
             int forward = m.level == LEVEL_VIEW_FORWARD;
             int now = rig_setting_get(forward ? RIG_GRIP_VIEW_FORWARD : RIG_GRIP_VIEW_UP);
-            wcopy(title, 0, 64, forward ? tr(L"Cockpit 2: nach vorn", L"Cockpit 2: forward") : tr(L"Cockpit 2: Höhe", L"Cockpit 2: height"));
+            wcopy(title, 0, 64, forward ? tr(L"Dashboard-Cam: nach vorn", L"Dashboard cam: forward") : tr(L"Dashboard-Cam: Höhe", L"Dashboard cam: height"));
             int low = forward ? VIEW_FORWARD_MIN : VIEW_UP_MIN, high = forward ? VIEW_FORWARD_MAX : VIEW_UP_MAX;
             int standard = forward ? 35 : -5;
             for (int v = low; v <= high; v += VIEW_STEP) {
@@ -876,10 +963,43 @@ static void build_page(wchar_t *title) {
         }
         case LEVEL_WORLD:
             wcopy(title, 0, 64, tr(L"Welt", L"World"));
-            for (unsigned i = 0; i < 3; ++i)
+            for (unsigned i = 0; i < WORLD_ROWS; ++i)
                 row_add(tr(world_german[i], world_english[i]), rig_setting_get(world_ids[i]) ? tr(L"An", L"On") : tr(L"Aus", L"Off"), 0,
                         (int)i);
             row_add(tr(L"Wirkt nach Spiel-Neustart", L"Takes effect after a restart"), L"", NOTIFY_ROW_INFO, -1);
+            hint(0);
+            break;
+        case LEVEL_LOOK: {
+            wcopy(title, 0, 64, tr(L"Maus-Blick: Empfindlichkeit", L"Mouse look: sensitivity"));
+            wchar_t v[16];
+            look_value_text(keyboard_walk_mouse_look(), v);
+            row_add(tr(L"Beim Laufen", L"While walking"), v, 0, LOOK_WALK);
+            look_value_text(keyboard_drive_mouse_look(), v);
+            row_add(tr(L"Beim Fahren", L"While driving"), v, 0, LOOK_DRIVE);
+            row_add(tr(L"Beide auf Standard (100 %)", L"Both to default (100 %)"), L"", 0, LOOK_RESET);
+            row_add(tr(L"◄ ► ändern, Enter = weiter", L"◄ ► change, Enter = next"), L"", NOTIFY_ROW_INFO, -1);
+            if (keyboard_mouse_steering())
+                row_add(tr(L"Fahren aus: Maus-Lenkung ist an", L"Driving off: mouse steering on"), L"", NOTIFY_ROW_INFO, -1);
+            row_add(tr(L"Wirkt sofort", L"Takes effect at once"), L"", NOTIFY_ROW_INFO, -1);
+            hint(0);
+            break;
+        }
+        case LEVEL_GAUGE:
+            wcopy(title, 0, 64, tr(L"Laufen: Tacho", L"Walking: speedometer"));
+            for (int i = 0; i < WALK_GAUGE_COUNT; ++i)
+                row_add(tr(gauge_german[i], gauge_english[i]),
+                        i == walk_gauge_style() ? tr(L"✓ aktiv", L"✓ active") : i == WALK_GAUGE_DEFAULT ? tr(L"Standard", L"default") : L"",
+                        0, i);
+            row_add(tr(L"Unten rechts, wenn du läufst", L"Bottom right while on foot"), L"", NOTIFY_ROW_INFO, -1);
+            row_add(tr(L"Wirkt sofort", L"Takes effect at once"), L"", NOTIFY_ROW_INFO, -1);
+            hint(0);
+            break;
+        case LEVEL_HANDHELD:
+            wcopy(title, 0, 64, tr(L"Laufen: Handkamera", L"Walking: handheld camera"));
+            for (int i = 0; i < WALK_HANDHELD_COUNT; ++i)
+                row_add(tr(hand_german[i], hand_english[i]), i == walking_handheld() ? tr(L"✓ aktiv", L"✓ active") : L"", 0, i);
+            row_add(tr(L"Wie ein Handy in der Hand", L"Like a phone in your hand"), L"", NOTIFY_ROW_INFO, -1);
+            row_add(tr(L"Wirkt sofort", L"Takes effect at once"), L"", NOTIFY_ROW_INFO, -1);
             hint(0);
             break;
         case LEVEL_DAMAGE:
@@ -952,6 +1072,9 @@ static void back(void) {
         case LEVEL_TELEMETRY: m.level = LEVEL_GROUPS; break;
         case LEVEL_WORLD: m.level = LEVEL_GROUPS; break;
         case LEVEL_DAMAGE: m.level = LEVEL_GROUPS; break;
+        case LEVEL_HANDHELD: m.level = LEVEL_GROUPS; break;
+        case LEVEL_LOOK: m.level = LEVEL_GROUPS; break;
+        case LEVEL_GAUGE: m.level = LEVEL_GROUPS; break;
         case LEVEL_LOGBOOK: m.level = LEVEL_GROUPS; break;
         case LEVEL_RECORDS: confirm_clear = 0; m.level = LEVEL_GROUPS; break;
         case LEVEL_BINDING: m.level = LEVEL_LIST; break;
@@ -1009,6 +1132,15 @@ static void choose(void) {
             } else if (action == TOP_LOGBOOK) {
                 m.level = LEVEL_LOGBOOK;
                 m.sel[LEVEL_LOGBOOK] = 0;
+            } else if (action == TOP_LOOK) {
+                m.level = LEVEL_LOOK;
+                m.sel[LEVEL_LOOK] = 0;
+            } else if (action == TOP_GAUGE) {
+                m.level = LEVEL_GAUGE;
+                m.sel[LEVEL_GAUGE] = walk_gauge_style();
+            } else if (action == TOP_HANDHELD) {
+                m.level = LEVEL_HANDHELD;
+                m.sel[LEVEL_HANDHELD] = walking_handheld();
             } else if (action == TOP_DAMAGE) {
                 m.level = LEVEL_DAMAGE;
                 m.sel[LEVEL_DAMAGE] = no_damage_mode();
@@ -1068,6 +1200,9 @@ static void choose(void) {
             }
             break;
         }
+        case LEVEL_LOOK:
+            look_step(action, 2);
+            break;
         case LEVEL_TELEMETRY: {
             if (action >= TELE_LOOK_POS && action <= TELE_LOOK_SIZE) {
                 tele_look_step(action, 2);
@@ -1100,6 +1235,38 @@ static void choose(void) {
                 }
             }
             break;
+        case LEVEL_GAUGE: {
+            if (action < 0 || action >= WALK_GAUGE_COUNT) break;
+            walk_gauge_set_style(action);
+            int saved = save_gripline_digit("WalkGauge", action);
+            char text[192];
+            unsigned t = 0;
+            wchar_t line[128];
+            unsigned n = wcopy(line, 0, 128, tr(L"Lauf-Tacho: ", L"Walking speedometer: "));
+            n = wcopy(line, n, 128, tr(gauge_german[action], gauge_english[action]));
+            if (!saved) wcopy(line, n, 128, tr(L"\nNur bis zum Spielende (nicht gespeichert)", L"\nUntil the game closes (not saved)"));
+            utf8(line, text, sizeof(text), &t);
+            text[t] = 0;
+            notify_show(text);
+            log_append_value("KEYMENU: walking gauge ", action);
+            break;
+        }
+        case LEVEL_HANDHELD: {
+            if (action < 0 || action >= WALK_HANDHELD_COUNT) break;
+            walking_set_handheld(action);
+            int saved = save_gripline_digit("WalkHandheld", action);
+            char text[192];
+            unsigned t = 0;
+            wchar_t line[128];
+            unsigned n = wcopy(line, 0, 128, tr(L"Handkamera: ", L"Handheld camera: "));
+            n = wcopy(line, n, 128, tr(hand_german[action], hand_english[action]));
+            if (!saved) wcopy(line, n, 128, tr(L"\nNur bis zum Spielende (nicht gespeichert)", L"\nUntil the game closes (not saved)"));
+            utf8(line, text, sizeof(text), &t);
+            text[t] = 0;
+            notify_show(text);
+            log_append_value("KEYMENU: walking handheld camera ", action);
+            break;
+        }
         case LEVEL_DAMAGE: {
             if (action < 0 || action >= NO_DAMAGE_COUNT) break;
             no_damage_set_mode(action);
@@ -1117,7 +1284,7 @@ static void choose(void) {
             break;
         }
         case LEVEL_WORLD: {
-            if (action >= 0 && action < 3) {
+            if (action >= 0 && action < WORLD_ROWS) {
                 unsigned id = world_ids[action];
                 int on = !rig_setting_get(id);
                 rig_setting_set(id, on); /* saves Gripline.ini and shows the restart card */
@@ -1224,6 +1391,27 @@ static void choose(void) {
                                         : (m.german ? "Nitro online aus\nGripline schaltet Nitro in Online-Sitzungen ab" : "Nitro off online\nGripline switches nitro off in online sessions"))
                                   : (m.german ? "Nitro online\nNicht gespeichert" : "Nitro online\nNot saved"));
                 log_append(on ? "KEYMENU: nitro online allowed\r\n" : "KEYMENU: nitro online blocked\r\n");
+            } else if (action == SET_SUMMON_STYLE) { /* Enter: the next style, at once */
+                int next = (summon_style() + 1) % SUMMON_STYLE_COUNT;
+                summon_set_style(next);
+                int saved = save_gripline_digit("SummonStyle", next);
+                char text[192];
+                unsigned t = 0;
+                wchar_t line[128];
+                unsigned n = wcopy(line, 0, 128, tr(L"Auto rufen: Fahrstil ", L"Summon car: driving style "));
+                n = wcopy(line, n, 128, tr(summon_german[next], summon_english[next]));
+                if (!saved) wcopy(line, n, 128, tr(L"\nNur bis zum Spielende (nicht gespeichert)", L"\nUntil the game closes (not saved)"));
+                utf8(line, text, sizeof(text), &t);
+                text[t] = 0;
+                notify_show(text);
+                log_append_value("KEYMENU: summon style ", next);
+            } else if (action == SET_SUMMON_SOUNDS) {
+                int on = !summon_sounds();
+                summon_set_sounds(on);
+                int saved = save_gripline_digit("SummonSounds", on);
+                notify_show(on ? (m.german ? "Autopilot-Sounds an" : "Autopilot sounds on") : (m.german ? "Autopilot-Sounds aus" : "Autopilot sounds off"));
+                if (!saved) log_append("KEYMENU: summon sounds not saved\r\n");
+                log_append(on ? "KEYMENU: summon sounds on\r\n" : "KEYMENU: summon sounds off\r\n");
             }
             break;
         case LEVEL_COLOR:
@@ -1237,7 +1425,7 @@ static void choose(void) {
             int forward = m.level == LEVEL_VIEW_FORWARD;
             int value = (forward ? VIEW_FORWARD_MIN : VIEW_UP_MIN) + action;
             rig_setting_set(forward ? RIG_GRIP_VIEW_FORWARD : RIG_GRIP_VIEW_UP, value); /* live, saved, card */
-            log_append_value(forward ? "KEYMENU: cockpit view 2 forward cm " : "KEYMENU: cockpit view 2 up cm ", value);
+            log_append_value(forward ? "KEYMENU: dashboard cam forward cm " : "KEYMENU: dashboard cam up cm ", value);
             break;
         }
         case LEVEL_TRAFFIC:
@@ -1520,6 +1708,14 @@ static void key_menu_tick(ULONGLONG now) {
         int action = selected_action();
         if (action >= TELE_LOOK_POS && action <= TELE_LOOK_SIZE) {
             tele_look_step(action, left ? -1 : 1);
+            show();
+            return;
+        }
+    }
+    if ((left || right) && m.level == LEVEL_LOOK) {
+        int action = selected_action();
+        if (action == LOOK_WALK || action == LOOK_DRIVE) {
+            look_step(action, left ? -1 : 1);
             show();
             return;
         }

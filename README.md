@@ -3,20 +3,19 @@
 **Immersion for Forza Horizon 2 on PC** – walk the open world on foot, drive with a real cockpit and your wheel, and shape the world around you.
 One mod, one file (`Gripline.dll`), one in-game menu (**F8**). Works offline and online with [FH2MP](https://github.com/Charelene/FH2MP).
 
-**[⬇ Download the latest version](../../releases/latest)** · **[💬 Discord](https://discord.gg/g83eBcrq)** (help, ideas, new versions) · latest release: **V7**
+**[⬇ Download the latest version](../../releases/latest)** · **[💬 Discord](https://discord.gg/g83eBcrq)** (help, ideas, new versions) · current version: **V7.1**
 
 > Gripline is in active development and gets small updates often (V7.1, V7.2 …). The release list shows what is new.
-> *Marked **V7.1** below = comes with the next release.*
 
 ---
 
 ## What you get
 
 ### 🚶 Walking *(V7)*
-Press **F** (controller: hold **LS + Y**) and get out of the car. Walk, run and jump through the open world **with real collision** (trees, walls, buildings, ground) – smooth movement, crouch and a hand-camera feel. Fade to black with car door sounds, **summon your car back** with **G** (controller: **X**) *(V7.1)*, and get back in. Offline only.
+Press **F** (controller: hold **LS + Y**) and get out of the car. Walk, run and jump through the open world **with real collision** (trees, walls, buildings, ground) – smooth movement, crouch and a hand-camera feel. Fade to black with car door sounds, **summon your car back** with **G** (controller: **X**), and get back in. Offline only.
 
 ### 🏎️ Cockpit, wheel and controls
-- **Dashboard cam** *(V7.1 name; called cockpit view 2 in V7)* – a second interior camera at the gauges, like in FH5 (**Tab** or **V**).
+- **Dashboard cam** – a second interior camera at the gauges, like in FH5 (**Tab** or **V**).
 - **Steering animation** – the in-game wheel turns 1:1 with your real wheel.
 - **Keyboard driving** – WASD, mouse look, all keys changeable in the game, works together with a controller.
 - **Mouse steering** *(experimental)* and **mouse in the FH2 menus**.
@@ -156,7 +155,7 @@ All keys can be changed in **F8** or `FH2_Keyboard.ini`.
 
 ## Building and license
 See [BUILD.md](BUILD.md): `python build.py /path/to/zig --output out` makes `out/fh2-mods/Gripline.dll` (Zig 0.15.2).
-GPL-3.0 (see [LICENSE](LICENSE)). History: [CHANGES_FORK.md](CHANGES_FORK.md).
+GPL-3.0 (see [LICENSE](LICENSE)). Changes: [CHANGELOG.md](CHANGELOG.md) · developer history: [docs/TECHNICAL_HISTORY.md](docs/TECHNICAL_HISTORY.md).
 
 ## AI disclosure
 The code of Gripline was written with the help of an AI (Claude by Anthropic) and tested in an emulator and in the game.

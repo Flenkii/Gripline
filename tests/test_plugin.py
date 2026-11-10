@@ -114,7 +114,7 @@ for n in names:
 
 print('start:')
 check(e.call('fh2mod_init', api) == 0, 'fh2mod_init returns 0')
-check(seen['info'] == ('Gripline', 'V7'), 'registered as Gripline V7: %r' % (seen['info'],))
+check(seen['info'] == ('Gripline', 'V7.1'), 'registered as Gripline V7.1: %r' % (seen['info'],))
 check(len(e.threads) == 1, 'start thread created (waits for the game)')
 
 print('INI files:')
@@ -134,7 +134,7 @@ else:
 
 print('Mods page rows:')
 rows = seen['rows']
-check(len(rows) == 15, '%d rows (keyboard, traffic, cockpit, Gripline)' % len(rows))
+check(len(rows) == 16, '%d rows (keyboard, traffic, cockpit, Gripline)' % len(rows))
 check(not any(w in r['label'] for r in rows for w in ('Wheel', 'Weather', 'Time of Day', 'Profile')),
       'no wheel, weather, time of day or profile rows (Azimuth / Extra Options do those)')
 keys = [r['key'] for r in rows]

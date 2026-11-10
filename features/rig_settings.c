@@ -49,6 +49,7 @@ static const RigSettingInfo infos[RIG_SETTING_COUNT] = {
     [RIG_GRIP_CAR_LABELS] = {"EoGripCarLabels", "CarLabels", 0, 1, RIG_KIND_TOGGLE, 0, 1, NULL},
     [RIG_GRIP_EVENT_ICONS] = {"EoGripEventIcons", "EventIcons", 0, 1, RIG_KIND_TOGGLE, 0, 1, NULL},
     [RIG_GRIP_TELEMETRY] = {"EoGripTelemetry", "Telemetry", 0, 1, RIG_KIND_TOGGLE, 0, 1, NULL},
+    [RIG_GRIP_CALM_DRIVATARS] = {"EoGripCalmDrivatars", "CalmDrivatars", 0, 1, RIG_KIND_TOGGLE, 0, 1, NULL},
 };
 
 /* Rows of the menu. */
@@ -56,7 +57,7 @@ static const unsigned char order[] = {
     RIG_KEY_ENABLED,     RIG_KEY_STEER,     RIG_KEY_RETURN,     RIG_KEY_PEDAL,
     RIG_TRAFFIC_ALL_DAY, /* preset and amount: the Traffic page (plugin), with names instead of numbers */
     RIG_GRIP_STEERING,   RIG_GRIP_VIEW_FORWARD, RIG_GRIP_VIEW_UP, RIG_GRIP_NOTIFICATIONS, RIG_GRIP_CARD_COLOR,
-    RIG_GRIP_SPEED_CAMERAS, RIG_GRIP_CAR_LABELS, RIG_GRIP_EVENT_ICONS, RIG_GRIP_TELEMETRY,
+    RIG_GRIP_SPEED_CAMERAS, RIG_GRIP_CAR_LABELS, RIG_GRIP_EVENT_ICONS, RIG_GRIP_CALM_DRIVATARS, RIG_GRIP_TELEMETRY,
     RIG_GRIP_REPORT,
 };
 _Static_assert(sizeof(order) <= RIG_SETTING_COUNT, "menu rows");
@@ -139,13 +140,13 @@ static const RigText german[RIG_SETTING_COUNT] = {
                                 "Kleine Gripline-Karten oben rechts im Bild, z. B. wenn etwas "
                                 "gespeichert wurde oder Nitro online aus ist. Auch im Vollbild. "
                                 "Wirkt sofort."},
-    [RIG_GRIP_VIEW_FORWARD] = {"Cockpit-Ansicht 2: vor (cm)",
-                            "Zweite Cockpit-Ansicht wie in FH5: so viele Zentimeter weiter vorne am "
-                            "Tacho. Kamera-Taste: Cockpit, Cockpit 2, nächste Kamera (auch V). "
+    [RIG_GRIP_VIEW_FORWARD] = {"Dashboard-Cam: vor (cm)",
+                            "Dashboard-Cam wie in FH5: so viele Zentimeter weiter vorne am "
+                            "Tacho. Kamera-Taste: Cockpit, Dashboard-Cam, nächste Kamera (auch V). "
                             "Das Lenkrad verschwindet dort. "
                             "Wirkt sofort."},
-    [RIG_GRIP_VIEW_UP] = {"Cockpit-Ansicht 2: hoch (cm)",
-                          "So viele Zentimeter sitzt du in der zweiten Cockpit-Ansicht höher "
+    [RIG_GRIP_VIEW_UP] = {"Dashboard-Cam: hoch (cm)",
+                          "So viele Zentimeter sitzt du in der Dashboard-Cam höher "
                           "(negativ = tiefer). Wirkt sofort."},
     [RIG_GRIP_CARD_COLOR] = {"Gripline: Kartenfarbe",
                              "Farbe der Gripline-Karten (Streifen, Logo und Schrift) und der Tastenliste. "
@@ -159,6 +160,10 @@ static const RigText german[RIG_SETTING_COUNT] = {
     [RIG_GRIP_EVENT_ICONS] = {"Welt: Event-Symbole auf der Straße",
                               "Aus = keine Rennen- und Event-Symbole mehr auf der Straße in der offenen Welt. "
                               "Events starten weiter über die Karte. Nach einem Neustart des Spiels."},
+    [RIG_GRIP_CALM_DRIVATARS] = {"Welt: Drivatare fahren ruhig",
+                                 "An = alle Drivatare in der offenen Welt fahren gemütlich (die ruhigste Fahrstufe des "
+                                 "Spiels) und geben nicht mehr Gas, wenn du nah an sie heranfährst. Rennen bleiben wie sie sind. "
+                                 "Nach einem Neustart des Spiels."},
     [RIG_GRIP_TELEMETRY] = {"Gripline: Live-Telemetrie",
                             "Karte oben rechts beim Fahren: Tempo, Grip (haftet / rutscht / Drift mit "
                             "Rutschwinkel) und g-Kräfte quer und längs. Wirkt sofort."},
@@ -203,13 +208,13 @@ static const RigText english[RIG_SETTING_COUNT] = {
                                 "Small Gripline cards at the top right of the picture, e.g. when "
                                 "something was saved or nitro is off online. Also in fullscreen. "
                                 "Applies immediately."},
-    [RIG_GRIP_VIEW_FORWARD] = {"Cockpit View 2: Forward (cm)",
-                            "Second cockpit view like in FH5: this many centimetres closer to the "
-                            "gauges. Camera button: cockpit, cockpit 2, next camera (also V). "
+    [RIG_GRIP_VIEW_FORWARD] = {"Dashboard Cam: Forward (cm)",
+                            "Dashboard cam like in FH5: this many centimetres closer to the "
+                            "gauges. Camera button: cockpit, dashboard cam, next camera (also V). "
                             "The steering wheel disappears there. "
                             "Applies immediately."},
-    [RIG_GRIP_VIEW_UP] = {"Cockpit View 2: Up (cm)",
-                          "You sit this many centimetres higher in the second cockpit view "
+    [RIG_GRIP_VIEW_UP] = {"Dashboard Cam: Up (cm)",
+                          "You sit this many centimetres higher in the dashboard cam "
                           "(negative = lower). Applies immediately."},
     [RIG_GRIP_CARD_COLOR] = {"Gripline: Card Colour",
                              "Colour of the Gripline cards (bar, logo and title) and of the key list. "
@@ -223,6 +228,9 @@ static const RigText english[RIG_SETTING_COUNT] = {
     [RIG_GRIP_EVENT_ICONS] = {"World: Event Symbols on the Road",
                               "Off = no more race and event symbols standing on the road in free roam. "
                               "Events still start from the map. Restart the game to apply."},
+    [RIG_GRIP_CALM_DRIVATARS] = {"World: Calm Drivatars",
+                                 "On = every Drivatar in the open world cruises calmly (the game's calmest driving style) "
+                                 "and no longer speeds up when you get close. Races stay as they are. After a restart of the game."},
     [RIG_GRIP_TELEMETRY] = {"Gripline: Live Telemetry",
                             "Card at the top right while driving: speed, grip (gripping / sliding / "
                             "drifting with slip angle) and side and length g-forces. Applies immediately."},
@@ -296,9 +304,10 @@ static int is_gripline(unsigned id) {
     return id >= RIG_GRIP_FIRST && id < RIG_GRIP_END;
 }
 
-static volatile LONG gripline_values[RIG_GRIP_END - RIG_GRIP_FIRST] = {1, 0, 35, -5, NOTIFY_COLOR_BLUE, 1, 1, 1, 0};
+static volatile LONG gripline_values[RIG_GRIP_END - RIG_GRIP_FIRST] = {1, 0, 35, -5, NOTIFY_COLOR_BLUE, 1, 1, 1, 0, 0};
 
-void rig_settings_world(int speed_cameras, int car_labels, int telemetry, int event_icons) {
+void rig_settings_world(int speed_cameras, int car_labels, int telemetry, int event_icons, int calm_drivatars) {
+    gripline_values[RIG_GRIP_CALM_DRIVATARS - RIG_GRIP_FIRST] = calm_drivatars ? 1 : 0;
     gripline_values[RIG_GRIP_EVENT_ICONS - RIG_GRIP_FIRST] = event_icons ? 1 : 0;
     gripline_values[RIG_GRIP_TELEMETRY - RIG_GRIP_FIRST] = telemetry ? 1 : 0;
     telemetry_set_enabled(telemetry);
@@ -412,7 +421,8 @@ static void confirm_text(unsigned id, int value, char *text, size_t capacity) {
         default: card_append(text, capacity, &used, ini_format_int(value, number)); break;
     }
     if (id == RIG_KEY_ENABLED || id == RIG_GRIP_STEERING || id == RIG_TRAFFIC_LEVEL || id == RIG_TRAFFIC_PRESET ||
-        id == RIG_GRIP_SPEED_CAMERAS || id == RIG_GRIP_CAR_LABELS || id == RIG_GRIP_EVENT_ICONS)
+        id == RIG_GRIP_SPEED_CAMERAS || id == RIG_GRIP_CAR_LABELS || id == RIG_GRIP_EVENT_ICONS ||
+        id == RIG_GRIP_CALM_DRIVATARS)
         card_append(text, capacity, &used, de ? " - nach Neustart" : " - after a restart");
 }
 

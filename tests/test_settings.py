@@ -18,7 +18,8 @@ e = Emu(DLL, root)
 KEYS = ['TrafficLevel', 'RushHourAllDay', 'Notifications', 'SteeringAnimation', 'CockpitViewForward',
         'CockpitViewUp', 'CardColor', 'CardStyle', 'UpdateCheck', 'SpeedCameras', 'CarLabels', 'Telemetry',
         'TelemetryShow', 'EventIcons', 'NewsSeen', 'NoDamage', 'CardsHidden', 'CruiseCrashOff', 'CruiseMinSpeed', 'CruiseSlowOff',
-        'TelemetryPosition', 'TelemetryOpacity', 'TelemetrySize', 'NitroOnline']
+        'TelemetryPosition', 'TelemetryOpacity', 'TelemetrySize', 'WalkHandheld', 'CalmDrivatars', 'WalkGauge',
+        'SummonStyle', 'SummonSounds', 'NitroOnline']
 
 
 def read(text):
@@ -60,6 +61,20 @@ check(ok == 1 and v['TelemetryShow'] == 4095, 'UTF-8 mit BOM')
 
 ok, v, n, s = read('[Gripline]\r\nCardsHidden=117\r\n')
 check(ok == 1 and v['CardsHidden'] == 117, 'CardsHidden gelesen')
+
+ok, v, n, s = read('[Gripline]\r\nWalkHandheld=3\r\n')
+check(ok == 1 and v['WalkHandheld'] == 3, 'V7.1 WalkHandheld gelesen')
+ok, v, n, s = read(None)
+check(v['WalkGauge'] == 3, 'V7.1 Lauf-Tacho Standard: Schritt-Puls (3)')
+ok, v, n, s = read('[Gripline]\r\nWalkGauge=1\r\n')
+check(ok == 1 and v['WalkGauge'] == 1, 'V7.1 WalkGauge gelesen')
+ok, v, n, s = read('[Gripline]\r\nCalmDrivatars=1\r\n')
+check(ok == 1 and v['CalmDrivatars'] == 1, 'V7.1 CalmDrivatars gelesen')
+ok, v, n, s = read(None)
+check(v['CalmDrivatars'] == 0, 'CalmDrivatars Standard aus')
+check(v['SummonStyle'] == 1 and v['SummonSounds'] == 1, 'V7.1 Auto rufen Standard: Normal, Sounds an')
+ok, v, n, s = read('[Gripline]\r\nSummonStyle=2\r\nSummonSounds=0\r\n')
+check(ok == 1 and v['SummonStyle'] == 2 and v['SummonSounds'] == 0, 'V7.1 SummonStyle / SummonSounds gelesen')
 
 print(f'\n{checks[0]} checks, {len(fails)} failed')
 sys.exit(1 if fails else 0)

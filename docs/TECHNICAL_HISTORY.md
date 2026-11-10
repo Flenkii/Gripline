@@ -1,6 +1,8 @@
-# Changes in this fork compared to Extra Options 0.2.98
+# Gripline – technical history (files and hooks per version)
 
-Fork of https://github.com/RokkuDayo/ForzaHorizon2_ExtraOptions – modified in October 2026 by Flenkii.
+For the short, player-facing list see [CHANGELOG.md](../CHANGELOG.md). This file is the developer's log: which source files came or went and how the hooks work.
+
+Gripline started in October 2026 as a fork of [Extra Options](https://github.com/RokkuDayo/ForzaHorizon2_ExtraOptions) 0.2.98 by RokkuDayo (GPL-3.0). Since V6 it is a stand-alone FH2 Mod Platform mod, and with V7.1 the last source files that came from Extra Options were rewritten.
 
 ## New files
 - `features/wheel_bridge.c` – G920 wheel as an Xbox wheel, force feedback (the game's own wheel programs; the old own FFB only as fallback), reconnect, log
@@ -20,7 +22,7 @@ Fork of https://github.com/RokkuDayo/ForzaHorizon2_ExtraOptions – modified in 
 - `features/platform_link.c/.h`, `platform/gripline_mod.c` (V5) – FH2 Mod Platform module (`fh2-mods\Gripline.dll`) and the GRIPLINE tile page
 - `features/cockpit.c/.h` (V5) – full steering animation built in (own Deflate, Oodle1 and GR2 code; port of `tools/fh2_lenkrad.py`); V6: the game's ±90° clamp and divisor patched so the wheel turns 1:1
 - `features/mod_scan.c/.h` (V6) – start card with the mods found, Azimuth Mapper detection (its named event `AzimuthMapper.ShowWindow`, no process list)
-- `features/cockpit_view.c/.h` (V6) – cockpit view 2: camera moved to the gauges, wheel and driver hidden live
+- `features/cockpit_view.c/.h` (V6) – dashboard cam: camera moved to the gauges, wheel and driver hidden live
 - `features/creator_mode.c/.h` (V6) – creator mode: HUD, minimap, prompts and Gripline cards hidden (key H / wheel function 16)
 - `features/time_of_day.c/.h` (V6) – fixed time of day or slow day in free roam, offline only, through the game's own clock
 - `features/noclip.c/.h` (V6.4) – noclip: key F6 flies the own car through the map (the car's CCarDynamics body state set through its own setter around the car update, hooked through the platform), offline only; live card with speed and height
@@ -58,7 +60,7 @@ Removed (October 29, 2026):
 - the "mods found" start card and the fh2wheels check – the platform's MODS tab lists the mods; fh2wheels does not load on Azimuth 1.0.x
 
 Kept and changed:
-- keyboard, steering animation (rotation now from Azimuth's `data\azimuth.ini`), cockpit view 2, More Traffic, nitro key,
+- keyboard, steering animation (rotation now from Azimuth's `data\azimuth.ini`), dashboard cam, More Traffic, nitro key,
   key list, cards, Azimuth Mapper check, problem report (adds `azimuth.log` and `mods\loadorder.txt`)
 - settings: `Gripline.ini` ([Traffic], [Gripline]; old `Weather`/`TimeOfDay` keys are ignored) and `FH2_Keyboard.ini`
 - `build.py` builds only `Gripline.dll`; tests run against its `--test` build
@@ -69,10 +71,24 @@ Plugin build on Azimuth 1.0.3 (October 29, 2026, tested in the game by Flenkii):
     with `get_Gamepads` pointed at the Gripline pad, then puts `get_Gamepads` back (`keyboard_pad.c`)
   - cards and key list: Azimuth drops its D3D12 device when anything else draws into its back buffers, so the cards
     are drawn by the CPU into a transparent, click-through window over the game window (`notify.c`)
-  - cockpit view 2: the driver camera's FOV slot (game+0x2e78120, slot 0x70) is chained in front of Extra Options' own
+  - dashboard cam: the driver camera's FOV slot (game+0x2e78120, slot 0x70) is chained in front of Extra Options' own
 - start card "Gripline V6 active"
 - traffic: amounts 30/45/70/100/200 cars, faster spawning; presets Original / Much More Traffic / No Traffic /
   Drivatars Only, chosen by name on the platform page *Traffic* (MODS > Installed mods > Gripline)
+
+## V7.1 (November 2026)
+- `features/menu_mouse.c/.h` – mouse in the game's menus: the real Windows cursor, the tile under it gets the
+  pad selection (D-pad steps, tile places read from the menu's own layout), left click = A, wheel = LB/RB over the
+  tab row or up/down, right click = B (`MenuMouse` in FH2_Keyboard.ini)
+- `features/drive_look.c/.h` – mouse look in the car, every view (outside the camera circles the car)
+- walking: easing, mouse look, crouch, handheld camera (F8), driver figure hidden, follow camera when getting out
+- walking speedometer at the bottom right while on foot: three looks (Ring, Racing bar, Step pulse = default), F8 > Gripline > Walking: speedometer, Gripline.ini `WalkGauge` (`features/walk_gauge.c/.h`)
+- `features/summon.c/.h` – summon the car while walking (G / controller X): the game's AI drives it along a GPS
+  route, Gripline drives it itself off the road, the last metres and when the GPS / AI cannot (backs up and drives
+  round obstacles), parks it beside the walker; live card with distance, speed and arrival time; autopilot sounds
+  (own tones on / off / warning: `tools/make_summon_tones.py` -> `assets/sounds/summon_*.wav` -> `features/summon_sounds.h` via `tools/make_summon_sounds.py`); F8 > Settings:
+  driving style (Calm / Normal / Sporty, `SummonStyle`) and sounds (`SummonSounds`) in Gripline.ini
+- what's-new cards for V7.1
 
 ## V7 – The Big Update (November 2026)
 New files:
@@ -81,6 +97,6 @@ New files:
 - `features/cruise.c/.h` – cruise control (K)
 - `features/telemetry.c/.h`, `features/records.c/.h`, `features/logbook.c/.h` – live telemetry, records, CSV, logbook, what's-new cards
 - `features/no_damage.c/.h` – visible damage reset for other / all cars (the game's own ForzaCar function)
-- `features/world_files.c/.h` – speed cameras, names over cars, event icons (copies in `mods\Gripline\media`)
+- `features/world_files.c/.h` – speed cameras, names over cars, event icons, calm Drivatars (V7.1: AI/Difficulty.xml <Global> cruise chances 1/0/0, CruiseReaction off) (copies in `mods\Gripline\media`)
 - `features/update_check.c/.h` – one HTTPS request to the GitHub releases API at start (winhttp loaded at run time)
 Changed: `noclip.c` (freecam, walking, controller combos), `notify.c` (3 card designs, panels, fade to black), `cockpit.c` (V6.5 cockpit file repair), `settings.c` (a wrong line is skipped, not the rest), one shared lock for writing `Gripline.ini`; `sha256.c` and unused functions removed. Imports of `Gripline.dll` unchanged (51).

@@ -1,37 +1,19 @@
-#ifndef FH2_GAME_ADDRESSES_H
-#define FH2_GAME_ADDRESSES_H
+#ifndef GRIPLINE_GAME_ADDRESSES_H
+#define GRIPLINE_GAME_ADDRESSES_H
+/* Offsets (RVAs) into forza_durango_release_final.exe 1.0.0.64 that Gripline's own code uses.
+   Found by reading the game's code; add the image base to get the live address. */
 
-enum {
-    GAME_RVA_LOCALE_MANAGER = 0x36629a0,
-    GAME_RVA_TEXT_TABLES = 0x3662990,
-    GAME_RVA_AUDIO_ENGINE = 0x365d3d8,
-    GAME_RVA_TEXT_TABLES_VTABLE = 0x2eb0dc8,
-    GAME_RVA_AUDIO_ENGINE_VTABLE = 0x2e733e0,
-    GAME_RVA_AUDIO_ENGINE_ALT_VTABLE = 0x2e73898,
-    GAME_RVA_SET_LOCALE = 0x1245cf0,
-    GAME_RVA_SET_TEXT_CODE = 0x1246540,
-    GAME_RVA_REFRESH_TEXT = 0x1244e80,
-    GAME_RVA_PLAYER_CAR_VTABLE = 0x2c5cb80,
-    GAME_RVA_ROAD_BINDINGS_VTABLE = 0x2f5d850,
-    GAME_RVA_PLAYER_STATE_VTABLE = 0x2d44ef0,
-    GAME_RVA_PLAYER_MANAGER = 0x34aba60,
-    GAME_RVA_PARAMETER_STRING = 0x8898c0,
-    GAME_RVA_GET_LOCAL_PLAYER = 0x21e0c0,
-    GAME_RVA_GET_PLAYER_CAR = 0x2da060,
-    GAME_RVA_GET_STATE_CACHE = 0x52bf80,
-    GAME_RVA_NEAREST_ROAD = 0xf5db40,
-    GAME_RVA_PROFILE_SOURCE_VTABLE = 0x2daf548,
-    GAME_RVA_USER_PROFILE_VTABLE = 0x2eb1288,
-    GAME_RVA_UI_MANAGER = 0x36e0ae8,
-    GAME_RVA_TEXTURE_MANAGER = 0x36604b8,
-    GAME_RVA_TEXTURE_QUEUE = 0x367c748,
-    GAME_RVA_GRAPHICS_DEVICE = 0x3660140,
-    GAME_RVA_CREATE_BITMAP = 0x535000,
-    GAME_RVA_WRAP_BITMAP = 0x535180,
-    GAME_RVA_CREATE_PIXEL_BUFFER = 0x165e600,
-    GAME_RVA_QUEUE_TEXTURE = 0x1105510,
-    GAME_RVA_QUEUE_BITMAP_UPDATE = 0x16e2dc0,
-    GAME_RVA_DESTROY_UI_OBJECT = 0x257730,
-};
+/* global pointers (read, never written) */
+#define FH2_RVA_TEXT_TABLES 0x3662990u   /* game_language.c: language / text tables object */
+#define FH2_RVA_PLAYER_MANAGER 0x34aba60u /* keyboard_pad.c, noclip.c, summon.c: player manager */
+
+/* vtables, used to recognise an object by its type */
+#define FH2_RVA_PLAYER_CAR_VTABLE 0x2c5cb80u
+#define FH2_RVA_ROAD_BINDINGS_VTABLE 0x2f5d850u
+
+/* functions we call */
+#define FH2_RVA_GET_LOCAL_PLAYER 0x21e0c0u
+#define FH2_RVA_GET_PLAYER_CAR 0x2da060u
+#define FH2_RVA_NEAREST_ROAD 0xf5db40u /* summon.c: snap a point to the nearest road */
 
 #endif
