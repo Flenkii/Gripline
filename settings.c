@@ -33,6 +33,7 @@ const SettingDefinition setting_definitions[] = {
     SETTING("Gripline", "WalkGauge", walk_gauge, SETTING_MASK),
     SETTING("Gripline", "SummonStyle", summon_style, SETTING_MASK),
     SETTING("Gripline", "SummonSounds", summon_sounds, SETTING_MASK),
+    SETTING("Gripline", "NitroOnline", nitro_online, SETTING_BOOLEAN),
 };
 
 const size_t setting_count = ARRAY_COUNT(setting_definitions);
@@ -61,6 +62,7 @@ void settings_defaults(ModOptions *options) {
         .cruise_slow_off = 1,
         .telemetry_opacity = 100,
         .telemetry_size = 100,
+        .nitro_online = 1,
     };
 }
 

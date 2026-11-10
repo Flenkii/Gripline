@@ -120,6 +120,15 @@ e.tick += 2500
 e.call('Fh2TestNitroSet', 1, 1)
 pad['buttons'] = 0x1000
 check(poll()[1] == 0x1100, 'connection state 0 (offline): nitro works')
+cards_before = e.call('Fh2TestNotifyCount')
+e.wd(conn + 0x10, 1)
+e.tick += 600
+check(poll()[1] == 0x1100 and e.call('Fh2TestNotifyCount') == cards_before, 'NitroOnline=1 (default): online nitro works, no card')
+e.wd(conn + 0x10, 0)
+e.tick += 600
+poll()
+e.call('Fh2TestNitroOnline', 0)
+print('online, NitroOnline=0:')
 e.wd(conn + 0x10, 1)
 e.tick += 600
 r, b, lt, rt = poll()

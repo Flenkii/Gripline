@@ -31,6 +31,7 @@ typedef struct {
     int speed_cameras, car_labels, telemetry, event_icons;
     int calm_drivatars; /* [Gripline] CalmDrivatars: 1 = open-world Drivatars cruise calmly (V7.1, world_files.c) */
     int news_seen; /* [Gripline] NewsSeen: version whose what's-new cards were shown (71 = V7.1), logbook.c */
+    int nitro_online; /* [Gripline] NitroOnline: 1 nitro key also online (default), 0 off online (nitro_link.h) */
     int no_damage; /* [Gripline] NoDamage: 0 off, 1 other cars, 2 all cars (V7, no_damage.h) */
     int telemetry_pos, telemetry_opacity, telemetry_size; /* [Gripline] TelemetryPosition 0..5, TelemetryOpacity %, TelemetrySize % (V7, notify.h) */
     int cruise_crash_off, cruise_min_speed, cruise_slow_off; /* [Gripline] CruiseCrashOff 0/1, CruiseMinSpeed km/h (V7, cruise.h) */
