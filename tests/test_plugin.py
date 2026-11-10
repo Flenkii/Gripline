@@ -24,6 +24,10 @@ API_SIZE = 32 + 8 * len(names)
 
 root = tempfile.mkdtemp(prefix='gripline-plugin-')
 os.makedirs(os.path.join(root, 'Mount'))
+OLD = bool(os.environ.get('GL_OLD_LAYOUT'))  # older Extra Options: mods\loadorder.txt, no mods\Forza Horizon 2
+if OLD:
+    os.makedirs(os.path.join(root, 'mods'))
+    open(os.path.join(root, 'mods', 'loadorder.txt'), 'w').write('Gripline\n')
 eo_ini = ('[Global]\r\nEnabled=1\r\n[Files]\r\nEnableMediaOverrides=1\r\n[Traffic]\r\nTrafficLevel=5\r\n'
           'RushHourAllDay=0\r\nWeather=1\r\nTimeOfDay=3\r\n[Gripline]\r\nNotifications=1\r\nSteeringAnimation=1\r\n'
           '[Livery]\r\nEnable4K=1\r\n')
@@ -122,7 +126,11 @@ eo = open(os.path.join(root, 'FH2_ExtraOptions.ini'), newline='').read()
 check('[Traffic]' not in eo and '[Gripline]' not in eo and 'TrafficLevel' not in eo, 'FH2_ExtraOptions.ini without Gripline keys')
 check('[Global]' in eo and 'Enable4K=1' in eo and 'EnableMediaOverrides=1' in eo, 'FH2_ExtraOptions.ini keeps its own keys')
 check(open(os.path.join(root, 'FH2_ExtraOptions.ini.before-gripline'), newline='').read() == eo_ini, 'backup of the old INI')
-check(os.path.isdir(os.path.join(root, 'mods', 'Gripline', 'media')), 'mods\\Gripline\\media made')
+if OLD:
+    check(os.path.isdir(os.path.join(root, 'mods', 'Gripline', 'media')) and not os.path.exists(os.path.join(root, 'mods', 'Forza Horizon 2')),
+          'old layout: mods\\Gripline\\media made')
+else:
+    check(os.path.isdir(os.path.join(root, 'mods', 'Forza Horizon 2', 'Gripline', 'media')), 'mods\\Forza Horizon 2\\Gripline\\media made (Extra Options 0.6.0 layout)')
 
 print('Mods page rows:')
 rows = seen['rows']

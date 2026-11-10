@@ -51,7 +51,7 @@ static FH2Mod *mod;
 static wchar_t directory[PATH_CAPACITY];   /* the Azimuth folder (next to azimuth.exe) */
 static wchar_t game_path[PATH_CAPACITY];   /* ...\Mount\forza_durango_release_final.exe */
 static wchar_t mount_dir[PATH_CAPACITY];   /* ...\Mount */
-static wchar_t media_dir[PATH_CAPACITY];   /* Azimuth\mods\Gripline\media */
+static wchar_t media_dir[PATH_CAPACITY];   /* Azimuth\mods\Forza Horizon 2\Gripline\media (EO 0.6.0) or mods\Gripline\media (older) */
 static unsigned char *game;
 static volatile LONG started;
 
@@ -509,6 +509,7 @@ static void start_features(void) {
     traffic_tunables_start(game, &options);
     keyboard_pad_game_start(game, directory);
     ini_migrate_log(); /* notes of the fork1-fork3 file migration (were never written to the log) */
+    nitro_online_remember(options.nitro_online);
     nitro_link_start(game);
     cockpit_view_start(game);
     walking_start(game);
@@ -554,6 +555,39 @@ static void start_features(void) {
     platform_log("Gripline features started");
 }
 
+/* Where Extra Options mounts Gripline's media. Extra Options 0.6.0 (FH2MP 1.3.3 and later) reads its packages
+   from mods\Forza Horizon 2\<name>; 0.3.x/0.4.x read mods\<name>. New layout when mods\Forza Horizon 2 exists or
+   there is no old mods\loadorder.txt; the old layout only while that list is still there and the new folder is not
+   (an older Extra Options, or 0.6.0 before its first start moved the packages). */
+static int dir_exists(const wchar_t *path) {
+    DWORD attributes = GetFileAttributesW(path);
+    return attributes != INVALID_FILE_ATTRIBUTES && (attributes & FILE_ATTRIBUTE_DIRECTORY);
+}
+
+static void make_dirs(const wchar_t *path) {
+    static wchar_t partial[PATH_CAPACITY]; /* static: a big stack frame needs ___chkstk_ms, not linked */
+    lstrcpynW(partial, path, PATH_CAPACITY);
+    for (wchar_t *p = partial + 3; *p; ++p) {
+        if (*p != L'\\') continue;
+        *p = 0;
+        CreateDirectoryW(partial, NULL);
+        *p = L'\\';
+    }
+    CreateDirectoryW(partial, NULL);
+}
+
+static void choose_media_dir(void) {
+    static wchar_t horizon[PATH_CAPACITY], order[PATH_CAPACITY];
+    int new_layout = 1;
+    if (path_join(horizon, directory, L"mods\\Forza Horizon 2") && path_join(order, directory, L"mods\\loadorder.txt"))
+        new_layout = dir_exists(horizon) || GetFileAttributesW(order) == INVALID_FILE_ATTRIBUTES;
+    if (path_join(media_dir, directory, new_layout ? L"mods\\Forza Horizon 2\\Gripline\\media" : L"mods\\Gripline\\media")) {
+        make_dirs(media_dir);
+        platform_log(new_layout ? "media folder: mods\\Forza Horizon 2\\Gripline (Extra Options 0.6.0 layout)"
+                                : "media folder: mods\\Gripline (older Extra Options layout)");
+    }
+}
+
 static DWORD WINAPI start_thread(LPVOID unused) {
     (void)unused;
     game = api->api_version >= 3 && api->wait_for_code ? (unsigned char *)api->wait_for_code(120000)
@@ -586,7 +620,7 @@ FH2MOD_EXPORT int fh2mod_init(const FH2ModApi *platform) {
         return 0;
     }
     if (!mount_dir[0]) platform_log("the platform did not find the game folder - steering animation and traffic files off");
-    if (path_join(media_dir, directory, L"mods\\Gripline\\media")) CreateDirectoryW(media_dir, NULL);
+    choose_media_dir();
     move_gripline_sections();
     log_set_directory(directory);
     unsigned char *host = (unsigned char *)GetModuleHandleW(NULL);

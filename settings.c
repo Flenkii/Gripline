@@ -28,6 +28,7 @@ const SettingDefinition setting_definitions[] = {
     SETTING("Gripline", "TelemetryPosition", telemetry_pos, SETTING_MASK),
     SETTING("Gripline", "TelemetryOpacity", telemetry_opacity, SETTING_MASK),
     SETTING("Gripline", "TelemetrySize", telemetry_size, SETTING_MASK),
+    SETTING("Gripline", "NitroOnline", nitro_online, SETTING_BOOLEAN),
 };
 
 const size_t setting_count = ARRAY_COUNT(setting_definitions);
@@ -52,6 +53,7 @@ void settings_defaults(ModOptions *options) {
         .cruise_slow_off = 1,
         .telemetry_opacity = 100,
         .telemetry_size = 100,
+        .nitro_online = 1,
     };
 }
 

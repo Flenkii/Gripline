@@ -13,6 +13,7 @@
 #include "support.h"
 #include "report.h"
 #include "no_damage.h"
+#include "nitro_link.h"
 #include "update_check.h"
 #include "cruise.h"
 
@@ -36,7 +37,7 @@ enum { TOP_STYLE = 100, TOP_RESET = 101, TOP_MOUSE = 102, TOP_TELEMETRY = 103, T
        TOP_SETTINGS = 110, TOP_CARDS = 111, TOP_TRAFFIC = 112, TOP_CRUISE = 113 };
 
 /* settings page (V7): rows */
-enum { SET_COLOR, SET_STEERING, SET_VIEW_FORWARD, SET_VIEW_UP, SET_UPDATE };
+enum { SET_COLOR, SET_STEERING, SET_VIEW_FORWARD, SET_VIEW_UP, SET_UPDATE, SET_NITRO };
 /* cockpit view 2 choices in cm (rig_settings.c ranges -20..80 and -20..30) */
 #define VIEW_STEP 5
 #define VIEW_FORWARD_MIN (-20)
@@ -655,6 +656,7 @@ static void build_page(wchar_t *title) {
             row_add(tr(L"Cockpit-Ansicht 2: Höhe", L"Cockpit view 2: height"), cm, 0, SET_VIEW_UP);
             row_add(tr(L"Update-Hinweis beim Start", L"Update notice at start"), update_check_enabled() ? tr(L"An", L"On") : tr(L"Aus", L"Off"), 0,
                     SET_UPDATE);
+            row_add(tr(L"Nitro auch online", L"Nitro also online"), nitro_online_allowed() ? tr(L"An", L"On") : tr(L"Aus", L"Off"), 0, SET_NITRO);
             row_add(tr(L"Lenkrad-Animation, Update:", L"Steering animation, update:"), L"", NOTIFY_ROW_INFO, -1);
             row_add(tr(L"wirken nach Spiel-Neustart", L"take effect after a restart"), L"", NOTIFY_ROW_INFO, -1);
             hint(0);
@@ -1214,6 +1216,14 @@ static void choose(void) {
                                         : (m.german ? "Update-Hinweis aus\nGripline fragt GitHub nicht mehr" : "Update notice off\nGripline no longer asks GitHub"))
                                   : (m.german ? "Update-Hinweis\nNicht gespeichert" : "Update notice\nNot saved"));
                 log_append(on ? "KEYMENU: update check on\r\n" : "KEYMENU: update check off\r\n");
+            } else if (action == SET_NITRO) {
+                int on = !nitro_online_allowed();
+                int saved = save_gripline_digit("NitroOnline", on);
+                nitro_online_remember(on);
+                notify_show(saved ? (on ? (m.german ? "Nitro auch online\nGripline-Nitro-Taste bleibt online aktiv" : "Nitro also online\nThe Gripline nitro key stays active online")
+                                        : (m.german ? "Nitro online aus\nGripline schaltet Nitro in Online-Sitzungen ab" : "Nitro off online\nGripline switches nitro off in online sessions"))
+                                  : (m.german ? "Nitro online\nNicht gespeichert" : "Nitro online\nNot saved"));
+                log_append(on ? "KEYMENU: nitro online allowed\r\n" : "KEYMENU: nitro online blocked\r\n");
             }
             break;
         case LEVEL_COLOR:

@@ -18,7 +18,7 @@ e = Emu(DLL, root)
 KEYS = ['TrafficLevel', 'RushHourAllDay', 'Notifications', 'SteeringAnimation', 'CockpitViewForward',
         'CockpitViewUp', 'CardColor', 'CardStyle', 'UpdateCheck', 'SpeedCameras', 'CarLabels', 'Telemetry',
         'TelemetryShow', 'EventIcons', 'NewsSeen', 'NoDamage', 'CardsHidden', 'CruiseCrashOff', 'CruiseMinSpeed', 'CruiseSlowOff',
-        'TelemetryPosition', 'TelemetryOpacity', 'TelemetrySize']
+        'TelemetryPosition', 'TelemetryOpacity', 'TelemetrySize', 'NitroOnline']
 
 
 def read(text):
