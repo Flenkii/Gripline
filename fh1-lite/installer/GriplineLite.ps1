@@ -362,7 +362,7 @@ $folder.Add_Click({
   if ($dlg.ShowDialog() -eq "OK") { $script:proj = $dlg.SelectedPath; Refresh-View }
 })
 
-# Update hint: is there a newer Gripline Lite release on GitHub (tags fh1-lite-vX.Y)?
+# Update hint: is there a newer Gripline Lite release on GitHub (github.com/Flenkii/Gripline-Lite, tags vX.Y)?
 # Only reads the release list and opens the page in the browser; nothing is downloaded.
 # Offline or any error: no hint.
 $update = New-Object Windows.Forms.LinkLabel
@@ -377,12 +377,12 @@ $update.Add_LinkClicked({ Start-Process $update.Tag })
 function Check-Update {
   try {
     [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
-    $releases = Invoke-RestMethod -Uri "https://api.github.com/repos/Flenkii/Gripline/releases?per_page=50" `
+    $releases = Invoke-RestMethod -Uri "https://api.github.com/repos/Flenkii/Gripline-Lite/releases?per_page=50" `
       -Headers @{ "User-Agent" = "GriplineLite-Installer" } -TimeoutSec 5
     $mine = [version]$Version
     $best = $null
     foreach ($r in $releases) {
-      if ($r.draft -or $r.tag_name -notmatch '^fh1-lite-v(\d+(\.\d+){1,3})$') { continue }
+      if ($r.draft -or $r.tag_name -notmatch '^v(\d+(\.\d+){1,3})$') { continue }
       $v = [version]$Matches[1]
       if ($v -gt $mine -and (-not $best -or $v -gt $best.V)) { $best = @{ V = $v; Url = $r.html_url } }
     }
