@@ -44,6 +44,10 @@ struct Tunable {
 Tunable tunables[] = {
     {"MaxTraffic", 0x8342C53C, true, false},       {"MinTraffic", 0x8342C594, true, false},
     {"MaxFestival", 0x8342C5C4, true, true},       {"MinFestival", 0x8342C47C, true, true},
+    // AI/Traffic/Density/* (sub_82C0D0xx lerps them by the time of day, cartype 2 traffic):
+    // the caps the traffic system itself uses, apart from the spawner's above.
+    {"Traffic/MaxTraffic", 0x8342C394, true, false},  {"Traffic/MinTraffic", 0x8342C3D0, true, false},
+    {"Traffic/MaxFestival", 0x8342C430, true, true},  {"Traffic/MinFestival", 0x8342C4AC, true, true},
     {"Interval/TrafficMin", 0x8342CE2C, false, false},
     {"Interval/TrafficMed", 0x8342CB38, false, false},
     {"Interval/TrafficMax", 0x8342CBEC, false, false},
