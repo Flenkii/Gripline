@@ -8,6 +8,8 @@
 #include <atomic>
 #include <cstdint>
 
+struct PPCContext;  // rex/ppc/context.h
+
 namespace forza::gripline {
 
 struct Settings {
@@ -20,6 +22,8 @@ struct Settings {
   std::atomic<float> dash_pitch{0.0f};     // degrees up
   std::atomic<int> traffic_level{2};       // 0 off, 1 less, 2 normal, 3 more, 4 lots, 5 max
   std::atomic<int> drivatar_level{2};      // the same for the Drivatars (festival cars)
+  std::atomic<bool> walking{true};         // F / left stick press gets out of the stopped car
+  std::atomic<float> walk_eye{1.60f};      // the walker's eye, metres above the ground
 };
 
 Settings& Get();
@@ -42,5 +46,18 @@ bool MenuOpen();
 // Called from DashCamPad: opens/closes the menu, reads its keys and the pad's d-pad.
 // Returns true while the menu is open.
 bool MenuPoll(uint16_t buttons);
+
+// The camera button of player 1's controller (RB, Back on a wheel; hooks/gripline_dashcam.cpp).
+uint16_t CameraButtonBit();
+// Back in the car: the Dashboard Cam on again if it was on when getting out.
+void DashCamRestore(bool on);
+
+// Walking (hooks/gripline_walking.cpp). WalkPad: player 1's pad after the Dashboard Cam; while
+// getting out, walking and getting in the game gets only the handbrake and START.
+void WalkPad(uint8_t* base, uint16_t& buttons, uint8_t triggers[2], int16_t sticks[4]);
+// The camera director's step: true when view and position are the walker's eye.
+bool WalkFrame(PPCContext& ctx, uint8_t* base, uint32_t director, float view[16], float position[3]);
+// Getting out, walking or getting in (the Dashboard Cam leaves the camera button alone).
+bool WalkingBusy();
 
 }  // namespace forza::gripline

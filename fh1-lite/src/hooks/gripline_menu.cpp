@@ -57,6 +57,7 @@ void Save() {
   std::fprintf(f, "dashcam=%d\ndash_forward=%.3f\ndash_up=%.3f\ndash_pitch=%.1f\n",
                int(settings.dashcam.load()), settings.dash_forward.load(), settings.dash_up.load(),
                settings.dash_pitch.load());
+  std::fprintf(f, "walking=%d\nwalk_eye=%.2f\n", int(settings.walking.load()), settings.walk_eye.load());
   std::fclose(f);
 }
 
@@ -76,6 +77,8 @@ constexpr Row kRows[] = {
     {"Dashcam zurücksetzen", "Reset Dashcam"},
     {"Verkehr", "Traffic"},
     {"Drivatare", "Drivatars"},
+    {"Walking (F / linker Stick)", "Walking (F / left stick)"},
+    {"Walking Augenhöhe", "Walking eye height"},
 };
 constexpr int kRowCount = int(sizeof(kRows) / sizeof(kRows[0]));
 int row = 0;
@@ -91,6 +94,8 @@ std::string Value(int r, bool de) {
     case 5: std::snprintf(text, sizeof(text), "%+.0f cm", settings.dash_up * 100.0f); return text;
     case 6: std::snprintf(text, sizeof(text), "%+.0f°", settings.dash_pitch.load()); return text;
     case 7: return de ? "Rechts drücken" : "Press Right";
+    case 10: return settings.walking ? (de ? "An" : "On") : (de ? "Aus" : "Off");
+    case 11: std::snprintf(text, sizeof(text), "%.2f m", settings.walk_eye.load()); return text;
     default: {
       static const char* kDe[] = {"Aus", "Wenig", "Normal", "Mehr", "Viel", "Maximal"};
       static const char* kEn[] = {"Off", "Less", "Normal", "More", "Lots", "Maximum"};
@@ -114,6 +119,8 @@ void Change(int r, int step) {
     case 6: add(settings.dash_pitch, step * 1.0f, -20.0f, 20.0f); break;
     case 8: settings.traffic_level = std::clamp(settings.traffic_level + step, 0, 5); break;
     case 9: settings.drivatar_level = std::clamp(settings.drivatar_level + step, 0, 5); break;
+    case 10: settings.walking = !settings.walking; break;
+    case 11: add(settings.walk_eye, step * 0.05f, 0.50f, 2.00f); break;
     default:
       if (step > 0) {
         settings.dash_forward = kDefaultForward;
@@ -141,7 +148,7 @@ void Draw() {
   if (!InCarView())
     body += de ? "\nTipp: Innenansicht wählen, dann siehst du Änderungen sofort."
                : "\nTip: pick the in-car view to see changes right away.";
-  HudShow("GRIPLINE LITE 0.9", body, 3600.0, false);
+  HudShow("GRIPLINE LITE 1.0", body, 3600.0, false);
 }
 
 bool MenuKeyPressed() {
@@ -187,6 +194,8 @@ void LoadSettings() {
       else if (k == "dash_forward") settings.dash_forward = std::clamp(v, -0.30f, 0.80f);
       else if (k == "dash_up") settings.dash_up = std::clamp(v, -0.30f, 0.30f);
       else if (k == "dash_pitch") settings.dash_pitch = std::clamp(v, -20.0f, 20.0f);
+      else if (k == "walking") settings.walking = v != 0;
+      else if (k == "walk_eye") settings.walk_eye = std::clamp(v, 0.50f, 2.00f);
     }
     std::fclose(f);
     REXLOG_INFO("Gripline: settings loaded from {}", kFile);

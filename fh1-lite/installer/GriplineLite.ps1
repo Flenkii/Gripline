@@ -10,12 +10,13 @@
 param([switch]$NoGui, [string]$Action = "", [string]$Project = "")
 
 $ErrorActionPreference = "Stop"
-$Version = "0.9"
+$Version = "1.0"
 $Marker = "Gripline Lite"
 $Here = Split-Path -Parent $MyInvocation.MyCommand.Path
 $Files = Join-Path (Split-Path -Parent $Here) "src\hooks"
 $HookFiles = @("gripline_settings.h", "gripline_wheel.cpp", "gripline_dashcam.cpp",
-               "gripline_menu.cpp", "gripline_traffic.cpp")
+               "gripline_menu.cpp", "gripline_traffic.cpp", "gripline_walking.cpp",
+               "gripline_walk_fade.h", "gripline_door_sounds.h")
 $German = (Get-UICulture).TwoLetterISOLanguageName -eq "de"
 
 function T([string]$de, [string]$en) { if ($German) { $de } else { $en } }
@@ -32,6 +33,7 @@ function Paths([string]$proj) {
   @{
     CMake = Join-Path $proj "CMakeLists.txt"
     Input = Join-Path $proj "src\kernel\input_autopress.cpp"
+    Hud = Join-Path $proj "src\platform\hud_overlay.cpp"
     Hooks = Join-Path $proj "src\hooks"
     Stamp = Join-Path $proj "gripline-lite.version"
     Backup = Join-Path $proj "gripline-lite-backup"
@@ -40,7 +42,7 @@ function Paths([string]$proj) {
 
 function Valid-Project([string]$proj) {
   $p = Paths $proj
-  (Test-Path $p.CMake) -and (Test-Path $p.Input) -and (Test-Path (Join-Path $p.Hooks "camera_fov.cpp"))
+  (Test-Path $p.CMake) -and (Test-Path $p.Input) -and (Test-Path $p.Hud) -and (Test-Path (Join-Path $p.Hooks "camera_fov.cpp"))
 }
 
 function Read-Lines([string]$path) {
@@ -116,12 +118,14 @@ function Install([string]$proj) {
   New-Item -ItemType Directory -Force -Path $dir | Out-Null
   Copy-Item $p.CMake $dir
   Copy-Item $p.Input $dir
+  Copy-Item $p.Hud $dir
 
   $cmake = Read-Lines $p.CMake
   Remove-Patch $cmake.Lines "cmake"
   $at = Find-One $cmake.Lines '^\s*src/hooks/camera_fov\.cpp\s*$' "src/hooks/camera_fov.cpp"
   $indent = ($cmake.Lines[$at] -replace '\S.*$', '')
-  $add = @("gripline_wheel.cpp", "gripline_dashcam.cpp", "gripline_menu.cpp", "gripline_traffic.cpp") |
+  $add = @("gripline_wheel.cpp", "gripline_dashcam.cpp", "gripline_menu.cpp", "gripline_traffic.cpp",
+           "gripline_walking.cpp") |
          ForEach-Object { "${indent}src/hooks/$_" }
   $cmake.Lines.InsertRange($at + 1, [string[]]$add)
 
@@ -133,6 +137,7 @@ function Install([string]$proj) {
   $i = Find-One $l 'state\.buttons = forza::CustomRacePad\(state\.buttons\);' "CustomRacePad"
   $l.InsertRange($i + 1, [string[]]@(
     '    if (!block_all) state.buttons = forza::gripline::DashCamPad(base, state.buttons);  // Gripline Lite',
+    '    if (!block_all) forza::gripline::WalkPad(base, state.buttons, state.triggers, state.sticks);  // Gripline Lite',
     '    if (forza::gripline::MenuOpen()) state.buttons = 0, state.sticks[2] = state.sticks[3] = 0;  // Gripline Lite'))
   $i = Find-One $l 'Capabilities\(sdk, ctx, base, forza::input_caps::CapabilitiesArgs\(ctx\)\);' "CapabilitiesArgs"
   $l.Insert($i + 1, '  forza::gripline::NoteCaps(base, ctx.r3.u32, gripline_caps);  // Gripline Lite')
@@ -141,10 +146,20 @@ function Install([string]$proj) {
   $l.Insert($i + 1, '  forza::gripline::NoteCaps(base, ctx.r3.u32, gripline_caps);  // Gripline Lite')
   $l.Insert($i, '  const uint32_t gripline_caps = ctx.r6.u32;  // Gripline Lite')
 
+  # The walking fade to black: drawn with the HUD overlay's ImGui drawer.
+  $hud = Read-Lines $p.Hud
+  Remove-Patch $hud.Lines "input"
+  $h = $hud.Lines
+  $i = Find-One $h '^#include "benchmark\.h"' "benchmark.h"
+  $h.Insert($i + 1, '#include "../hooks/gripline_walk_fade.h"  // Gripline Lite')
+  $i = Find-One $h '^\s*benchmark_dialog->Update\(\);\s*$' "InstallHud"
+  $h.Insert($i + 1, '  forza::gripline::InstallFade(drawer, app_context);  // Gripline Lite')
+
   # All anchors found: write everything.
   foreach ($f in $HookFiles) { Copy-Item (Join-Path $Files $f) (Join-Path $p.Hooks $f) -Force }
   Write-Lines $p.CMake $cmake
   Write-Lines $p.Input $in
+  Write-Lines $p.Hud $hud
   Set-Content -Path $p.Stamp -Value $Version -Encoding ASCII
 }
 
@@ -157,6 +172,11 @@ function Uninstall([string]$proj) {
   $in = Read-Lines $p.Input
   Remove-Patch $in.Lines "input"
   Write-Lines $p.Input $in
+  if (Test-Path $p.Hud) {
+    $hud = Read-Lines $p.Hud
+    Remove-Patch $hud.Lines "input"
+    Write-Lines $p.Hud $hud
+  }
   foreach ($f in $HookFiles) { Remove-Item (Join-Path $p.Hooks $f) -ErrorAction SilentlyContinue }
   Remove-Item $p.Stamp -ErrorAction SilentlyContinue
 }

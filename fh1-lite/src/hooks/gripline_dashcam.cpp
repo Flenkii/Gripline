@@ -104,6 +104,12 @@ uint16_t CameraButton() {
 }
 }  // namespace
 
+uint16_t forza::gripline::CameraButtonBit() { return CameraButton(); }
+void forza::gripline::DashCamRestore(bool on) {
+  dash_on.store(on && Get().dashcam, std::memory_order_relaxed);
+  if (on) REXLOG_INFO("Gripline: Dashboard Cam on again (back in the car)");
+}
+
 bool forza::gripline::DashCamDrawn() { return dash_drawn.load(std::memory_order_relaxed); }
 bool forza::gripline::InCarView() { return in_car.load(std::memory_order_relaxed); }
 
@@ -116,6 +122,11 @@ uint16_t forza::gripline::DashCamPad(uint8_t* base, uint16_t buttons) {
   if (MenuPoll(buttons)) {
     previous = buttons;
     return buttons;  // the menu is open: input_autopress.cpp takes the buttons from the game
+  }
+  if (WalkingBusy()) {  // walking (hooks/gripline_walking.cpp) has the pad
+    previous = buttons;
+    swallowed = 0;
+    return buttons;
   }
   const uint16_t button = CameraButton();
   const bool edge = (buttons & button) && !(previous & button);
@@ -189,6 +200,20 @@ extern "C" REX_FUNC(GriplineDirectorStep) {
   }
   GriplineDirectorStepOriginal(ctx, base);
   forza::gripline::ApplyTraffic(base);
+  {  // Walking (hooks/gripline_walking.cpp): the walker's eye in place of the camera
+    float walk_view[16], walk_pos[3];
+    if (forza::gripline::WalkFrame(ctx, base, director, walk_view, walk_pos)) {
+      dash_drawn.store(false, std::memory_order_relaxed);
+      applied.director = director;
+      std::memcpy(applied.original_view, forza::GuestPtr(base, director + kViewMatrix), 64);
+      std::memcpy(applied.original_pos, forza::GuestPtr(base, director + kPosition), 12);
+      for (int i = 0; i < 16; ++i) StoreFloat(base, director + kViewMatrix + 4 * i, walk_view[i]);
+      for (int i = 0; i < 3; ++i) StoreFloat(base, director + kPosition + 4 * i, walk_pos[i]);
+      std::memcpy(applied.posed_view, forza::GuestPtr(base, director + kViewMatrix), 64);
+      std::memcpy(applied.posed_pos, forza::GuestPtr(base, director + kPosition), 12);
+      return;
+    }
+  }
   const bool pose = dash_on.load(std::memory_order_relaxed) && forza::gripline::Get().dashcam &&
                     !forza::xr::CockpitActive() && Valid(director) &&
                     director == FirstViewDirector(base) && InCarCamera(base, director);
