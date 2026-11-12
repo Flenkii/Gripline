@@ -7,17 +7,32 @@
 // MaxFestival (7) and MinFestival (2) the Drivatars. AI/Spawning/Interval/TrafficMin/Med/Max
 // (0.5, 4, 20 s) space the spawns. The Gripline menu's levels scale these live; the game's own
 // values are kept from the first read and put back at "Normal".
+//
+// Those are only caps: how many cars the spawner wants comes from the road densities in
+// gametunablesettings AIOpenWorld.xml (<Density min max> per road type, per cartype traffic or
+// festival). sub_82C14C80 appends each parsed density (0x28 bytes, min at +0, max at +4) to its
+// list (a vector: begin, end, capacity); the parser keeps the cartype in r20 (2 traffic,
+// 1 festival). The hook remembers the lists and the game's values, and the levels scale them
+// live, so "More" and above really bring more cars.
 #include "gripline_settings.h"
 
 #include "../platform/guest_addr.h"
 #include "../platform/guest_memory.h"
 #include <rex/logging.h>
+#include <rex/ppc/context.h>
+#include <rex/ppc/func.h>
 #include <algorithm>
+#include <mutex>
+#include <vector>
 #include <cmath>
 #include <cstdint>
 #include <cstring>
 
 #if FORZA_TU4
+#define GriplineDensityAppend sub_82C14C80
+#define GriplineDensityAppendOriginal __imp__sub_82C14C80
+extern "C" REX_FUNC(GriplineDensityAppendOriginal);
+
 namespace {
 struct Tunable {
   const char* name;
@@ -55,7 +70,98 @@ void Store(uint8_t* base, uint32_t address, float v) {
   uint8_t* p = forza::GuestPtr(base, address);
   p[0] = uint8_t(bits >> 24), p[1] = uint8_t(bits >> 16), p[2] = uint8_t(bits >> 8), p[3] = uint8_t(bits);
 }
+uint32_t LoadU32(uint8_t* base, uint32_t address) {
+  const uint8_t* p = forza::GuestPtr(base, address);
+  return uint32_t(p[0]) << 24 | uint32_t(p[1]) << 16 | uint32_t(p[2]) << 8 | p[3];
+}
+
+// One parsed density list and the game's min/max of each of its entries.
+struct DensityList {
+  uint32_t vector;  // guest: begin, end, capacity
+  bool festival;
+  std::vector<float> stock;  // min, max, min, max, ...
+  float applied = 1.0f;      // the factor its entries carry now
+};
+constexpr uint32_t kDensitySize = 0x28;
+std::mutex density_mutex;
+std::vector<DensityList> density_lists;
+
+float DensityFactor(bool festival) {
+  auto& g = forza::gripline::Get();
+  return Factor(festival ? g.drivatar_level : g.traffic_level);
+}
+
+bool Near(float a, float b) { return std::fabs(a - b) <= 1e-4f + std::fabs(b) * 1e-4f; }
+
+// Puts the factor on one list; drops the list if its memory no longer holds what we wrote.
+bool ScaleList(uint8_t* base, DensityList& list, float f) {
+  const uint32_t begin = LoadU32(base, list.vector), end = LoadU32(base, list.vector + 4);
+  if (!begin || end < begin || (end - begin) / kDensitySize != list.stock.size() / 2) return false;
+  for (size_t i = 0; i < list.stock.size() / 2; ++i) {
+    const uint32_t e = begin + uint32_t(i) * kDensitySize;
+    if (!Near(Load(base, e), list.stock[2 * i] * list.applied) ||
+        !Near(Load(base, e + 4), list.stock[2 * i + 1] * list.applied))
+      return false;
+  }
+  for (size_t i = 0; i < list.stock.size() / 2; ++i) {
+    const uint32_t e = begin + uint32_t(i) * kDensitySize;
+    Store(base, e, list.stock[2 * i] * f);
+    Store(base, e + 4, list.stock[2 * i + 1] * f);
+  }
+  list.applied = f;
+  return true;
+}
+
+void ApplyDensities(uint8_t* base) {
+  std::lock_guard lock(density_mutex);
+  for (size_t i = 0; i < density_lists.size();) {
+    auto& list = density_lists[i];
+    const float f = DensityFactor(list.festival);
+    if (f == list.applied || ScaleList(base, list, f)) {
+      ++i;
+    } else {
+      density_lists.erase(density_lists.begin() + i);
+    }
+  }
+}
 }  // namespace
+
+// The AIOpenWorld.xml parser appends one <Density> (r4) to a cartype's list (r3).
+extern "C" REX_FUNC(GriplineDensityAppend) {
+  const uint32_t vector = ctx.r3.u32, density = ctx.r4.u32;
+  const uint32_t cartype = ctx.r20.u32;  // the parser's: 2 traffic, 1 festival
+  if ((cartype == 1 || cartype == 2) && vector && density) {
+    const bool festival = cartype == 1;
+    const float min = Load(base, density), max = Load(base, density + 4);
+    std::lock_guard lock(density_mutex);
+    DensityList* list = nullptr;
+    for (auto& l : density_lists)
+      if (l.vector == vector) list = &l;
+    const uint32_t begin = LoadU32(base, vector), end = LoadU32(base, vector + 4);
+    const size_t count = end >= begin ? (end - begin) / kDensitySize : 0;
+    if (!list || list->stock.size() / 2 != count) {
+      // A new list (or one the game rebuilt): start over with what it holds now.
+      std::erase_if(density_lists, [&](const DensityList& l) { return l.vector == vector; });
+      if (count == 0) {
+        density_lists.push_back({vector, festival, {}, 1.0f});
+        list = &density_lists.back();
+      }
+    }
+    if (list) {
+      const float f = DensityFactor(festival);
+      if (list->stock.empty()) list->applied = f;
+      if (Near(f, list->applied)) {
+        list->stock.push_back(min);
+        list->stock.push_back(max);
+        Store(base, density, min * f);
+        Store(base, density + 4, max * f);
+      } else {
+        std::erase_if(density_lists, [&](const DensityList& l) { return l.vector == vector; });
+      }
+    }
+  }
+  GriplineDensityAppendOriginal(ctx, base);
+}
 
 namespace forza::gripline {
 // Main loop, once a frame (the camera director's step).
@@ -81,8 +187,13 @@ void ApplyTraffic(uint8_t* base) {
     }
     if (now != want) Store(base, value, want);
   }
+  ApplyDensities(base);
   if (traffic != applied_traffic || drivatars != applied_drivatars) {
     applied_traffic = traffic, applied_drivatars = drivatars;
+    {
+      std::lock_guard lock(density_mutex);
+      REXLOG_INFO("Gripline: {} road density lists scaled", density_lists.size());
+    }
     REXLOG_INFO("Gripline: traffic level {} (max {:.0f} cars by day), Drivatar level {} (max {:.0f})",
                 traffic, Load(base, tunables[0].address + 8), drivatars,
                 Load(base, tunables[2].address + 8));
