@@ -21,6 +21,10 @@ void notify_fade_tag(unsigned tag);
 /* a card in a fixed colour (NOTIFY_COLOR_*, whatever the setting says); badge (UTF-8, may be NULL) goes after
    GRIPLINE in the title line, e.g. "WARNUNG" on red warning cards; long_hold = as long as a start card */
 void notify_show_tinted(const char *text, int color, const char *badge, int long_hold);
+/* V7.2 big card for important messages and errors: title ("\n" + subtitle) like a normal card, then body text
+   word-wrapped into up to 7 lines ("\n" = new line, "\n\n" = empty line). color -1 = from the settings,
+   hold_ms 0 = 20 s. Also logged in one line. Safe from any thread. */
+void notify_show_big(const char *title, const char *body, int color, const char *badge, unsigned hold_ms);
 
 /* Same, but for messages from game start: kept until the game has shown its first picture
    (a few seconds), then shown in the given order. Safe from any thread. */

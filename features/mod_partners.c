@@ -71,21 +71,6 @@ void mod_partners_detect(const wchar_t *azimuth_dir, ModVersionFn version_of) {
     }
 }
 
-static int mouse_card(char *out, unsigned size) {
-    int de = game && game_language_is_german(game);
-    const char *text;
-    if ((mouse_parts & (PART_KEYBOARD | PART_MENU_MOUSE)) == (PART_KEYBOARD | PART_MENU_MOUSE))
-        text = de ? "FH2 Mouse & Keyboard erkannt\nTastatur und Maus kommen von dort" : "FH2 Mouse & Keyboard found\nKeyboard and mouse come from it";
-    else if (mouse_parts & PART_KEYBOARD)
-        text = de ? "FH2 Mouse & Keyboard erkannt\nTastatur kommt von dort" : "FH2 Mouse & Keyboard found\nThe keyboard comes from it";
-    else
-        text = de ? "FH2 Mouse & Keyboard erkannt\nMaus kommt von dort" : "FH2 Mouse & Keyboard found\nThe mouse comes from it";
-    unsigned n = 0;
-    while (text[n] && n + 1 < size) out[n] = text[n], ++n;
-    out[n] = 0;
-    return n > 0;
-}
-
 void mod_partners_start(unsigned char *game_image) {
     game = game_image;
     if (!mouse_found) return;
@@ -104,7 +89,7 @@ void mod_partners_start(unsigned char *game_image) {
     if (mouse_parts & PART_MENU_MOUSE) log_append("PARTNERS: its cursor works the menus - Gripline menu mouse off.\r\n");
     if (mouse_parts & PART_DRIVE_LOOK) log_append("PARTNERS: its free look turns the camera - Gripline mouse look off.\r\n");
     log_append("PARTNERS: Gripline's own hotkeys (noclip, freecam, walking, F8 ...) keep working.\r\n");
-    if (notify_kind_on(NOTIFY_KIND_START)) notify_show_deferred_call(mouse_card);
+    /* V7.2 calm start: no own card any more (Marvin 14.11.2026), the log above says what moved */
 }
 
 static void put(char *out, unsigned size, unsigned *n, const char *text) {

@@ -552,15 +552,29 @@ static void noclip_install(void) {
 }
 
 /* "Gripline V7 active" + "F5 keys, F6 noclip, F7 freecam, F8 menu" (short: the card is narrow) */
+/* V7.2 calm start: ONE card, "Gripline V7.x active" and the key of the Gripline menu (as bound now; the
+   key menu can change it). The other keys are in that menu; partner mods and nitro only go to the log. */
 static int start_card(char *out, unsigned size) {
-    static const char head[] = "Gripline " GRIPLINE_VERSION " active\n";
-    unsigned n = 0;
-    while (head[n] && n + 1 < size) {
-        out[n] = head[n];
-        ++n;
+    int de = game && game_language_is_german(game);
+    char key[8] = {0};
+    const char *key_name = NULL;
+    int index = keyboard_binding_find(L"KeyMenu");
+    if (index >= 0) {
+        unsigned char vk[4] = {0};
+        keyboard_binding_vks((unsigned)index, vk);
+        if (vk[0]) key_name = keyboard_key_ini_name(vk[0], key);
     }
+    unsigned n = 0;
+    const char *parts[4] = {"Gripline " GRIPLINE_VERSION, de ? " aktiv" : " active", NULL, NULL};
+    if (key_name && *key_name) {
+        parts[2] = "\n";
+        parts[3] = key_name;
+    }
+    for (unsigned p = 0; p < 4; ++p)
+        for (const char *t = parts[p]; t && *t && n + 1 < size; ++t) out[n++] = *t;
+    const char *tail = key_name && *key_name ? (de ? ": Gripline-Menü" : ": Gripline menu") : "";
+    for (const char *t = tail; *t && n + 1 < size; ++t) out[n++] = *t;
     out[n] = 0;
-    if (n + 1 < size) keyboard_start_keys(out + n, size - n);
     return 1;
 }
 
@@ -569,9 +583,13 @@ static int load_guard_card(char *out, unsigned size) {
     (void)out;
     (void)size;
     int de = game && game_language_is_german(game);
-    notify_show_tinted(de ? "Verkehr auf Original gesetzt\nLetzter Start hing beim Laden"
-                          : "Traffic set to Original\nLast start hung while loading",
-                       NOTIFY_COLOR_ORANGE, de ? "HINWEIS" : "NOTE", 1);
+    notify_show_big(de ? "Verkehr auf Original gesetzt\nLetzter Start hing beim Laden"
+                       : "Traffic set to Original\nLast start hung while loading",
+                    de ? "Der letzte Spielstart blieb beim Laden hängen. Zur Sicherheit fährt jetzt nur der normale "
+                         "Verkehr des Spiels.\n\nMehr Verkehr kannst du im Gripline-Menü wieder einstellen."
+                       : "The last game start got stuck while loading. To be safe, only the game's normal traffic "
+                         "drives now.\n\nYou can turn more traffic back on in the Gripline menu.",
+                    NOTIFY_COLOR_ORANGE, de ? "HINWEIS" : "NOTE", 0);
     return 0;
 }
 
@@ -580,9 +598,12 @@ static int ini_lines_card(char *out, unsigned size) {
     (void)out;
     (void)size;
     int de = game && game_language_is_german(game);
-    notify_show_tinted(de ? "Gripline.ini: Zeile übersprungen\nRest geladen, Details in Gripline.log"
-                          : "Gripline.ini: line skipped\nRest loaded, details in Gripline.log",
-                       NOTIFY_COLOR_ORANGE, de ? "HINWEIS" : "NOTE", 1);
+    notify_show_big(de ? "Gripline.ini: eine Zeile übersprungen" : "Gripline.ini: one line skipped",
+                    de ? "Eine Zeile in Gripline.ini war unverständlich und wurde ausgelassen. Alle anderen "
+                         "Einstellungen gelten.\n\nWelche Zeile: ganz oben in Gripline.log (IGNORED)."
+                       : "One line in Gripline.ini could not be read and was left out. All other settings "
+                         "are used.\n\nWhich line: at the top of Gripline.log (IGNORED).",
+                    NOTIFY_COLOR_ORANGE, de ? "HINWEIS" : "NOTE", 0);
     return 0;
 }
 
@@ -658,10 +679,7 @@ static void start_features(void) {
     if (!keyboard_pad_late()) platform_log("keyboard: not active (off in FH2_Keyboard.ini, Mapper running, FH2 Mouse & Keyboard drives, or no hook)");
     if (!notify_install_late()) platform_log("cards: could not hook the game picture");
     if (notify_kind_on(NOTIFY_KIND_START)) {
-        notify_show_deferred_call(start_card); /* the keys as bound now (the key menu can change them) */
-        /* own card "Press F8 to change your keys": only until this version's what's-new cards were seen,
-           later starts show just one card (the start card names F8 too) */
-        if (options.news_seen < GRIPLINE_NEWS_VERSION) notify_show_deferred_call(key_menu_start_card);
+        notify_show_deferred_call(start_card); /* V7.2: the only start card; the menu key as bound now */
     }
     InterlockedExchange(&started, 1);
     if (row_count) sync_rows();

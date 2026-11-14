@@ -432,14 +432,15 @@ static void show_news(void) {
         if (save_news_seen()) log_append("LOGBOOK: what's-new cards hidden (CardsHidden), NewsSeen saved.\r\n");
         return;
     }
-    const char *badge = de ? "NEU IN V7.1" : "NEW IN V7.1";
-    /* the last one shown ends up on top */
-    notify_show_tinted(de ? "Maus im Menü\nEsc: Kacheln anklicken, Rad, Rechtsklick" : "Mouse in the menus\nEsc: click tiles, wheel, right click",
-                       NOTIFY_COLOR_GREEN, badge, 1);
-    notify_show_tinted(de ? "Maus-Blick im Auto\nMaus bewegen = umschauen" : "Mouse look in the car\nMove the mouse to look around",
-                       NOTIFY_COLOR_GREEN, badge, 1);
-    notify_show_tinted(de ? "Laufen, weicher\nDucken (Strg), Handkamera (F8)" : "Smoother walking\nCrouch (Ctrl), handheld camera (F8)",
-                       NOTIFY_COLOR_GREEN, badge, 1);
+    /* V7.2: one big card instead of three small ones */
+    notify_show_big(de ? "Neu in Gripline " GRIPLINE_VERSION : "New in Gripline " GRIPLINE_VERSION,
+                    de ? "Maus im Menü: Esc, dann Kacheln anklicken, Rad, Rechtsklick\n"
+                         "Maus-Blick im Auto: Maus bewegen = umschauen\n"
+                         "Laufen weicher: Ducken (Strg), Handkamera (F8)"
+                       : "Mouse in the menus: Esc, then click tiles, wheel, right click\n"
+                         "Mouse look in the car: move the mouse to look around\n"
+                         "Smoother walking: crouch (Ctrl), handheld camera (F8)",
+                    NOTIFY_COLOR_GREEN, de ? "NEU" : "NEW", 0);
     if (save_news_seen()) log_append("LOGBOOK: what's-new cards shown, NewsSeen saved.\r\n");
     else log_append("LOGBOOK: what's-new cards shown, but Gripline.ini could not be written.\r\n");
 }
