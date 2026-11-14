@@ -143,7 +143,10 @@ check(all(re.fullmatch(r'[A-Za-z0-9_]+', k) for k in keys), 'keys letters/digits
 check(all(r['label'] for r in rows), 'every row has a label')
 check(not any(r['label'] in ('Traffic: Preset', 'Traffic: Amount') for r in rows),
       'traffic preset and amount are not numbered sliders any more')
-check(seen['pages'] == [('Traffic', 'Gripline Traffic')], 'Traffic page with the presets by name: %r' % (seen['pages'],))
+check(seen['pages'] == [('Traffic', 'Gripline Traffic'), ('F8Mouse', 'Gripline Mouse'), ('F8Walking', 'Gripline Walking'),
+                        ('F8Driving', 'Gripline Driving'), ('F8Summon', 'Gripline Summon & Online'), ('F8Cards', 'Gripline Cards'),
+                        ('F8Logbook', 'Gripline Logbook')],
+      'Traffic page + the six F8 pages (V7.1 Mods page mirror): %r' % (seen['pages'],))
 check(any(r['kind'] == 0 for r in rows), 'on/off rows')
 check(any(r['restart'] for r in rows), 'restart rows marked')
 color = [r for r in rows if r['label'] == 'Gripline: Card Colour']

@@ -16,4 +16,21 @@ void key_menu_start(void);
 int key_menu_pad_input(unsigned char *gamepad);
 /* NotifyTextFn for notify_show_deferred_call: own start card naming the menu key */
 int key_menu_start_card(char *out, unsigned size);
+
+/* V7.1: the F8 pages as pages under MODS > Installed mods > Gripline (texts in the game language). */
+#define KEY_MENU_MIRROR_PAGES 6
+#define KEY_MENU_MIRROR_KEY 12
+enum { KEY_MENU_MIRROR_NORMAL, KEY_MENU_MIRROR_DIM, KEY_MENU_MIRROR_HEADING };
+typedef struct {
+    char label[128], value[96]; /* UTF-8 */
+    char key[KEY_MENU_MIRROR_KEY]; /* empty: nothing to choose */
+    int style;                     /* KEY_MENU_MIRROR_* */
+} KeyMenuMirrorRow;
+const char *key_menu_mirror_title(unsigned page);       /* page title (English, fixed at the start) */
+const char *key_menu_mirror_label(unsigned page);       /* its row on Gripline's own page */
+const char *key_menu_mirror_description(unsigned page);
+/* rows of `page` as they are now; returns how many */
+unsigned key_menu_mirror_rows(unsigned page, KeyMenuMirrorRow *out, unsigned capacity);
+/* A on a row: does what Enter does in F8 (saves, card). Returns 1 if the row was found. */
+int key_menu_mirror_choose(const char *key);
 #endif

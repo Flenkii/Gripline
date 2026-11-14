@@ -410,6 +410,85 @@ static void add_traffic_page(void) {
     if (!api->add_page(mod, &page)) platform_log("could not add the Traffic page");
 }
 
+/* ------------------------------------------------------------------ F8 pages (V7.1) */
+
+/* The F8 menu's pages under MODS > Installed mods > Gripline (key_menu.c keeps rows and actions,
+   so both menus stay the same). Titles are fixed at the start (English), rows follow the game language. */
+#define MIRROR_PAGE_ROWS 48
+static const char *const mirror_keys[KEY_MENU_MIRROR_PAGES] = {"F8Mouse", "F8Walking", "F8Driving", "F8Summon", "F8Cards", "F8Logbook"};
+static KeyMenuMirrorRow mirror_rows[MIRROR_PAGE_ROWS];
+
+static int mirror_page_index(const char *page_key) {
+    for (unsigned p = 0; p < KEY_MENU_MIRROR_PAGES; ++p) {
+        const char *a = mirror_keys[p], *b = page_key;
+        while (*a && *a == *b) ++a, ++b;
+        if (!*a && !*b) return (int)p;
+    }
+    return -1;
+}
+
+static void build_mirror_page(unsigned page) {
+    if (!api || api->api_version < 8 || !api->set_page_rows || page >= KEY_MENU_MIRROR_PAGES) return;
+    static FH2PageRow rows[MIRROR_PAGE_ROWS];
+    unsigned count = started ? key_menu_mirror_rows(page, mirror_rows, MIRROR_PAGE_ROWS) : 0;
+    int german = game && game_language_is_german(game);
+    const char *now = german ? "Wird gespeichert - dieselbe Einstellung wie im F8-Menü." : "Saved - the same setting as in the F8 menu.";
+    memset(rows, 0, sizeof(rows));
+    for (unsigned i = 0; i < count; ++i) {
+        rows[i].size = sizeof(FH2PageRow);
+        rows[i].key = mirror_rows[i].key[0] ? mirror_rows[i].key : NULL;
+        rows[i].label = mirror_rows[i].label;
+        rows[i].value = mirror_rows[i].value[0] ? mirror_rows[i].value : NULL;
+        rows[i].style = mirror_rows[i].style == KEY_MENU_MIRROR_HEADING ? FH2_ROW_HEADING
+                      : mirror_rows[i].style == KEY_MENU_MIRROR_DIM   ? FH2_ROW_DIM
+                                                                      : FH2_ROW_NORMAL;
+        if (rows[i].key) {
+            rows[i].description = key_menu_mirror_description(page);
+            rows[i].footer = now;
+        }
+    }
+    if (!count) { /* the game is still loading */
+        rows[0].size = sizeof(FH2PageRow);
+        rows[0].label = german ? "Gripline startet noch ..." : "Gripline is still starting ...";
+        rows[0].style = FH2_ROW_DIM;
+        count = 1;
+    }
+    api->set_page_rows(mod, mirror_keys[page], rows, count);
+}
+
+static void on_mirror_open(void *user, const char *page_key) {
+    (void)user;
+    int page = mirror_page_index(page_key);
+    if (page >= 0) build_mirror_page((unsigned)page);
+}
+
+static void on_mirror_select(void *user, const char *page_key, const char *row_key) {
+    (void)user;
+    int page = mirror_page_index(page_key);
+    if (page < 0 || !started || !row_key) return;
+    key_menu_mirror_choose(row_key);
+    build_mirror_page((unsigned)page);
+    sync_rows(); /* telemetry and others are rows on the Mods page too */
+}
+
+static void add_mirror_pages(void) {
+    if (api->api_version < 8 || !api->add_page || !api->set_page_rows) {
+        platform_log("platform older than 2.7.0: the F8 pages only in the F8 menu");
+        return;
+    }
+    static FH2Page pages[KEY_MENU_MIRROR_PAGES];
+    for (unsigned p = 0; p < KEY_MENU_MIRROR_PAGES; ++p) {
+        pages[p].size = sizeof(FH2Page);
+        pages[p].key = mirror_keys[p];
+        pages[p].title = key_menu_mirror_title(p);
+        pages[p].label = key_menu_mirror_label(p);
+        pages[p].description = key_menu_mirror_description(p);
+        pages[p].on_open = on_mirror_open;
+        pages[p].on_select = on_mirror_select;
+        if (!api->add_page(mod, &pages[p])) platform_log("could not add an F8 page");
+    }
+}
+
 /* ------------------------------------------------------------------ start */
 
 /* Azimuth 1.0.3 drives the wheel (launcher, data\azimuth.ini [launcher] wheel_rotation); the cockpit
@@ -623,7 +702,7 @@ FH2MOD_EXPORT int fh2mod_init(const FH2ModApi *platform) {
     info.check_updates = 0;
     info.description = "Immersion for Forza Horizon 2: walk on foot, dashboard cam and 1:1 wheel, keyboard and mouse, "
                        "live telemetry, world options. Runs next to Extra Options and FH2MP. "
-                       "Short list of settings here - press F8 in the game for all of them.";
+                       "Settings here and on the pages below (the same as the F8 menu in the game, except key bindings).";
     mod = api->register_mod(&info);
     if (!mod) return 1;
     if (!find_folders()) {
@@ -644,6 +723,7 @@ FH2MOD_EXPORT int fh2mod_init(const FH2ModApi *platform) {
     }
     add_rows();
     add_traffic_page();
+    add_mirror_pages();
     HANDLE thread = CreateThread(NULL, 0, start_thread, NULL, 0, NULL);
     if (!thread) {
         platform_log("could not start - no thread");
