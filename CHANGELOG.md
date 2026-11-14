@@ -4,7 +4,8 @@ What changed for players, newest first. Every version is on the [Releases](../..
 (Technical details: [docs/TECHNICAL_HISTORY.md](docs/TECHNICAL_HISTORY.md).)
 
 ## V7.1 *(next release)*
-- **Mouse in the game's menus** – click tiles, wheel for tabs and lists, right click = back.
+- **Mouse in the game's menus** – click tiles, wheel for tabs and lists, right click = back. Setting in F8: On / Only when moved / Off.
+- **The F8 settings in the game's own menus too**: MODS › Installed mods › Gripline has pages for mouse, walking, driving, summon & online, cards and logbook (key bindings stay in F8).
 - **Mouse look in the car**, with its own sensitivity setting (F8).
 - **Smoother walking** – easing, crouch, handheld camera, mouse look; a **walking speedometer** with three looks.
 - **Summon your car** while walking (**G** / controller **X**): it drives to you by itself.

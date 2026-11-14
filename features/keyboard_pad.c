@@ -66,7 +66,7 @@ static int mouse_dead = 30;   /* [Keyboard] MouseDeadZone: percent of the game's
 static int mouse_center;      /* [Keyboard] MouseCenter: seconds without mouse movement until the wheel turns back straight, 0 = never */
 static volatile int walk_mouse = 100;  /* [Keyboard] WalkMouseLook: walking's mouse look in percent, 0 = off (V7.1) */
 static volatile int drive_mouse = 100; /* [Keyboard] DriveMouseLook: mouse look in the car in percent, 0 = off (V7.1) */
-static int menu_mouse = 1;    /* [Keyboard] MenuMouse: mouse in the game's menus, 1 = on, 0 = off (V7.1) */
+static volatile int menu_mouse = 1; /* [Keyboard] MenuMouse: mouse in the game's menus, 1 = on, 2 = only once moved, 0 = off (V7.1/V7.1) */
 static volatile LONG values[KEY_SETTING_COUNT];
 static int loaded;
 static const wchar_t *const setting_keys[KEY_SETTING_COUNT] = {L"Enabled", L"SteerTime", L"ReturnTime",
@@ -465,6 +465,7 @@ static void settings_load(void) {
     drive_mouse = read_int(L"DriveMouseLook", 100);
     if (drive_mouse < 0 || drive_mouse > 300) drive_mouse = 100;
     menu_mouse = read_int(L"MenuMouse", 1);
+    if (menu_mouse < 0 || menu_mouse > 2) menu_mouse = 1;
     for (unsigned i = 0; i < ARRAY_COUNT(bindings); ++i) {
         wchar_t text[96];
         GetPrivateProfileStringW(L"Keyboard", bindings[i].key, bindings[i].defaults, text, 96, ini_path);
@@ -522,6 +523,14 @@ int keyboard_drive_mouse_look(void) {
 
 void keyboard_set_drive_mouse_look(int percent) {
     if (percent >= 0 && percent <= 300) drive_mouse = percent;
+}
+
+int keyboard_menu_mouse_mode(void) {
+    return menu_mouse;
+}
+
+void keyboard_set_menu_mouse_mode(int mode) {
+    if (mode >= 0 && mode <= 2) menu_mouse = mode;
 }
 
 const wchar_t *keyboard_ini_path(void) {

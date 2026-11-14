@@ -104,5 +104,12 @@ int keyboard_walk_mouse_look(void);
 void keyboard_set_walk_mouse_look(int percent);
 int keyboard_drive_mouse_look(void);
 void keyboard_set_drive_mouse_look(int percent);
+/* V7.1: [Keyboard] MenuMouse - mouse in the game's menus: 1 = on (default), 2 = pointer only once the mouse moves
+   (not when a menu opens), 0 = off (no pointer, no clicks, no wheel) */
+#define MENU_MOUSE_OFF 0
+#define MENU_MOUSE_ON 1
+#define MENU_MOUSE_MOVED 2
+int keyboard_menu_mouse_mode(void);
+void keyboard_set_menu_mouse_mode(int mode);
 
 #endif

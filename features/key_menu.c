@@ -36,7 +36,8 @@ enum { LEVEL_CLOSED, LEVEL_GROUPS, LEVEL_LIST, LEVEL_BINDING, LEVEL_CAPTURE, LEV
 
 /* first page: rows after the binding pages */
 enum { TOP_STYLE = 100, TOP_RESET = 101, TOP_MOUSE = 102, TOP_TELEMETRY = 103, TOP_WORLD = 104, TOP_LOGBOOK = 105, TOP_RECORDS = 106, TOP_REPORT = 108, TOP_DAMAGE = 109,
-       TOP_SETTINGS = 110, TOP_CARDS = 111, TOP_TRAFFIC = 112, TOP_CRUISE = 113, TOP_HANDHELD = 114, TOP_LOOK = 115, TOP_GAUGE = 116 };
+       TOP_SETTINGS = 110, TOP_CARDS = 111, TOP_TRAFFIC = 112, TOP_CRUISE = 113, TOP_HANDHELD = 114, TOP_LOOK = 115, TOP_GAUGE = 116,
+       TOP_MENU_MOUSE = 117 };
 
 /* settings page (V7): rows */
 enum { SET_COLOR, SET_STEERING, SET_VIEW_FORWARD, SET_VIEW_UP, SET_UPDATE, SET_SUMMON_STYLE, SET_SUMMON_SOUNDS, SET_NITRO };
@@ -82,6 +83,12 @@ static const int dead_values[DEAD_CHOICES] = {0, 10, 20, 30, 40, 50};
 static const wchar_t *const dead_names[DEAD_CHOICES] = {L"0 %", L"10 %", L"20 %", L"30 %", L"40 %", L"50 %"};
 static const wchar_t *const center_english[CENTER_CHOICES] = {L"Never", L"after 1 second", L"after 2 seconds",
                                                               L"after 3 seconds", L"after 5 seconds"};
+
+/* V7.1 mouse in the game's menus: FH2_Keyboard.ini MenuMouse, Enter steps On -> only once moved -> Off */
+#define MENU_MOUSE_CHOICES 3
+static const int menu_mouse_order[MENU_MOUSE_CHOICES] = {MENU_MOUSE_ON, MENU_MOUSE_MOVED, MENU_MOUSE_OFF};
+static const wchar_t *const menu_mouse_german[3] = {L"Aus", L"An", L"Nur bei Bewegung"};  /* by MenuMouse value */
+static const wchar_t *const menu_mouse_english[3] = {L"Off", L"On", L"Only when moved"};
 
 static const wchar_t *const style_names[NOTIFY_STYLE_COUNT] = {L"Classic", L"Enhanced", L"Overdrive"};
 
@@ -692,6 +699,8 @@ static void build_page(wchar_t *title) {
             row_add(tr(L"Maus-Lenkung (experimentell)", L"Mouse steering (experimental)"), tr(mouse_german[mouse_choice()], mouse_english[mouse_choice()]), 0,
                     TOP_MOUSE);
             row_add(tr(L"Maus-Blick: Empfindlichkeit", L"Mouse look: sensitivity"), L"›", 0, TOP_LOOK);
+            row_add(tr(L"Maus im Spielmenü", L"Mouse in the game menus"),
+                    tr(menu_mouse_german[keyboard_menu_mouse_mode()], menu_mouse_english[keyboard_menu_mouse_mode()]), 0, TOP_MENU_MOUSE);
             row_add(tr(L"Fahren & Daten", L"Driving & data"), L"", NOTIFY_ROW_SECTION, -1);
             row_add(tr(L"Live-Telemetrie", L"Live telemetry"), telemetry_enabled() ? tr(L"An", L"On") : tr(L"Aus", L"Off"), 0,
                     TOP_TELEMETRY);
@@ -956,7 +965,7 @@ static void build_page(wchar_t *title) {
                 }
                 row_add(m.german ? (imperial ? names_de_mph[i] : names_de[i]) : (imperial ? names_mph[i] : names_en[i]), text, 0, -1);
             }
-            row_add(confirm_clear ? tr(L"Sicher? Nochmal Enter", L"Sure? Enter again") : tr(L"Alle Rekorde löschen", L"Clear all records"),
+            row_add(confirm_clear ? tr(L"Sicher? Nochmal Enter/A", L"Sure? Enter/A again") : tr(L"Alle Rekorde löschen", L"Clear all records"),
                     L"", 0, 0);
             hint(0);
             break;
@@ -1027,7 +1036,12 @@ static void build_page(wchar_t *title) {
     }
 }
 
+static SRWLOCK menu_lock = SRWLOCK_INIT; /* V7.1: menu thread + Mods page callbacks (mirror below) */
+static volatile int mirror_level = -1; /* V7.1: F8's real level while a mirror call borrows m (pad input reads it) */
+static int mirror_quiet; /* V7.1: a Mods page row is being chosen - no F8 panel */
+
 static void show(void) {
+    if (mirror_quiet) return;
     wchar_t title[64];
     build_page(title);
     notify_panel_show(title, rows, row_count, 1);
@@ -1120,7 +1134,28 @@ static void choose(void) {
     if (action < 0) return;
     switch (m.level) {
         case LEVEL_GROUPS:
-            if (action == TOP_REPORT) {
+            if (action == TOP_MENU_MOUSE) {
+                int now = keyboard_menu_mouse_mode(), next = MENU_MOUSE_ON;
+                for (int i = 0; i < MENU_MOUSE_CHOICES; ++i)
+                    if (menu_mouse_order[i] == now) next = menu_mouse_order[(i + 1) % MENU_MOUSE_CHOICES];
+                keyboard_set_menu_mouse_mode(next);
+                int saved = save_mouse("MenuMouse", next);
+                static const wchar_t *const help_german[3] = {L"\nKein Zeiger, keine Klicks im Menü", L"\nZeiger erscheint beim Öffnen",
+                                                              L"\nZeiger erst, wenn du die Maus bewegst"};
+                static const wchar_t *const help_english[3] = {L"\nNo pointer, no clicks in the menus", L"\nPointer shows when a menu opens",
+                                                               L"\nPointer only once you move the mouse"};
+                wchar_t line[128];
+                unsigned n = wcopy(line, 0, 128, tr(L"Maus im Spielmenü: ", L"Mouse in the game menus: "));
+                n = wcopy(line, n, 128, tr(menu_mouse_german[next], menu_mouse_english[next]));
+                wcopy(line, n, 128, saved ? tr(help_german[next], help_english[next])
+                                          : tr(L"\nNur bis zum Spielende (nicht gespeichert)", L"\nUntil the game closes (not saved)"));
+                char text[192];
+                unsigned t = 0;
+                utf8(line, text, sizeof(text), &t);
+                text[t] = 0;
+                notify_show(text);
+                log_append_value("KEYMENU: mouse in the game menus ", next);
+            } else if (action == TOP_REPORT) {
                 report_create_lang(m.german);
             } else if (action == TOP_RESET) {
                 m.level = LEVEL_RESET_ALL;
@@ -1617,8 +1652,9 @@ int key_menu_pad_input(unsigned char *gamepad) {
     if (((buttons & 0x0008u) && !(buttons & 0x0040u)) || lx > 20000) bits |= PAD_RIGHT;
     InterlockedExchange(&pad_now, bits);
     InterlockedExchange64(&pad_tick, (LONG64)GetTickCount64());
-    int take = m.level != LEVEL_CLOSED || (buttons & 0x0040u);
-    if (m.level != LEVEL_CLOSED) {
+    int level = mirror_level >= 0 ? mirror_level : m.level;
+    int take = level != LEVEL_CLOSED || (buttons & 0x0040u);
+    if (level != LEVEL_CLOSED) {
         unsigned char zero[12] = {0}; /* buttons, triggers, sticks: nothing for the game */
         memory_copy(gamepad, zero, sizeof(zero));
     } else if (pad_swallow) {
@@ -1772,7 +1808,9 @@ static DWORD WINAPI menu_thread(LPVOID unused) {
     (void)unused;
     xinput_load();
     for (;;) {
+        AcquireSRWLockExclusive(&menu_lock);
         key_menu_tick(GetTickCount64());
+        ReleaseSRWLockExclusive(&menu_lock);
         Sleep(30);
     }
 }
@@ -1788,6 +1826,201 @@ void key_menu_start(void) {
     if (thread) CloseHandle(thread);
     else log_append("KEYMENU: no thread - key menu off.\r\n");
 #endif
+}
+
+
+/* ------------------------------------------------------------------ Mods page mirror (V7.1) */
+
+/* The F8 pages as pages under MODS > Installed mods > Gripline (plugin/gripline_plugin.c), for players
+   who use the game's own menus: the same rows, texts and actions as here (choose() does the work, so
+   both stay the same). Rows that are already settings rows on the Mods page are left out, and so is
+   everything about keys (a key has to be pressed on the keyboard). The menu thread and the game's UI
+   thread (page callbacks) share the state through menu_lock. */
+
+#define MIRROR_ALL (-1)
+#define MIRROR_PARTS 3
+static const struct {
+    const char *title, *label, *description;
+    struct {
+        int level, only;  /* only: one action of that page (MIRROR_ALL = every row) */
+        int skip[4];      /* actions left out (on the Mods page already); ends at the first -1 or after 4 */
+        int no_info;      /* 1: the page's notes are about rows left out */
+    } parts[MIRROR_PARTS];
+} mirror_pages[KEY_MENU_MIRROR_PAGES] = {
+    {"Gripline Mouse", "Mouse & Look", "Mouse in the game menus, mouse steering and mouse look (F8 menu).",
+     {{LEVEL_GROUPS, TOP_MENU_MOUSE, {-1}, 0}, {LEVEL_MOUSE, MIRROR_ALL, {-1}, 0}, {LEVEL_LOOK, MIRROR_ALL, {-1}, 0}}},
+    {"Gripline Walking", "Walking", "Handheld camera and speedometer on foot (F8 menu).",
+     {{LEVEL_HANDHELD, MIRROR_ALL, {-1}, 0}, {LEVEL_GAUGE, MIRROR_ALL, {-1}, 0}, {0, 0, {-1}, 0}}},
+    {"Gripline Driving", "Driving", "Cruise control, no damage and the telemetry panel (F8 menu).",
+     {{LEVEL_CRUISE, MIRROR_ALL, {-1}, 0}, {LEVEL_DAMAGE, MIRROR_ALL, {-1}, 0}, {LEVEL_TELEMETRY, MIRROR_ALL, {0, -1}, 0}}},
+    {"Gripline Summon & Online", "Summon, Nitro & Updates", "Summon car, nitro online and the update notice (F8 menu).",
+     {{LEVEL_SETTINGS, MIRROR_ALL, {SET_COLOR, SET_STEERING, SET_VIEW_FORWARD, SET_VIEW_UP}, 1}, {0, 0, {-1}, 0}, {0, 0, {-1}, 0}}},
+    {"Gripline Cards", "Cards & Design", "Which cards show, and their design (F8 menu).",
+     {{LEVEL_CARDS, MIRROR_ALL, {-1}, 0}, {LEVEL_STYLE, MIRROR_ALL, {-1}, 0}, {0, 0, {-1}, 0}}},
+    {"Gripline Logbook", "Logbook & Records", "Distance driven, your cars and your records (F8 menu).",
+     {{LEVEL_LOGBOOK, MIRROR_ALL, {-1}, 0}, {LEVEL_RECORDS, MIRROR_ALL, {-1}, 0}, {0, 0, {-1}, 0}}},
+};
+
+const char *key_menu_mirror_title(unsigned page) {
+    return page < KEY_MENU_MIRROR_PAGES ? mirror_pages[page].title : "";
+}
+const char *key_menu_mirror_label(unsigned page) {
+    return page < KEY_MENU_MIRROR_PAGES ? mirror_pages[page].label : "";
+}
+const char *key_menu_mirror_description(unsigned page) {
+    return page < KEY_MENU_MIRROR_PAGES ? mirror_pages[page].description : "";
+}
+
+static int mirror_skipped(unsigned page, unsigned part, int action) {
+    const int *skip = mirror_pages[page].parts[part].skip;
+    for (unsigned i = 0; i < 4 && skip[i] >= 0; ++i)
+        if (skip[i] == action) return 1;
+    return 0;
+}
+
+static int mirror_has(const wchar_t *text, const wchar_t *part) {
+    for (; *text; ++text) {
+        unsigned i = 0;
+        while (part[i] && text[i] == part[i]) ++i;
+        if (!part[i]) return 1;
+    }
+    return 0;
+}
+
+/* keyboard words have no place on a controller page */
+static int mirror_keyboard_text(const wchar_t *text) {
+    return mirror_has(text, L"Enter") || mirror_has(text, L"◄") || mirror_has(text, L"Esc");
+}
+
+/* UTF-8 of `text` without a " (...)" part that names keys: "Einzeln (Enter = an/aus)" -> "Einzeln" */
+static void mirror_text(const wchar_t *text, char *out, unsigned capacity) {
+    wchar_t clean[64];
+    unsigned n = 0;
+    for (unsigned i = 0; text[i] && n + 1 < 64; ++i) {
+        if (text[i] == L' ' && text[i + 1] == L'(' && mirror_keyboard_text(text + i)) break;
+        clean[n++] = text[i];
+    }
+    clean[n] = 0;
+    unsigned t = 0;
+    if (capacity) out[0] = 0;
+    utf8(clean, out, capacity, &t);
+    if (t < capacity) out[t] = 0;
+}
+
+static void mirror_key(int level, int action, char out[KEY_MENU_MIRROR_KEY]) {
+    unsigned n = 0, a = (unsigned)action;
+    char d[8];
+    unsigned k = 0;
+    out[n++] = 'L';
+    out[n++] = (char)('A' + level);
+    do d[k++] = (char)('0' + a % 10); while ((a /= 10) && k < 8);
+    while (k && n + 1 < KEY_MENU_MIRROR_KEY) out[n++] = d[--k];
+    out[n] = 0;
+}
+
+static int mirror_german(void) {
+    unsigned char *image = keyboard_game_image();
+    return image && game_language_is_german(image);
+}
+
+/* builds `level` like the F8 menu does, without touching what F8 shows */
+static void mirror_build(int level, wchar_t *title) {
+    m.level = level;
+    m.german = mirror_german();
+    m.sel[level] = -1; /* no row marked as selected */
+    build_page(title);
+    for (unsigned i = 0; i < row_count; ++i)
+        if (rows[i].style == NOTIFY_ROW_SELECTED) rows[i].style = 0;
+}
+
+unsigned key_menu_mirror_rows(unsigned page, KeyMenuMirrorRow *out, unsigned capacity) {
+    if (page >= KEY_MENU_MIRROR_PAGES) return 0;
+    unsigned count = 0;
+    AcquireSRWLockExclusive(&menu_lock);
+    int saved_sel[LEVEL_COUNT];
+    int saved_level = m.level, saved_german = m.german;
+    mirror_level = saved_level;
+    memory_copy(saved_sel, m.sel, sizeof(saved_sel));
+    for (unsigned part = 0; part < MIRROR_PARTS; ++part) {
+        int level = mirror_pages[page].parts[part].level, only = mirror_pages[page].parts[part].only;
+        if (level <= LEVEL_CLOSED) continue;
+        wchar_t title[64];
+        mirror_build(level, title);
+        if (only == MIRROR_ALL && count < capacity) {
+            memory_copy(&out[count], &(KeyMenuMirrorRow){0}, sizeof(out[count]));
+            mirror_text(title, out[count].label, sizeof(out[count].label));
+            out[count++].style = KEY_MENU_MIRROR_HEADING;
+        }
+        for (unsigned i = 0; i < row_count && count < capacity; ++i) {
+            int action = row_action[i], style = rows[i].style;
+            if (style == NOTIFY_ROW_HINT) continue;
+            if (only != MIRROR_ALL && action != only) continue;
+            if (action >= 0 && mirror_skipped(page, part, action)) continue;
+            if (style == NOTIFY_ROW_INFO && (mirror_pages[page].parts[part].no_info || mirror_keyboard_text(rows[i].label))) continue;
+            KeyMenuMirrorRow *row = &out[count++];
+            memory_copy(row, &(KeyMenuMirrorRow){0}, sizeof(*row));
+            mirror_text(rows[i].label, row->label, sizeof(row->label));
+            mirror_text(rows[i].keys, row->value, sizeof(row->value));
+            if (row->value[0] == '\xe2' && row->value[1] == '\x80' && row->value[2] == '\xba') row->value[0] = 0; /* "›" opens a sub-page in F8 */
+            row->style = style == NOTIFY_ROW_SECTION ? KEY_MENU_MIRROR_HEADING
+                       : style == NOTIFY_ROW_INFO   ? KEY_MENU_MIRROR_DIM
+                                                    : KEY_MENU_MIRROR_NORMAL;
+            if (action >= 0) mirror_key(level, action, row->key);
+        }
+    }
+    m.level = saved_level, m.german = saved_german;
+    memory_copy(m.sel, saved_sel, sizeof(saved_sel));
+    mirror_level = -1;
+    if (m.level != LEVEL_CLOSED) {
+        wchar_t title[64];
+        build_page(title); /* F8's own rows back (its panel did not change) */
+    }
+    ReleaseSRWLockExclusive(&menu_lock);
+    return count;
+}
+
+int key_menu_mirror_choose(const char *key) {
+    if (!key || key[0] != 'L' || key[1] < 'A' + LEVEL_GROUPS || key[1] >= 'A' + LEVEL_COUNT || !key[2]) return 0;
+    int level = key[1] - 'A', action = 0;
+    for (const char *c = key + 2; *c; ++c) {
+        if (*c < '0' || *c > '9' || action > 100000) return 0;
+        action = action * 10 + (*c - '0');
+    }
+    /* only rows the pages list */
+    int listed = 0;
+    for (unsigned p = 0; p < KEY_MENU_MIRROR_PAGES && !listed; ++p)
+        for (unsigned part = 0; part < MIRROR_PARTS; ++part) {
+            int l = mirror_pages[p].parts[part].level, only = mirror_pages[p].parts[part].only;
+            if (l == level && (only == MIRROR_ALL || only == action) && !mirror_skipped(p, part, action)) listed = 1;
+        }
+    if (!listed) return 0;
+    AcquireSRWLockExclusive(&menu_lock);
+    if (!ini_path[0]) set_path();
+    int saved_sel[LEVEL_COUNT];
+    int saved_level = m.level, saved_german = m.german, saved_group = m.group, saved_binding = m.binding;
+    mirror_level = saved_level;
+    memory_copy(saved_sel, m.sel, sizeof(saved_sel));
+    wchar_t title[64];
+    mirror_build(level, title);
+    int k = 0, found = -1;
+    for (unsigned i = 0; i < row_count; ++i) {
+        if (row_action[i] < 0) continue;
+        if (row_action[i] == action) found = k;
+        ++k;
+    }
+    if (found >= 0) {
+        m.sel[level] = found;
+        mirror_quiet = 1;
+        choose();
+        mirror_quiet = 0;
+        log_append_value("KEYMENU: chosen on the Mods page, action ", action);
+    }
+    m.level = saved_level, m.german = saved_german, m.group = saved_group, m.binding = saved_binding;
+    memory_copy(m.sel, saved_sel, sizeof(saved_sel));
+    mirror_level = -1;
+    if (m.level != LEVEL_CLOSED) show(); /* F8 open as well: it shows the new value */
+    ReleaseSRWLockExclusive(&menu_lock);
+    return found >= 0;
 }
 
 #ifdef FH2_TWEAKS_TEST
@@ -1826,6 +2059,28 @@ __declspec(dllexport) int Fh2TestKeyMenuCover(void) {
             ++n;
         }
     return n;
+}
+/* Mods page mirror: "label|value|key|style\n" per row */
+__declspec(dllexport) int Fh2TestKeyMenuMirrorRows(unsigned page, char *out, unsigned size) {
+    static KeyMenuMirrorRow list[64];
+    unsigned count = key_menu_mirror_rows(page, list, 64), n = 0;
+    for (unsigned i = 0; i < count; ++i) {
+        const char *parts[3] = {list[i].label, list[i].value, list[i].key};
+        for (unsigned p = 0; p < 3; ++p) {
+            for (const char *c = parts[p]; *c && n + 4 < size; ++c) out[n++] = *c;
+            if (n + 4 < size) out[n++] = '|';
+        }
+        if (n + 4 < size) out[n++] = (char)('0' + list[i].style);
+        if (n + 4 < size) out[n++] = '\n';
+    }
+    if (size) out[n < size ? n : size - 1] = 0;
+    return (int)count;
+}
+__declspec(dllexport) int Fh2TestKeyMenuMirrorChoose(const char *key) {
+    return key_menu_mirror_choose(key);
+}
+__declspec(dllexport) int Fh2TestMenuMouseMode(void) {
+    return keyboard_menu_mouse_mode();
 }
 __declspec(dllexport) int Fh2TestKeyMenuSelected(wchar_t *label) {
     for (unsigned i = 0; i < row_count; ++i)

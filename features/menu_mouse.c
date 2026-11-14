@@ -476,7 +476,8 @@ static void frame(void) {
         last_w = 0;
         return;
     }
-    int moved = !last_w || (float)x != px || (float)y != py;
+    /* a menu just opened counts as a move (the pointer shows), except in "only once moved" mode (V7.1) */
+    int moved = last_w ? (float)x != px || (float)y != py : keyboard_menu_mouse_mode() != MENU_MOUSE_MOVED;
     px = (float)x, py = (float)y;
     last_w = w, last_h = h;
     ULONGLONG now = GetTickCount64();

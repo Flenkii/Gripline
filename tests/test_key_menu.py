@@ -118,8 +118,8 @@ check(ok == 1 and card_text == 'Press F8 to change your keys\nKey menu: arrows, 
 check(e.call('Fh2TestKeyboardBinding', 42, 0) == F8, 'KeyMenu = F8 (Standard)')
 
 press(F8)
-check(tick() == LEVEL_GROUPS and panel() == 25, f'F8 oeffnet das Menue (4 Abschnitte + 4 Seiten + Maus + Maus-Blick + Telemetrie + Tempomat + Fahrtenbuch + Rekorde + Welt + Verkehr + Kein Schaden + Einstellungen + Handkamera + Lauf-Tacho + Karten & Hinweise + Karten-Design + Problem-Bericht + Alle Tasten + Hinweis): {panel()}')
-check(e.call('Fh2TestNotifyPanelPixels', 1080) >= 76 + 25 * 26, f'V7.1 Hauptseite mit Lauf-Tacho behaelt die grossen Zeilen: {e.call("Fh2TestNotifyPanelPixels", 1080)} px')
+check(tick() == LEVEL_GROUPS and panel() == 26, f'F8 oeffnet das Menue (4 Abschnitte + 4 Seiten + Maus + Maus-Blick + Maus im Spielmenue + Telemetrie + Tempomat + Fahrtenbuch + Rekorde + Welt + Verkehr + Kein Schaden + Einstellungen + Handkamera + Lauf-Tacho + Karten & Hinweise + Karten-Design + Problem-Bericht + Alle Tasten + Hinweis): {panel()}')
+check(e.call('Fh2TestNotifyPanelPixels', 1080) >= 76 + 26 * 26, f'V7.1 Hauptseite mit Lauf-Tacho und Maus im Spielmenue behaelt die grossen Zeilen: {e.call("Fh2TestNotifyPanelPixels", 1080)} px')
 top = panel_rows()
 check(top.get('Keys & controls') == '' and top.get('Driving & data') == '' and top.get('World & cars') == '' and top.get('Gripline') == '',
       f'vier Abschnitte: {list(top)}')
@@ -306,7 +306,7 @@ press(DOWN); press(0x25)
 check(panel_rows().get('Background opacity') == '90 %' and b'TelemetryOpacity=90' in open(os.path.join(root, 'Gripline.ini'), 'rb').read(), 'Deckkraft 90 % gespeichert')
 press(DOWN); press(ENTER)
 check(panel_rows().get('Size') == '115 %' and b'TelemetrySize=115' in open(os.path.join(root, 'Gripline.ini'), 'rb').read(), 'Groesse 115 % gespeichert')
-press(ESC); press(UP); press(UP); press(ENTER)
+press(ESC); press(UP); press(UP); press(UP); press(ENTER)  # Live telemetry -> Mouse in the game menus -> Mouse look -> Mouse steering
 for _ in range(10): press(DOWN)
 check(selected() == '40 %', selected())
 press(ENTER)
@@ -388,7 +388,7 @@ press(ENTER)
 rows = panel_rows()
 check(rows.get('0-100 km/h') == '\u2013' and 'Clear all records' in rows, f'Rekorde: {rows}')
 press(ENTER)
-check('Sure? Enter again' in panel_rows(), 'Rekorde loeschen fragt nach')
+check('Sure? Enter/A again' in panel_rows(), 'Rekorde loeschen fragt nach')
 press(ESC)
 check('Own sprint' not in rows, f'Eigener Sprint ist weg: {rows}')
 press(ESC)
@@ -505,6 +505,71 @@ for stem, want in [('NIS_GTR_12', "Nissan GTR '12"), ('CHE_CorvetteStingray_14',
                    ('DOD_Challenger392_H2_12', "Dodge Challenger392 H2 '12"), ('VW_Type2_63', "Volkswagen Type2 '63"),
                    ('fer_f142_10', "Ferrari f142 '10")]:
     check(pretty(stem) == want, f'Autoname {stem}: {pretty(stem)!r}')
+
+# V7.1: mouse in the game menus (FH2_Keyboard.ini MenuMouse 1 -> 2 -> 0 -> 1)
+check(e.call('Fh2TestMenuMouseMode') == 1, 'Maus im Spielmenue: Standard An')
+press(0x79)
+check(goto('Mouse in the game menus'), selected())
+check(panel_rows().get('Mouse in the game menus') == 'On', f'Zeile zeigt An: {panel_rows()}')
+press(ENTER)
+check(panel_rows().get('Mouse in the game menus') == 'Only when moved' and 'MenuMouse=2\r\n' in ini() and e.call('Fh2TestMenuMouseMode') == 2,
+      'Enter: nur bei Bewegung, gespeichert')
+press(ENTER)
+check(panel_rows().get('Mouse in the game menus') == 'Off' and 'MenuMouse=0\r\n' in ini() and e.call('Fh2TestMenuMouseMode') == 0, 'Enter: Aus')
+press(ENTER)
+check(panel_rows().get('Mouse in the game menus') == 'On' and 'MenuMouse=1\r\n' in ini(), 'Enter: wieder An')
+press(ESC)
+check(tick() == LEVEL_CLOSED, 'Maus im Spielmenue: zu')
+
+# V7.1: the F8 pages on MODS > Installed mods > Gripline (mirror)
+def mirror(page):
+    b = e.alloc(16384)
+    n = e.call('Fh2TestKeyMenuMirrorRows', page, b, 16384)
+    text = bytes(e.mu.mem_read(b, 16384)).split(b'\0')[0].decode('utf-8')
+    out = []
+    for line in text.split('\n')[:n]:
+        label, value, key, style = line.split('|')
+        out.append((label, value, key, int(style)))
+    return out
+def choose(key):
+    return e.call('Fh2TestKeyMenuMirrorChoose', e.put_bytes(key.encode() + b'\0'))
+pages = [mirror(p) for p in range(6)]
+check(all(pages), 'sechs Seiten mit Zeilen')
+allrows = [r for p in pages for r in p]
+check(not any('Enter' in r[0] or '◄' in r[0] or 'Esc' in r[0] for r in allrows if r[3] != 0 or not r[2]),
+      f'keine Tastatur-Hinweise: {[r[0] for r in allrows if "Enter" in r[0] or "Esc" in r[0]]}')
+labels = [r[0] for r in allrows]
+check('Card colour' not in labels and 'Steering animation 1:1' not in labels and 'Telemetry panel' not in labels,
+      'Zeilen der Mods-Seite nicht doppelt')
+check(not any(k in labels for k in ('Throttle', 'Reset all keys to default')), 'keine Tastenbelegung')
+mouse = {r[0]: r for r in pages[0]}
+check(mouse.get('Mouse in the game menus', ('', ''))[1] == 'On', f'Maus-Seite: Maus im Spielmenue {pages[0][:3]}')
+before = panel()
+check(choose(mouse['Mouse in the game menus'][2]) == 1 and 'MenuMouse=2\r\n' in ini() and e.call('Fh2TestMenuMouseMode') == 2,
+      'A auf der Mods-Seite: nur bei Bewegung, gespeichert')
+check(tick() == LEVEL_CLOSED and panel() == before, 'F8-Menue bleibt zu, kein Panel')
+check({r[0]: r for r in mirror(0)}['Mouse in the game menus'][1] == 'Only when moved', 'Seite zeigt den neuen Wert')
+choose(mouse['Mouse in the game menus'][2]); choose(mouse['Mouse in the game menus'][2])
+check('MenuMouse=1\r\n' in ini(), 'zweimal weiter: wieder An')
+gentle = [r for r in pages[0] if r[0] == 'Gentle']
+check(gentle and choose(gentle[0][2]) == 1 and 'MouseSteering=25\r\n' in ini(), 'Maus-Lenkung Sanft ueber die Mods-Seite')
+off = [r for r in mirror(0) if r[0] == 'Off' and r[2]]
+choose(off[0][2])
+check('MouseSteering=0\r\n' in ini(), 'Maus-Lenkung wieder aus')
+check(choose('LB999') == 0 and choose('LF102') == 0 and choose('xyz') == 0, 'unbekannte / nicht gelistete Zeilen: nichts')
+walk = {r[0]: r for r in pages[1]}
+check('Walking: handheld camera' in walk and 'Walking: speedometer' in walk, f'Laufen-Seite: {list(walk)}')
+# F8 open at the same time: its page stays
+press(0x79)
+goto('Mouse in the game menus')
+sel = selected()
+choose(mouse['Mouse in the game menus'][2])
+check(tick() == LEVEL_GROUPS and selected() == sel and panel_rows().get('Mouse in the game menus') == 'Only when moved',
+      'F8 offen: bleibt auf seiner Zeile und zeigt den neuen Wert')
+press(ENTER); press(ENTER)
+check(panel_rows().get('Mouse in the game menus') == 'On' and 'MenuMouse=1\r\n' in ini(), 'F8 danach normal bedienbar (Aus, An)')
+press(ESC)
+check(tick() == LEVEL_CLOSED, 'zu')
 
 # "all to default" with confirmation
 press(0x79)
