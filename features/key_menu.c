@@ -15,6 +15,7 @@
 #include "no_damage.h"
 #include "nitro_link.h"
 #include "update_check.h"
+#include "mod_partners.h"
 #include "cruise.h"
 #include "summon.h"
 #include "walking.h"
@@ -40,7 +41,7 @@ enum { TOP_STYLE = 100, TOP_RESET = 101, TOP_MOUSE = 102, TOP_TELEMETRY = 103, T
        TOP_MENU_MOUSE = 117 };
 
 /* settings page (V7): rows */
-enum { SET_COLOR, SET_STEERING, SET_VIEW_FORWARD, SET_VIEW_UP, SET_UPDATE, SET_SUMMON_STYLE, SET_SUMMON_SOUNDS, SET_NITRO };
+enum { SET_COLOR, SET_STEERING, SET_VIEW_FORWARD, SET_VIEW_UP, SET_UPDATE, SET_SUMMON_STYLE, SET_SUMMON_SOUNDS, SET_NITRO, SET_YIELD };
 /* dashboard cam choices in cm (rig_settings.c ranges -20..80 and -20..30) */
 #define VIEW_STEP 5
 #define VIEW_FORWARD_MIN (-20)
@@ -698,9 +699,12 @@ static void build_page(wchar_t *title) {
             for (unsigned g = 0; g < GROUP_COUNT; ++g) row_add(tr(groups[g].german, groups[g].english), L"›", 0, (int)g);
             row_add(tr(L"Maus-Lenkung (experimentell)", L"Mouse steering (experimental)"), tr(mouse_german[mouse_choice()], mouse_english[mouse_choice()]), 0,
                     TOP_MOUSE);
-            row_add(tr(L"Maus-Blick: Empfindlichkeit", L"Mouse look: sensitivity"), L"›", 0, TOP_LOOK);
+            /* V7.2: a part another mod does (mod_partners.h) says so instead of Gripline's value */
+            row_add(tr(L"Maus-Blick: Empfindlichkeit", L"Mouse look: sensitivity"),
+                    mod_partners_takes_drive_look() ? tr(L"über FH2 Mouse", L"via FH2 Mouse") : L"›", 0, TOP_LOOK);
             row_add(tr(L"Maus im Spielmenü", L"Mouse in the game menus"),
-                    tr(menu_mouse_german[keyboard_menu_mouse_mode()], menu_mouse_english[keyboard_menu_mouse_mode()]), 0, TOP_MENU_MOUSE);
+                    mod_partners_takes_menu_mouse() ? tr(L"über FH2 Mouse", L"via FH2 Mouse")
+                    : tr(menu_mouse_german[keyboard_menu_mouse_mode()], menu_mouse_english[keyboard_menu_mouse_mode()]), 0, TOP_MENU_MOUSE);
             row_add(tr(L"Fahren & Daten", L"Driving & data"), L"", NOTIFY_ROW_SECTION, -1);
             row_add(tr(L"Live-Telemetrie", L"Live telemetry"), telemetry_enabled() ? tr(L"An", L"On") : tr(L"Aus", L"Off"), 0,
                     TOP_TELEMETRY);
@@ -753,7 +757,9 @@ static void build_page(wchar_t *title) {
             row_add(tr(L"Auto rufen: Autopilot-Sounds", L"Summon car: autopilot sounds"), summon_sounds() ? tr(L"An", L"On") : tr(L"Aus", L"Off"), 0,
                     SET_SUMMON_SOUNDS);
             row_add(tr(L"Nitro auch online", L"Nitro also online"), nitro_online_allowed() ? tr(L"An", L"On") : tr(L"Aus", L"Off"), 0, SET_NITRO);
-            row_add(tr(L"Lenkrad-Animation, Update:", L"Steering animation, update:"), L"", NOTIFY_ROW_INFO, -1);
+            row_add(tr(L"Andere Mods vorlassen", L"Let other mods take over"), mod_partners_yield() ? tr(L"An", L"On") : tr(L"Aus", L"Off"), 0,
+                    SET_YIELD);
+            row_add(tr(L"Lenkrad-Animation, Update, Mods:", L"Steering animation, update, mods:"), L"", NOTIFY_ROW_INFO, -1);
             row_add(tr(L"wirken nach Spiel-Neustart", L"take effect after a restart"), L"", NOTIFY_ROW_INFO, -1);
             hint(0);
             break;
@@ -1418,6 +1424,14 @@ static void choose(void) {
                                         : (m.german ? "Update-Hinweis aus\nGripline fragt GitHub nicht mehr" : "Update notice off\nGripline no longer asks GitHub"))
                                   : (m.german ? "Update-Hinweis\nNicht gespeichert" : "Update notice\nNot saved"));
                 log_append(on ? "KEYMENU: update check on\r\n" : "KEYMENU: update check off\r\n");
+            } else if (action == SET_YIELD) { /* V7.2: read at start (the keyboard is set up before the menu exists) */
+                int on = !mod_partners_yield();
+                int saved = save_gripline_digit("YieldToMods", on);
+                mod_partners_remember_yield(on);
+                notify_show(saved ? (on ? (m.german ? "Andere Mods vorlassen: an\nab dem nächsten Start" : "Let other mods take over: on\nfrom the next start")
+                                        : (m.german ? "Andere Mods vorlassen: aus\nGripline nutzt immer seine eigenen Teile" : "Let other mods take over: off\nGripline always uses its own parts"))
+                                  : (m.german ? "Andere Mods vorlassen\nNicht gespeichert" : "Let other mods take over\nNot saved"));
+                log_append(on ? "KEYMENU: yield to other mods on\r\n" : "KEYMENU: yield to other mods off\r\n");
             } else if (action == SET_NITRO) {
                 int on = !nitro_online_allowed();
                 int saved = save_gripline_digit("NitroOnline", on);

@@ -269,6 +269,33 @@ class Emu:
         self.mu.mem_write(buf, value.encode('utf-16le') + b'\0\0')
         return len(value)
 
+    def k_GetPrivateProfileIntW(self):
+        # the same lookup as GetPrivateProfileStringW, then the leading number (Windows: default when none)
+        section, key, default, path = (self.wstr(self.arg(0)), self.wstr(self.arg(1)), self.arg(2) & 0xffffffff,
+                                       self.host(self.wstr(self.arg(3))))
+        value = None
+        if os.path.exists(path):
+            cur = None
+            for line in open(path, encoding='latin1').read().replace('\r', '').split('\n'):
+                t = line.strip()
+                if t.startswith('[') and ']' in t:
+                    cur = t[1:t.index(']')].strip().lower()
+                    continue
+                if cur == section.lower() and '=' in t and not t.startswith(';'):
+                    k, v = t.split('=', 1)
+                    if k.strip().lower() == key.lower():
+                        value = v.strip()
+                        break
+        if value is None:
+            return default
+        digits = ''
+        for c in value:
+            if c.isdigit() or (c == '-' and not digits):
+                digits += c
+            else:
+                break
+        return (int(digits) & 0xffffffff) if digits not in ('', '-') else 0
+
     # ------------------------------------------------------------- misc kernel32
     def k_MultiByteToWideChar(self):
         src, n, dst, cap = self.arg(2), self.arg(3) & 0xffffffff, self.arg(4), self.arg(5) & 0xffffffff

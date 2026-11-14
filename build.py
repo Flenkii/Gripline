@@ -36,7 +36,7 @@ SOURCES = [
     # menu, cards and housekeeping
     "features/key_menu.c", "features/menu_mouse.c", "features/focus_guard.c", "features/notify.c",
     "features/rig_settings.c", "features/ini_edit.c", "features/ini_migrate.c",
-    "features/mod_scan.c", "features/version_check.c", "features/update_check.c", "features/report.c",
+    "features/mod_scan.c", "features/mod_partners.c", "features/version_check.c", "features/update_check.c", "features/report.c",
 ]
 
 

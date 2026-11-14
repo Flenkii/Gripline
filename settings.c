@@ -34,6 +34,7 @@ const SettingDefinition setting_definitions[] = {
     SETTING("Gripline", "SummonStyle", summon_style, SETTING_MASK),
     SETTING("Gripline", "SummonSounds", summon_sounds, SETTING_MASK),
     SETTING("Gripline", "NitroOnline", nitro_online, SETTING_BOOLEAN),
+    SETTING("Gripline", "YieldToMods", yield_to_mods, SETTING_BOOLEAN),
 };
 
 const size_t setting_count = ARRAY_COUNT(setting_definitions);
@@ -63,6 +64,7 @@ void settings_defaults(ModOptions *options) {
         .telemetry_opacity = 100,
         .telemetry_size = 100,
         .nitro_online = 1,
+        .yield_to_mods = 1,
     };
 }
 

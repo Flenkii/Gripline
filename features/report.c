@@ -6,6 +6,7 @@
 #include "report.h"
 #include "logging.h"
 #include "mod_scan.h"
+#include "mod_partners.h"
 #include "notify.h"
 #include "support.h"
 
@@ -142,6 +143,7 @@ int report_create(void) {
         unsigned m = (unsigned)text_length(mapper);
         memory_copy(data + n, mapper, m);
         n += m;
+        n += mod_partners_report((char *)data + n, 600); /* V7.2: what Gripline left to other mods */
         entries[count].name = "Gripline_Report.txt";
         ok = add_entry(zip, &entries[count++], &offset, when, data, n);
     }

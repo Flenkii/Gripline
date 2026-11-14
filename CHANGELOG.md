@@ -3,7 +3,12 @@
 What changed for players, newest first. Every version is on the [Releases](../../releases) page.
 (Technical details: [docs/TECHNICAL_HISTORY.md](docs/TECHNICAL_HISTORY.md).)
 
-## V7.1 *(next release)*
+## V7.2 *(in progress)*
+- **Gripline makes room for other mods**: with [FH2 Mouse & Keyboard](https://github.com/qiangqiang101/FH2MouseKeyboard) installed, its keyboard driving, menu cursor and mouse look are used and Gripline's own switch off (a card says so; Gripline's hotkeys such as noclip, freecam, walking and F8 keep working). F8 › Settings › *Let other mods take over* = Off keeps Gripline's own.
+- **NitroSystem** is switched off through its own switch while you walk, fly noclip/freecam, and online when *Nitro also online* is off (its gauge hides too).
+- The problem report lists which parts Gripline left to which mod.
+
+## V7.1
 - **Mouse in the game's menus** – click tiles, wheel for tabs and lists, right click = back. Setting in F8: On / Only when moved / Off.
 - **The F8 settings in the game's own menus too**: MODS › Installed mods › Gripline has pages for mouse, walking, driving, summon & online, cards and logbook (key bindings stay in F8).
 - **Mouse look in the car**, with its own sensitivity setting (F8).

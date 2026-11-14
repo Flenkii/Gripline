@@ -108,6 +108,7 @@ stubs = {
     'add_setting': add_setting,
     'wait_for_game': lambda: 0,
     'wait_for_code': lambda: 0,
+    'mod_version': lambda: 0,  # V7.2 partner check: no other mod installed
 }
 for n in names:
     e.wq(api + offset[n], e.stub('api_' + n, stubs.get(n, e.missing('api.' + n))))

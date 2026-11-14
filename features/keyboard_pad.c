@@ -1,6 +1,7 @@
 /* Keyboard as a gamepad (unofficial add-on). See keyboard_pad.h. */
 #include "keyboard_pad.h"
 #include "mod_scan.h"
+#include "mod_partners.h"
 #include "ini_migrate.h"
 #include "game_addresses.h"
 #include "logging.h"
@@ -918,7 +919,7 @@ int keyboard_walk_mouse(float *dx, float *dy) {
 /* driving: not while mouse steering is on (the mouse steers then) */
 int keyboard_drive_mouse(float *dx, float *dy) {
     *dx = 0.0f, *dy = 0.0f;
-    if (!drive_mouse || mouse_sensitivity || !mouse_look_read(dx, dy)) return 0;
+    if (!drive_mouse || mouse_sensitivity || mod_partners_takes_drive_look() || !mouse_look_read(dx, dy)) return 0;
     *dx *= (float)drive_mouse / 100.0f, *dy *= (float)drive_mouse / 100.0f;
     return 1;
 }
@@ -936,7 +937,7 @@ int keyboard_menu_mouse(int *x, int *y, int *buttons, int *wheel, int *client_w,
     *x = *y = *buttons = *wheel = 0;
     *client_w = *client_h = 0;
     *system_shown = 0;
-    if (!menu_mouse || !mouse_ready()) return 0;
+    if (!menu_mouse || mod_partners_takes_menu_mouse() || !mouse_ready()) return 0;
     if (!to_client) {
         to_client = (ScreenToClientFn)(uintptr_t)GetProcAddress(user32, "ScreenToClient");
         cursor_info = (CursorInfoFn)(uintptr_t)GetProcAddress(user32, "GetCursorInfo");
@@ -1400,6 +1401,10 @@ static HRESULT WINAPI hook_get_factory(void *name, const GUID *iid, void **out) 
         mod_scan_announce_mapper();
         return original_get_factory(name, iid, out);
     }
+    if (mod_partners_takes_keyboard()) { /* V7.2: its keys drive (mod_partners.c says so in the log) */
+        log_append("KEYBOARD: FH2 Mouse & Keyboard drives with the keyboard; Gripline keyboard off, gamepads unchanged.\r\n");
+        return original_get_factory(name, iid, out);
+    }
     if (!real_statics) {
         void *real = NULL;
         HRESULT hr = original_get_factory(name, iid, &real);
@@ -1522,7 +1527,7 @@ int keyboard_pad_late(void) {
     if (wrapped) return 1;
     if (!ini_path[0]) return 0;
     if (!loaded) settings_load();
-    if (!values[KEY_SETTING_ENABLED] || mod_scan_mapper_running()) return 0;
+    if (!values[KEY_SETTING_ENABLED] || mod_scan_mapper_running() || mod_partners_takes_keyboard()) return 0;
     HMODULE combase = LoadLibraryExW(L"combase.dll", NULL, LOAD_LIBRARY_SEARCH_SYSTEM32);
     if (!combase) return 0;
     GetFactoryFn get_factory = original_get_factory ? original_get_factory
