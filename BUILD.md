@@ -26,6 +26,8 @@ python test_report.py ../out-test/fh2-mods/Gripline.dll
 python test_ini_migrate.py ../out-test/fh2-mods/Gripline.dll
 python test_cockpit_view.py ../out-test/fh2-mods/Gripline.dll
 python test_nitro.py ../out-test/fh2-mods/Gripline.dll
+python test_partners.py ../out-test/fh2-mods/Gripline.dll
+python test_anna.py ../out-test/fh2-mods/Gripline.dll
 python test_cockpit.py ../out-test/fh2-mods/Gripline.dll
 python test_walking.py ../out-test/fh2-mods/Gripline.dll
 python test_walk_gauge.py ../out-test/fh2-mods/Gripline.dll

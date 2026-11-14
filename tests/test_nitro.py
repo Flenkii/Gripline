@@ -17,7 +17,14 @@ def check(cond, text):
         fails.append(text)
 
 
+blocks = []  # (who, blocked) passed to NitroSystem's FnFNitro_SetBlocked (V7.2)
+
+
 class NEmu(Emu):
+    def k_GetProcAddress(self):
+        name = bytes(self.mu.mem_read(self.arg(1), 32)).split(b'\0')[0] if self.arg(1) > 0xffff else b''
+        return set_blocked_stub if name == b'FnFNitro_SetBlocked' else 0
+
     def k_VirtualProtect(self):
         if self.arg(3):
             self.wd(self.arg(3), 0x02)
@@ -36,6 +43,8 @@ def original_get_state():
     e.mu.mem_write(state, struct.pack('<IHBBhhhh', 7, pad['buttons'], 0, 0, 0, 0, 0, 0))
     return 0
 get_stub = e.stub('orig_XInputGetState', original_get_state)
+set_blocked_stub = e.stub('FnFNitro_SetBlocked',
+                          lambda: blocks.append((bytes(e.mu.mem_read(e.arg(0), 16)).split(b'\0')[0].decode(), e.arg(1) & 0xffffffff)))
 set_stub = e.stub('orig_XInputSetState', lambda: 0)
 
 M = e.alloc(0x1000, 0x1000)
@@ -139,6 +148,7 @@ check(e.call('Fh2TestNotifyCount') >= 1, 'notification shown')
 l1, l2 = e.alloc(200), e.alloc(200)
 e.call('Fh2TestNotifyText', 0, l1, l2)
 check(e.wstr(l1) == 'Nitro off' and e.wstr(l2) == 'Reason: you are online (FH2MP)', 'card text: %r / %r' % (e.wstr(l1), e.wstr(l2)))
+check(blocks and blocks[-1] == ('Gripline', 1), 'V7.2: NitroSystem itself blocked for "Gripline" (%r)' % blocks[-1:])
 title = e.alloc(64)
 style = e.call('Fh2TestNotifyStyle', 0, title) & 0xffffffff
 check(style == 1 and e.wstr(title) == 'WARNING', 'nitro off: red, %r (%d)' % (e.wstr(title), style))
@@ -146,6 +156,8 @@ e.wd(conn + 0x10, 2)
 e.tick += 600
 pad['buttons'] = 0x1000
 check(poll()[1] == 0x1100, 'offline again: nitro back')
+check(blocks[-1] == ('Gripline', 0), 'V7.2: NitroSystem allowed again (%r)' % blocks[-1:])
+check(all(b[1] in (0, 1) for b in blocks) and len(blocks) <= 4, 'set_blocked only on changes (%d calls)' % len(blocks))
 e.call('Fh2TestNotifyText', 0, l1, l2)
 check(e.wstr(l1) == 'Nitro on again' and e.wstr(l2) == 'Reason: you are offline again', 'card: nitro on again / offline session')
 style = e.call('Fh2TestNotifyStyle', 0, title) & 0xffffffff

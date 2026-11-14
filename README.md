@@ -151,7 +151,7 @@ All keys can be changed in **F8** or `FH2_Keyboard.ini`.
 - seveN and a YouTube viewer – bug reports (V6.4.1, V6.5)
 - **[Sounds From The Lab](https://soundsfromthelab.com)** – car door sounds for walking (royalty-free, "Car Door Opening And Closing Slamming Shut")
 - **[Deuquan](https://github.com/Deuquan/FH2-CameraMods)** – his FH2 Camera Mods showed how smooth walking can feel; that inspired the V7.1 walking polish (easing, crouch, mouse look). No code was taken: Gripline's walking mode is its own implementation, with real collision
-- Works well with: **[NitroSystem](https://github.com/qiangqiang101/NitroSystem)** by qiangqiang101, **Azimuth Mapper** by bigdamnhero6
+- Works well with: **[NitroSystem](https://github.com/qiangqiang101/NitroSystem)**, **[FH2 ANNA](https://github.com/qiangqiang101/FH2_ANNA)** and **[FH2 Mouse & Keyboard](https://github.com/qiangqiang101/FH2MouseKeyboard)** by qiangqiang101 (Gripline uses FH2 ANNA's MIT menu header, `third_party/fh2anna`), **Azimuth Mapper** by bigdamnhero6
 
 ## Building and license
 See [BUILD.md](BUILD.md): `python build.py /path/to/zig --output out` makes `out/fh2-mods/Gripline.dll` (Zig 0.15.2).

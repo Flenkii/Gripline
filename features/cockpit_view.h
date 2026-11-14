@@ -9,7 +9,7 @@
 void cockpit_view_set_offset(int forward_cm, int up_cm);
 
 /* A toggle input (keyboard key or wheel button): switches the view on the press. */
-enum { COCKPIT_VIEW_KEYBOARD, COCKPIT_VIEW_WHEEL };
+enum { COCKPIT_VIEW_KEYBOARD, COCKPIT_VIEW_WHEEL, COCKPIT_VIEW_ANNA /* V7.2 anna_link.c */ };
 void cockpit_view_input(unsigned source, int held);
 
 /* 1 while the second view is on (cockpit.c then plays the steering animation part without the wheel). */

@@ -41,6 +41,10 @@ enum { MODE_NOCLIP = 1, MODE_FREECAM = 2, MODE_WALK = 3 /* walking.h */ };
    right stick looks (freecam; kept from the game's camera then), RT/LT up/down, A held faster. */
 void noclip_pad_input(unsigned user, unsigned char *gamepad);
 
+/* V7.2 (ANNA menu, anna_link.c): as if the noclip / freecam / walking key was pressed (MODE_*); handled on
+   noclip's own thread with the same checks (online, menus, walking ready). Any thread. */
+void noclip_request(int mode);
+
 /* 1 while noclip or freecam is on. */
 int noclip_active(void);
 /* 1 while freecam is on (cockpit_view.c moves the camera, keyboard_pad.c keeps the arrows). */

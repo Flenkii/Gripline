@@ -108,7 +108,21 @@ stubs = {
     'add_setting': add_setting,
     'wait_for_game': lambda: 0,
     'wait_for_code': lambda: 0,
+    'mod_version': lambda: 0,  # V7.2 partner check: no other mod installed
+    'get_interface': lambda: anna_api if cstr(e.arg(0)) == 'FH2ANNA' and e.arg(1) == 4 else 0,
 }
+# V7.2: a fake FH2 ANNA interface (fh2anna.h): add_entry records the entries
+anna_entries = []
+def anna_add_entry():
+    a = e.arg(0)
+    anna_entries.append({'key': cstr(e.rq(a + 8)), 'parent': cstr(e.rq(a + 16)) if e.rq(a + 16) else None,
+                         'label': cstr(e.rq(a + 24)), 'choose': e.rq(a + 32), 'label_now': e.rq(a + 48),
+                         'stays_open': e.rd(a + 64), 'enabled': e.rq(a + 72)})
+    return 1
+anna_api = e.alloc(48)
+e.mu.mem_write(anna_api, bytes(48))
+e.wd(anna_api, 48)
+e.wq(anna_api + 24, e.stub('anna_add_entry', anna_add_entry))
 for n in names:
     e.wq(api + offset[n], e.stub('api_' + n, stubs.get(n, e.missing('api.' + n))))
 
@@ -116,6 +130,17 @@ print('start:')
 check(e.call('fh2mod_init', api) == 0, 'fh2mod_init returns 0')
 check(seen['info'] == ('Gripline', 'V7.1'), 'registered as Gripline V7.1: %r' % (seen['info'],))
 check(len(e.threads) == 1, 'start thread created (waits for the game)')
+print('FH2 ANNA menu (V7.2):')
+keys_anna = [a['key'] for a in anna_entries]
+check(keys_anna[:1] == ['gripline'] and anna_entries[0]['parent'] is None and anna_entries[0]['choose'] == 0,
+      'a "Gripline" list at ANNA\'s top level')
+check(keys_anna[1:] == ['gripline.dashcam', 'gripline.walk', 'gripline.cruise', 'gripline.telemetry', 'gripline.freecam', 'gripline.menu'],
+      'six entries: %r' % keys_anna[1:])
+check(all(a['parent'] == 'gripline' and a['choose'] and a['label_now'] and a['label'] for a in anna_entries[1:]),
+      'each in the list, with a choice, a label and a label in the game language')
+check([a['stays_open'] for a in anna_entries[1:]] == [1, 0, 0, 1, 0, 0], 'dashboard cam and telemetry keep ANNA open')
+check(bool(anna_entries[1]['enabled']) and bool(anna_entries[2]['enabled']) and bool(anna_entries[5]['enabled']),
+      'dashboard cam, walking and freecam can be greyed out')
 
 print('INI files:')
 grip = open(os.path.join(root, 'Gripline.ini'), newline='').read()

@@ -25,6 +25,8 @@
 #include "features/keyboard_pad.h"
 #include "features/key_menu.h"
 #include "features/mod_scan.h"
+#include "features/mod_partners.h"
+#include "features/anna_link.h"
 #include "features/nitro_link.h"
 #include "features/notify.h"
 #include "features/report.h"
@@ -616,6 +618,8 @@ static void start_features(void) {
     cruise_set_slow_off(options.cruise_slow_off);
     notify_set_telemetry_look(options.telemetry_pos, options.telemetry_opacity, options.telemetry_size);
     mod_scan_start(directory);
+    mod_partners_start(game);
+    anna_link_set_game(game);
     version_check_start(game, directory);
     update_check_start(game, options.update_check);
     report_init(directory);
@@ -629,7 +633,7 @@ static void start_features(void) {
                        options.calm_drivatars);
     rig_settings_start(directory);
     /* the platform may have loaded Gripline after Azimuth set up gamepads and swap chain */
-    if (!keyboard_pad_late()) platform_log("keyboard: not active (off in FH2_Keyboard.ini, Mapper running, or no hook)");
+    if (!keyboard_pad_late()) platform_log("keyboard: not active (off in FH2_Keyboard.ini, Mapper running, FH2 Mouse & Keyboard drives, or no hook)");
     if (!notify_install_late()) platform_log("cards: could not hook the game picture");
     if (notify_kind_on(NOTIFY_KIND_START)) {
         notify_show_deferred_call(start_card); /* the keys as bound now (the key menu can change them) */
@@ -713,6 +717,8 @@ FH2MOD_EXPORT int fh2mod_init(const FH2ModApi *platform) {
     choose_media_dir();
     move_gripline_sections();
     log_set_directory(directory);
+    /* V7.2: before the keyboard is armed - another mod may already drive with the keyboard */
+    mod_partners_detect(directory, api->api_version >= 2 && api->mod_version ? api->mod_version : NULL);
     unsigned char *host = (unsigned char *)GetModuleHandleW(NULL);
     if (host) {
         int keys = keyboard_pad_arm(host, directory); /* before Azimuth sets up its gamepads */
@@ -721,6 +727,8 @@ FH2MOD_EXPORT int fh2mod_init(const FH2ModApi *platform) {
         platform_log(keys ? "early keyboard hook: yes" : "early keyboard hook: no");
         platform_log(cards ? "early card hook: yes" : "early card hook: no");
     }
+    /* V7.2: Gripline's list in FH2 ANNA's menu (FH2ANNA.dll started before Gripline.dll, its interface is there) */
+    anna_link_add(api->api_version >= 2 && api->get_interface ? api->get_interface("FH2ANNA", 4) : NULL);
     add_rows();
     add_traffic_page();
     add_mirror_pages();
