@@ -29,12 +29,12 @@ SOURCES = [
     "features/telemetry.c", "features/logbook.c", "features/records.c", "features/cruise.c",
     "features/trip.c", "features/noclip.c", "features/no_damage.c", "features/drive_look.c",
     # walking
-    "features/walking.c", "features/summon.c", "features/walk_gauge.c",
+    "features/walking.c", "features/car_doors.c", "features/freecam_drive.c", "features/summon.c", "features/walk_gauge.c",
     # cockpit, wheel and keyboard
     "features/cockpit.c", "features/cockpit_view.c", "features/wheel_buttons.c",
     "features/wheel_watch.c", "features/keyboard_pad.c", "features/nitro_link.c",
     # menu, cards and housekeeping
-    "features/key_menu.c", "features/menu_mouse.c", "features/focus_guard.c", "features/notify.c",
+    "features/key_menu.c", "features/pause_tile.c", "features/menu_mouse.c", "features/focus_guard.c", "features/notify.c",
     "features/rig_settings.c", "features/ini_edit.c", "features/ini_migrate.c",
     "features/mod_scan.c", "features/mod_partners.c", "features/anna_link.c", "features/version_check.c", "features/update_check.c", "features/report.c",
 ]

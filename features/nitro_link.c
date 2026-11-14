@@ -237,9 +237,8 @@ static int link_module(HMODULE module, const wchar_t *ini) {
     read_button();
     log_append("NITRO: NitroSystem found - Gripline nitro key and wheel button press its "
                "NitroButton.\r\n");
-    if (notify_kind_on(NOTIFY_KIND_START)) /* V7.2: the N key is Gripline's keyboard - off when another mod drives */
-        (linking_at_start ? notify_show_deferred : notify_show)(mod_partners_takes_keyboard() ? "NitroSystem found\nNitro: wheel button"
-                                                                                               : "NitroSystem found\nNitro: N / wheel button");
+    /* V7.2 calm start: no card any more. It named a wheel button even with no wheel connected and no
+       wheel button set to nitro (Marvin 14.11.2026); the log line above is enough */
     return 1;
 }
 

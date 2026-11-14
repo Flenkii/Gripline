@@ -11,6 +11,8 @@
 #include "game_units.h"
 #include "summon.h"
 #include "notify.h"
+#include "cockpit_view.h"
+#include "freecam_drive.h"
 
 /* ------------------------------------------------------------------ game addresses */
 
@@ -55,6 +57,8 @@ static void *previous_update[CAMERA_COUNT], *previous_view[CAMERA_COUNT];
 static void *previous_ui[6];
 
 static volatile LONG active, entered; /* entered: walking_enter gave the car's place */
+static volatile LONG glide_mode; /* V7.2: 0 none, 1 out (from -> walker), 2 in (walker -> to, then held) */
+static ULONGLONG glide_set;
 static volatile LONG step_from_enter;
 
 /* the walker, only changed in the camera update (one thread) */
@@ -253,7 +257,7 @@ int walking_no_floor(void) {
 }
 
 void walking_set_active(int on) {
-    if (!on) InterlockedExchange(&entered, 0), InterlockedExchange(&hiding, 0);
+    if (!on) InterlockedExchange(&entered, 0), InterlockedExchange(&hiding, 0), InterlockedExchange(&glide_mode, 0);
     InterlockedExchange(&active, on ? 1 : 0);
 }
 
@@ -541,6 +545,14 @@ static void turn(float a) {
     if (length > 0.5f) dir[0] = x / length, dir[1] = z / length;
 }
 
+/* V7.2 getting out with the door (noclip.c): which side, how far behind the car's middle */
+static volatile LONG exit_side = -1;
+static float exit_back;
+void walking_set_exit(int side, float back) {
+    exit_back = back;
+    InterlockedExchange(&exit_side, side > 0 ? 1 : -1);
+}
+
 static void spawn(void) {
     float length = root(car_forward[0] * car_forward[0] + car_forward[2] * car_forward[2]);
     if (length > 0.1f) dir[0] = car_forward[0] / length, dir[1] = car_forward[2] / length;
@@ -561,14 +573,23 @@ static void spawn(void) {
         log_class("WALKING: collision world class ", world);
     }
     InterlockedExchange(&collision_ok, world != NULL);
-    /* out at the left of the car (the driver's door of most cars), from inside the car outwards */
+    /* out at the driver's side (left, V7.2: right in a right-hand drive car), from inside the car outwards;
+       with the door open (V7.2) a little behind it, out of the way of the door */
     float rl = root(car_right[0] * car_right[0] + car_right[2] * car_right[2]);
     float lx = rl > 0.1f ? -car_right[0] / rl : -mirror * dir[1], lz = rl > 0.1f ? -car_right[2] / rl : mirror * dir[0];
-    float from[3] = {car_place[0], car_place[1] + 1.0f, car_place[2]};
-    float to[3] = {car_place[0] + lx * 2.0f, car_place[1] + 1.0f, car_place[2] + lz * 2.0f};
+    if (exit_side > 0) lx = -lx, lz = -lz;
+    float bx = -dir[0] * exit_back, bz = -dir[1] * exit_back;
+    float from[3] = {car_place[0] + bx, car_place[1] + 1.0f, car_place[2] + bz};
+    float to[3] = {car_place[0] + lx * 2.0f + bx, car_place[1] + 1.0f, car_place[2] + lz * 2.0f + bz};
     slide(from, to, 0, centre);
     last_ground = centre[1];
     stepped = 0;
+    if (exit_back > 0.0f) { /* V7.2 with the door: look back at the door, a little down (it shuts in view) */
+        float door[3] = {car_place[0] + lx * 0.9f, 0.0f, car_place[2] + lz * 0.9f};
+        float dx = door[0] - centre[0], dz = door[2] - centre[2], l = root(dx * dx + dz * dz);
+        if (l > 0.1f) dir[0] = dx / l, dir[1] = dz / l; /* mirror stays: it is the world's, not the heading's */
+        pitch = -0.15f, sin_cos(pitch, &pitch_sin, &pitch_cos);
+    }
 }
 
 static void step(float dt) {
@@ -577,6 +598,9 @@ static void step(float dt) {
     /* V7.1 summon: while the car is far away and coming, the walker stands (floor collision is only
        loaded around the car); looking around still works */
     int freeze = summon_walker_frozen();
+    /* V7.2: getting out / in, the camera moves by itself (a glide no camera shows ends after 3 s) */
+    if (glide_mode == 1 && GetTickCount64() - glide_set > 3000u) InterlockedExchange(&glide_mode, 0);
+    if (glide_mode) in = (WalkInput){0};
     if (freeze) in.ahead = in.side = 0.0f, in.jump = 0, vel[0] = vel[1] = 0.0f;
 #ifdef FH2_TWEAKS_TEST
     in.mouse_x += test_mouse[0], in.mouse_y += test_mouse[1];
@@ -843,13 +867,240 @@ static void walk_frame(void) {
     step((float)dt);
 }
 
+/* V7.2 (Marvin 14.11.2026): getting out / in with the door open, the camera glides between the seat
+   (or the camera before) and the walker's eye: sideways out through the door first, then to the
+   walker (in: the other way round), turning a little towards the door side on the way. */
+static float glide_point[3], glide_look[3], glide_side[3], glide_start_eye[3], glide_start_look[3];
+static float glide_ms;
+static LARGE_INTEGER glide_at;
+static int glide_started;
+static volatile LONG glide_duck;
+
+/* door8 (Marvin 14.11.2026): out of / into a seat the camera ducks under the roof's edge first and
+   then stands up (in: the other way round), instead of floating out straight */
+#define GLIDE_DUCK 0.12f
+void walking_glide_duck(void) {
+    InterlockedExchange(&glide_duck, 1);
+}
+
+void walking_glide(int in, const float point[3], const float point_look[3], const float side[3], unsigned ms) {
+    for (unsigned i = 0; i < 3; ++i) glide_point[i] = point[i], glide_look[i] = point_look[i], glide_side[i] = side[i];
+    glide_ms = (float)(ms ? ms : 1);
+    glide_started = 0;
+    InterlockedExchange(&glide_duck, 0);
+    glide_set = GetTickCount64();
+    InterlockedExchange(&glide_mode, in ? 2 : 1);
+}
+
+static float glide_time(void) {
+    LARGE_INTEGER now, frequency;
+    QueryPerformanceCounter(&now);
+    QueryPerformanceFrequency(&frequency);
+    if (!glide_started) glide_started = 1, glide_at = now;
+    float ms = (float)((double)(now.QuadPart - glide_at.QuadPart) * 1000.0 / (double)frequency.QuadPart);
+    float t = ms / glide_ms;
+    return t < 0.0f ? 0.0f : t > 1.0f ? 1.0f : t;
+}
+
+static float smooth(float t) {
+    t = t < 0.0f ? 0.0f : t > 1.0f ? 1.0f : t;
+    return t * t * (3.0f - 2.0f * t);
+}
+
+/* V7.2 polish (Marvin 14.11.2026, video 5): softer start and end than smooth (no jerk at all) */
+static float smoother(float t) {
+    t = t < 0.0f ? 0.0f : t > 1.0f ? 1.0f : t;
+    return t * t * t * (t * (t * 6.0f - 15.0f) + 10.0f);
+}
+
+/* V7.2 polish: the look turns at an even rate (video 5: the straight mix of two directions far
+   apart turned slowly, then whipped round in a few frames - a blur). Level part along the circle
+   (halved step by step, no maths library), the height part straight; out = unit. */
+static void turn_look(const float a[3], const float b[3], float t, const float side[3], float out[3]) {
+    float ha[2] = {a[0], a[2]}, hb[2] = {b[0], b[2]};
+    float na = root(ha[0] * ha[0] + ha[1] * ha[1]), nb = root(hb[0] * hb[0] + hb[1] * hb[1]);
+    float ya = a[1], yb = b[1];
+    if (na < 0.01f || nb < 0.01f) { /* straight up / down: plain mix */
+        float l[3] = {a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t};
+        float n = root(l[0] * l[0] + l[1] * l[1] + l[2] * l[2]);
+        if (n > 0.01f) out[0] = l[0] / n, out[1] = l[1] / n, out[2] = l[2] / n;
+        return;
+    }
+    ha[0] /= na, ha[1] /= na, hb[0] /= nb, hb[1] /= nb;
+    float lo[2] = {ha[0], ha[1]}, hi[2] = {hb[0], hb[1]}, f = t;
+    if (ha[0] * hb[0] + ha[1] * hb[1] < -0.95f) { /* (nearly) opposite: round the side first */
+        float m[2] = {side[0], side[2]}, nm = root(m[0] * m[0] + m[1] * m[1]);
+        if (nm > 0.01f) {
+            m[0] /= nm, m[1] /= nm;
+            if (f < 0.5f) hi[0] = m[0], hi[1] = m[1], f *= 2.0f;
+            else lo[0] = m[0], lo[1] = m[1], f = f * 2.0f - 1.0f;
+        }
+    }
+    for (unsigned k = 0; k < 14; ++k) {
+        float m[2] = {lo[0] + hi[0], lo[1] + hi[1]}, nm = root(m[0] * m[0] + m[1] * m[1]);
+        if (nm < 0.0001f) break;
+        m[0] /= nm, m[1] /= nm;
+        if (f < 0.5f) hi[0] = m[0], hi[1] = m[1], f *= 2.0f;
+        else lo[0] = m[0], lo[1] = m[1], f = f * 2.0f - 1.0f;
+    }
+    float h[2] = {lo[0] + (hi[0] - lo[0]) * f, lo[1] + (hi[1] - lo[1]) * f}, nh = root(h[0] * h[0] + h[1] * h[1]);
+    if (nh < 0.0001f) h[0] = hb[0], h[1] = hb[1], nh = 1.0f;
+    float y = ya / root(ya * ya + na * na) * (1.0f - t) + yb / root(yb * yb + nb * nb) * t; /* the height part */
+    if (y > 0.95f) y = 0.95f;
+    if (y < -0.95f) y = -0.95f;
+    float level = root(1.0f - y * y);
+    out[0] = h[0] / nh * level, out[1] = y, out[2] = h[1] / nh * level;
+}
+
+/* out: the side part of the way in the first 65 %, the rest from 25 % on (in: the other way round);
+   the look turns evenly over the whole glide, eased at both ends */
+static void glide_apply(float out_eye[3], float out_look[3]) {
+    if (!glide_mode) return;
+    if (glide_mode == 2 && !glide_started)
+        for (unsigned i = 0; i < 3; ++i) glide_start_eye[i] = out_eye[i], glide_start_look[i] = out_look[i];
+    float t = glide_time();
+    const float *a = glide_mode == 1 ? glide_point : glide_start_eye, *b = glide_mode == 1 ? out_eye : glide_point;
+    const float *la = glide_mode == 1 ? glide_look : glide_start_look, *lb = glide_mode == 1 ? out_look : glide_look;
+    float s_side = glide_mode == 1 ? smoother(t / 0.65f) : smoother((t - 0.35f) / 0.65f);
+    float s_rest = glide_mode == 1 ? smoother((t - 0.25f) / 0.75f) : smoother(t / 0.75f);
+    float d[3] = {b[0] - a[0], b[1] - a[1], b[2] - a[2]};
+    float along = d[0] * glide_side[0] + d[1] * glide_side[1] + d[2] * glide_side[2];
+    for (unsigned i = 0; i < 3; ++i) {
+        float side_part = along * glide_side[i];
+        out_eye[i] = a[i] + side_part * s_side + (d[i] - side_part) * s_rest;
+    }
+    if (glide_duck) { /* a soft dip early on the way out (late on the way in), world down */
+        float u = glide_mode == 1 ? t / 0.6f : (t - 0.4f) / 0.6f;
+        if (u > 0.0f && u < 1.0f) {
+            float b = smoother(u < 0.4f ? u / 0.4f : (1.0f - u) / 0.6f);
+            out_eye[1] -= GLIDE_DUCK * b;
+        }
+    }
+    float l[3];
+    turn_look(la, lb, smoother(t), glide_side, l);
+    out_look[0] = l[0], out_look[1] = l[1], out_look[2] = l[2];
+    if (glide_mode == 1 && t >= 1.0f) InterlockedExchange(&glide_mode, 0);
+}
+
+int walking_gliding(void) {
+    return glide_mode != 0;
+}
+
+/* V7.2: what the camera showed before walking (camera_view): any camera, and the seat (driver /
+   cockpit camera, not the dashboard cam) */
+static float seen_eye[3], seen_look[3], seat_eye[3], seat_look[3];
+static volatile LONG64 seen_tick, seat_tick;
+
+static void remember_view(void *camera, int index) {
+    unsigned family = cameras[index].family;
+    double e[3];
+    float d[3];
+    unsigned char *c = (unsigned char *)camera;
+    if (!memory_read(c + eye_field[family], e, sizeof(e)) || !memory_read(c + dir_field[family], d, sizeof(d))) return;
+    float f[3] = {(float)e[0], (float)e[1], (float)e[2]};
+    for (unsigned i = 0; i < 3; ++i)
+        if (!float_is_finite(f[i]) || !float_is_finite(d[i])) return;
+    ULONGLONG now = GetTickCount64();
+    for (unsigned i = 0; i < 3; ++i) seen_eye[i] = f[i], seen_look[i] = d[i];
+    InterlockedExchange64(&seen_tick, (LONG64)now);
+    if (index <= 1 && !cockpit_view_second()) {
+        for (unsigned i = 0; i < 3; ++i) seat_eye[i] = f[i], seat_look[i] = d[i];
+        InterlockedExchange64(&seat_tick, (LONG64)now);
+    }
+}
+
+static int recent(LONG64 tick, unsigned ms) {
+    return tick && GetTickCount64() - (ULONGLONG)tick <= ms;
+}
+
+int walking_seen_camera(float out_eye[3], float out_look[3]) {
+    if (!recent(seen_tick, 1000)) return 0;
+    for (unsigned i = 0; i < 3; ++i) out_eye[i] = seen_eye[i], out_look[i] = seen_look[i];
+    return 1;
+}
+
+int walking_seat_eye(float out_eye[3], float out_look[3]) {
+    if (!recent(seat_tick, 1000)) return 0;
+    for (unsigned i = 0; i < 3; ++i) out_eye[i] = seat_eye[i], out_look[i] = seat_look[i];
+    return 1;
+}
+
+/* V7.2: in the driver / cockpit camera the head turns to the door while it opens (noclip.c);
+   polish: getting in it starts turned (the door shuts in view) and turns back by itself */
+#define HEAD_TURN 1.1f /* about 50 degrees */
+#define HEAD_DOWN 0.06f /* door8: a little down (0.15 looked at the floor more than at the door and the mirror) */
+static volatile LONG head_turn_on;
+static float head_side[3];
+static float head_from, head_to;
+static unsigned head_ms;
+static ULONGLONG head_turn_at;
+
+static float head_amount(ULONGLONG now) {
+    return head_from + (head_to - head_from) * smooth((float)(now - head_turn_at) / (float)(head_ms ? head_ms : 1));
+}
+
+void walking_head_turn(const float side[3]) {
+    if (!side) {
+        InterlockedExchange(&head_turn_on, 0);
+        return;
+    }
+    head_side[0] = side[0], head_side[1] = side[1], head_side[2] = side[2];
+    head_from = 0.0f, head_to = HEAD_TURN, head_ms = 600;
+    head_turn_at = GetTickCount64();
+    InterlockedExchange(&head_turn_on, 1);
+}
+
+void walking_head_turned(const float side[3]) {
+    head_side[0] = side[0], head_side[1] = side[1], head_side[2] = side[2];
+    head_from = head_to = HEAD_TURN, head_ms = 1;
+    head_turn_at = GetTickCount64();
+    InterlockedExchange(&head_turn_on, 1);
+}
+
+void walking_head_turn_back(unsigned ms) {
+    if (!head_turn_on) return;
+    ULONGLONG now = GetTickCount64();
+    head_from = head_amount(now), head_to = 0.0f, head_ms = ms;
+    head_turn_at = now;
+}
+
+/* the look of a seat camera with the head turned fully (noclip.c: the glide out starts there) */
+void walking_head_look(const float look[3], const float side[3], float out[3]) {
+    float l[3] = {look[0] + side[0] * HEAD_TURN, look[1] - HEAD_DOWN * HEAD_TURN, look[2] + side[2] * HEAD_TURN};
+    float n = root(l[0] * l[0] + l[1] * l[1] + l[2] * l[2]);
+    if (!(n > 0.01f)) {
+        out[0] = look[0], out[1] = look[1], out[2] = look[2];
+        return;
+    }
+    out[0] = l[0] / n, out[1] = l[1] / n, out[2] = l[2] / n;
+}
+
+static void head_turn_apply(void *camera, unsigned family) {
+    float d[3];
+    unsigned char *c = (unsigned char *)camera;
+    if (!memory_read(c + dir_field[family], d, sizeof(d))) return;
+    ULONGLONG now = GetTickCount64();
+    float k = head_amount(now);
+    if (head_to == 0.0f && now - head_turn_at >= head_ms) { /* turned back: done */
+        InterlockedExchange(&head_turn_on, 0);
+        return;
+    }
+    float l[3] = {d[0] + head_side[0] * k, d[1] - HEAD_DOWN * k, d[2] + head_side[2] * k};
+    float n = root(l[0] * l[0] + l[1] * l[1] + l[2] * l[2]);
+    if (!(n > 0.01f)) return;
+    l[0] /= n, l[1] /= n, l[2] /= n;
+    memory_copy(c + dir_field[family], l, sizeof(l));
+}
+
 static void put_eye(void *camera, unsigned family) {
     if (!active || !entered || !stepped) return;
-    double e[3] = {eye[0], eye[1], eye[2]};
+    float ge[3] = {eye[0], eye[1], eye[2]}, gl[3] = {look[0], look[1], look[2]};
+    glide_apply(ge, gl);
+    double e[3] = {ge[0], ge[1], ge[2]};
     float d[4];
     unsigned char *c = (unsigned char *)camera;
     if (!memory_read(c + dir_field[family], d, sizeof(d))) return;
-    d[0] = look[0], d[1] = look[1], d[2] = look[2];
+    d[0] = gl[0], d[1] = gl[1], d[2] = gl[2];
     memory_copy(c + eye_field[family], e, sizeof(e));
     memory_copy(c + dir_field[family], d, 12);
 }
@@ -862,18 +1113,60 @@ static int camera_index(void *camera) {
     return -1;
 }
 
+/* V7.2 freecam while driving (freecam_drive.h): an outside camera looks from the free camera; the
+   game's own eye / direction go back before its next update, so its follow camera stays its own */
+static double free_game_eye[CAMERA_COUNT][3];
+static float free_game_dir[CAMERA_COUNT][4];
+static unsigned char free_saved[CAMERA_COUNT];
+static float free_eye[3], free_look[3];
+static int free_have;
+
+static void free_restore(void *camera, unsigned i) {
+    if (!free_saved[i]) return;
+    unsigned char *c = (unsigned char *)camera;
+    unsigned family = cameras[i].family;
+    memory_copy(c + eye_field[family], free_game_eye[i], sizeof(free_game_eye[i]));
+    memory_copy(c + dir_field[family], free_game_dir[i], 12);
+    free_saved[i] = 0;
+}
+
+static void free_put(void *camera, unsigned i, int step) {
+    unsigned char *c = (unsigned char *)camera;
+    unsigned family = cameras[i].family;
+    double e[3];
+    float d[4];
+    if (!memory_read(c + eye_field[family], e, sizeof(e)) || !memory_read(c + dir_field[family], d, sizeof(d))) return;
+    if (step) {
+        float ge[3] = {(float)e[0], (float)e[1], (float)e[2]}, gl[3] = {d[0], d[1], d[2]};
+        for (unsigned k = 0; k < 3; ++k) free_game_eye[i][k] = e[k];
+        memory_copy(free_game_dir[i], d, sizeof(d));
+        free_saved[i] = 1;
+        free_have = freecam_drive_frame(ge, gl, free_eye, free_look);
+    }
+    if (!free_have) return;
+    double ne[3] = {free_eye[0], free_eye[1], free_eye[2]};
+    d[0] = free_look[0], d[1] = free_look[1], d[2] = free_look[2];
+    memory_copy(c + eye_field[family], ne, sizeof(ne));
+    memory_copy(c + dir_field[family], d, 12);
+}
+
 static void *camera_update(void *camera, float dt, uintptr_t a, uintptr_t b) {
     int i = camera_index(camera);
     if (i < 0) return NULL; /* not one of ours: cannot happen, the slot is only in our vtables */
     unsigned family = cameras[i].family;
+    free_restore(camera, (unsigned)i); /* V7.2: the game's own values (freecam while driving) */
     drive_look_restore(camera, (unsigned)i, eye_field[family], dir_field[family]); /* the game's own values first */
     void *result = ((CameraUpdateFn)previous_update[i])(camera, dt, a, b);
     if (active) {
         walk_frame();
         put_eye(camera, family);
+    } else if (freecam_drive_active() && family == 1) {
+        free_put(camera, (unsigned)i, 1);
     } else {
+        free_have = 0;
         drive_look_frame(); /* V7.1 mouse look in the car */
         drive_look_apply(camera, (unsigned)i, family, eye_field[family], dir_field[family]);
+        if (head_turn_on && i <= 1) head_turn_apply(camera, family);
     }
     return result;
 }
@@ -901,6 +1194,8 @@ static void *camera_view(void *camera, void *out) {
     InterlockedExchange(&view_index, i);
     InterlockedExchange64(&view_tick, (LONG64)GetTickCount64());
     if (active) put_eye(camera, cameras[i].family);
+    else if (freecam_drive_active() && cameras[i].family == 1) free_put(camera, (unsigned)i, 0);
+    else remember_view(camera, i);
     void *result = ((CameraViewFn)previous_view[i])(camera, out);
     if (active && entered && stepped && result) { /* the picture Gripline wants (multicam_update below) */
         memory_copy(walk_view, result, sizeof(walk_view));
@@ -1021,7 +1316,7 @@ typedef void (*ReleaseFn)(void *);
 static int hud_hidden(void) {
     static volatile LONG running;
     static volatile LONG64 checked;
-    if (!active || !entered) return 0;
+    if ((!active || !entered) && !(freecam_drive_active() && walking_view_outside())) return 0; /* V7.2 freecam too */
     ULONGLONG now = GetTickCount64();
     if (now - (ULONGLONG)checked >= 50) { /* the draws of one frame nearly always agree */
         InterlockedExchange64(&checked, (LONG64)now);
@@ -1079,7 +1374,7 @@ static void marker_update(void) {
 }
 
 int walking_gauge_data(WalkGaugeData *out) {
-    if (!hud_hidden() || distance_cm < 0) return 0;
+    if (!active || !hud_hidden() || distance_cm < 0 || glide_mode) return 0; /* V7.2: not while gliding */
     static ULONGLONG units_next;
     static volatile LONG german, imperial;
     ULONGLONG now = GetTickCount64();

@@ -31,8 +31,11 @@ static unsigned char button_held[4], button_taken[4];
 
 /* freecam: the camera button is pressed for the player until the driver camera is active */
 #define DRIVER_SEARCH_MS 4000u
-#define PRESS_EVERY_MS 400u
-#define PRESS_MS 150u
+/* V7.2 polish (Marvin's log 14.11.2026: getting out ~850 ms, getting in ~440 ms dark = the game changes
+   the camera at once on each press, the presses were the wait): a press of 60 ms every 140 ms (more
+   than one frame down and up even at 30 fps) */
+#define PRESS_EVERY_MS 140u
+#define PRESS_MS 60u
 static volatile LONG want_driver; /* WANT_* */
 enum { WANT_NONE, WANT_DRIVER, WANT_OUTSIDE, WANT_CAMERA };
 static volatile LONG want_camera = -1, want_second; /* WANT_CAMERA: walking.c's camera index, dashboard cam */
@@ -142,7 +145,8 @@ static int camera_button(unsigned user, int held) {
     if (press) {
         if (second_view) {
             set_view(0); /* dashboard cam -> the game's next camera */
-        } else if (driver_active()) {
+        } else if (driver_active() && want_driver != WANT_OUTSIDE) {
+            /* (getting out, V7.2: straight to the game's next camera, one press less in the dark) */
             set_view(1); /* cockpit -> dashboard cam, the game stays on the driver camera */
             button_taken[user] = 1;
         }

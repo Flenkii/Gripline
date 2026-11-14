@@ -38,6 +38,7 @@
 #include "features/records.h"
 #include "features/game_language.h"
 #include "features/noclip.h"
+#include "features/freecam_drive.h"
 #include "features/walking.h"
 #include "features/summon.h"
 #include "features/menu_mouse.h"
@@ -47,6 +48,7 @@
 #include "features/update_check.h"
 #include "features/ini_migrate.h"
 #include "features/cruise.h"
+#include "features/pause_tile.h"
 
 void keyboard_pad_game_start(unsigned char *game_image, const wchar_t *settings_directory);
 void report_init(const wchar_t *settings_directory);
@@ -503,6 +505,22 @@ static int azimuth_rotation(void) {
 }
 
 static FH2Hook *noclip_hook;
+static FH2Hook *tile_hooks[6];
+static unsigned tile_hook_count;
+
+/* pause_tile.c: the platform's shared hooks (switched on after pause_tile_start kept the originals) */
+static void *tile_hook_function(const char *name, void *target, void *detour, void **original) {
+    if (api->api_version < 3 || !api->hook_function || !api->enable_hooks || tile_hook_count >= 6) return NULL;
+    FH2Hook *hook = api->hook_function(mod, name, target, detour, original);
+    if (hook) tile_hooks[tile_hook_count++] = hook;
+    return hook;
+}
+
+static void pause_tile_install(void) {
+    if (!pause_tile_start(game, media_dir, tile_hook_function)) return; /* nothing switched on: details in the log */
+    for (unsigned i = 0; i < tile_hook_count; ++i)
+        if (!api->enable_hooks(mod, tile_hooks[i])) log_append("PAUSETILE: the platform could not switch a hook on.\r\n");
+}
 
 static int noclip_switch(int on) {
     return on ? api->enable_hooks(mod, noclip_hook) : api->disable_hooks(mod, noclip_hook);
@@ -534,15 +552,29 @@ static void noclip_install(void) {
 }
 
 /* "Gripline V7 active" + "F5 keys, F6 noclip, F7 freecam, F8 menu" (short: the card is narrow) */
+/* V7.2 calm start: ONE card, "Gripline V7.x active" and the key of the Gripline menu (as bound now; the
+   key menu can change it). The other keys are in that menu; partner mods and nitro only go to the log. */
 static int start_card(char *out, unsigned size) {
-    static const char head[] = "Gripline " GRIPLINE_VERSION " active\n";
-    unsigned n = 0;
-    while (head[n] && n + 1 < size) {
-        out[n] = head[n];
-        ++n;
+    int de = game && game_language_is_german(game);
+    char key[8] = {0};
+    const char *key_name = NULL;
+    int index = keyboard_binding_find(L"KeyMenu");
+    if (index >= 0) {
+        unsigned char vk[4] = {0};
+        keyboard_binding_vks((unsigned)index, vk);
+        if (vk[0]) key_name = keyboard_key_ini_name(vk[0], key);
     }
+    unsigned n = 0;
+    const char *parts[4] = {"Gripline " GRIPLINE_VERSION, de ? " aktiv" : " active", NULL, NULL};
+    if (key_name && *key_name) {
+        parts[2] = "\n";
+        parts[3] = key_name;
+    }
+    for (unsigned p = 0; p < 4; ++p)
+        for (const char *t = parts[p]; t && *t && n + 1 < size; ++t) out[n++] = *t;
+    const char *tail = key_name && *key_name ? (de ? ": Gripline-Menü" : ": Gripline menu") : "";
+    for (const char *t = tail; *t && n + 1 < size; ++t) out[n++] = *t;
     out[n] = 0;
-    if (n + 1 < size) keyboard_start_keys(out + n, size - n);
     return 1;
 }
 
@@ -551,9 +583,13 @@ static int load_guard_card(char *out, unsigned size) {
     (void)out;
     (void)size;
     int de = game && game_language_is_german(game);
-    notify_show_tinted(de ? "Verkehr auf Original gesetzt\nLetzter Start hing beim Laden"
-                          : "Traffic set to Original\nLast start hung while loading",
-                       NOTIFY_COLOR_ORANGE, de ? "HINWEIS" : "NOTE", 1);
+    notify_show_big(de ? "Verkehr auf Original gesetzt\nLetzter Start hing beim Laden"
+                       : "Traffic set to Original\nLast start hung while loading",
+                    de ? "Der letzte Spielstart blieb beim Laden hängen. Zur Sicherheit fährt jetzt nur der normale "
+                         "Verkehr des Spiels.\n\nMehr Verkehr kannst du im Gripline-Menü wieder einstellen."
+                       : "The last game start got stuck while loading. To be safe, only the game's normal traffic "
+                         "drives now.\n\nYou can turn more traffic back on in the Gripline menu.",
+                    NOTIFY_COLOR_ORANGE, de ? "HINWEIS" : "NOTE", 0);
     return 0;
 }
 
@@ -562,9 +598,12 @@ static int ini_lines_card(char *out, unsigned size) {
     (void)out;
     (void)size;
     int de = game && game_language_is_german(game);
-    notify_show_tinted(de ? "Gripline.ini: Zeile übersprungen\nRest geladen, Details in Gripline.log"
-                          : "Gripline.ini: line skipped\nRest loaded, details in Gripline.log",
-                       NOTIFY_COLOR_ORANGE, de ? "HINWEIS" : "NOTE", 1);
+    notify_show_big(de ? "Gripline.ini: eine Zeile übersprungen" : "Gripline.ini: one line skipped",
+                    de ? "Eine Zeile in Gripline.ini war unverständlich und wurde ausgelassen. Alle anderen "
+                         "Einstellungen gelten.\n\nWelche Zeile: ganz oben in Gripline.log (IGNORED)."
+                       : "One line in Gripline.ini could not be read and was left out. All other settings "
+                         "are used.\n\nWhich line: at the top of Gripline.log (IGNORED).",
+                    NOTIFY_COLOR_ORANGE, de ? "HINWEIS" : "NOTE", 0);
     return 0;
 }
 
@@ -601,12 +640,16 @@ static void start_features(void) {
     summon_set_style(options.summon_style);
     summon_set_sounds(options.summon_sounds);
     walking_set_handheld(options.walk_handheld);
+    noclip_set_walk_door(options.walk_door);
+    noclip_set_freecam_drive(options.freecam_drive);
+    freecam_drive_set_range(options.freecam_range);
     walk_gauge_set_style(options.walk_gauge);
     menu_mouse_start(game); /* after walking: both chain the UI frame */
     focus_guard_start();    /* Azimuth may miss "window active" at the start -> pause menu again and again */
     no_damage_bind(game);
     no_damage_set_mode(options.no_damage);
     noclip_install();
+    pause_tile_install(); /* V7.2: Gripline tile in the pause menu (CARS tab) */
     gripline_set_output_root(media_dir);
     traffic_files_start(mount_dir, options.traffic_level);
     world_files_start(mount_dir, options.speed_cameras, options.car_labels, options.event_icons, options.calm_drivatars);
@@ -636,10 +679,7 @@ static void start_features(void) {
     if (!keyboard_pad_late()) platform_log("keyboard: not active (off in FH2_Keyboard.ini, Mapper running, FH2 Mouse & Keyboard drives, or no hook)");
     if (!notify_install_late()) platform_log("cards: could not hook the game picture");
     if (notify_kind_on(NOTIFY_KIND_START)) {
-        notify_show_deferred_call(start_card); /* the keys as bound now (the key menu can change them) */
-        /* own card "Press F8 to change your keys": only until this version's what's-new cards were seen,
-           later starts show just one card (the start card names F8 too) */
-        if (options.news_seen < GRIPLINE_NEWS_VERSION) notify_show_deferred_call(key_menu_start_card);
+        notify_show_deferred_call(start_card); /* V7.2: the only start card; the menu key as bound now */
     }
     InterlockedExchange(&started, 1);
     if (row_count) sync_rows();
@@ -726,6 +766,8 @@ FH2MOD_EXPORT int fh2mod_init(const FH2ModApi *platform) {
         int cards = notify_install(host);             /* game picture cards */
         platform_log(keys ? "early keyboard hook: yes" : "early keyboard hook: no");
         platform_log(cards ? "early card hook: yes" : "early card hook: no");
+        /* V7.2: the pause menu file, before the game first opens it */
+        platform_log(pause_tile_arm(host, mount_dir) ? "Gripline tile (CARS tab): menu file watched" : "Gripline tile (CARS tab): off");
     }
     /* V7.2: Gripline's list in FH2 ANNA's menu (FH2ANNA.dll started before Gripline.dll, its interface is there) */
     anna_link_add(api->api_version >= 2 && api->get_interface ? api->get_interface("FH2ANNA", 4) : NULL);

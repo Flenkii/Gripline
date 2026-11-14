@@ -200,7 +200,10 @@ static size_t ask_github(void) {
 }
 
 static void show(void) {
-    if (have_card) notify_show_tinted(card, NOTIFY_COLOR_ORANGE, "UPDATE", 1);
+    if (have_card) /* V7.2: big card, with where to get it */
+        notify_show_big(card, game_language_is_german(game) ? "Download: github.com/Flenkii/Gripline (Releases)"
+                                                            : "Download: github.com/Flenkii/Gripline (Releases)",
+                        NOTIFY_COLOR_ORANGE, "UPDATE", 0);
 }
 
 static DWORD WINAPI check_thread(LPVOID unused) {

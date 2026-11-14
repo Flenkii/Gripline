@@ -16,6 +16,8 @@ void key_menu_start(void);
 int key_menu_pad_input(unsigned char *gamepad);
 /* V7.2 (ANNA menu): opens the menu (or closes it), as the F8 key does. Any thread. */
 void key_menu_request_toggle(void);
+/* V7.2 (Gripline tile on Pause > Settings): opens the menu if it is closed. Any thread. */
+void key_menu_request_open(void);
 /* NotifyTextFn for notify_show_deferred_call: own start card naming the menu key */
 int key_menu_start_card(char *out, unsigned size);
 
@@ -27,7 +29,12 @@ typedef struct {
     char label[128], value[96]; /* UTF-8 */
     char key[KEY_MENU_MIRROR_KEY]; /* empty: nothing to choose */
     int style;                     /* KEY_MENU_MIRROR_* */
+    int flags;                     /* KEY_MENU_MIRROR_FLAG_* (what F8 marks with a sign the game font lacks) */
 } KeyMenuMirrorRow;
+#define KEY_MENU_MIRROR_FLAG_ACTIVE 1  /* the chosen one of a list ("✓ active") */
+#define KEY_MENU_MIRROR_FLAG_CHOICE 2  /* one of a list: active, "default" or no value */
+#define KEY_MENU_MIRROR_FLAG_ON 4      /* a switch that is on ("✓ on", "● on") */
+#define KEY_MENU_MIRROR_FLAG_SUBPAGE 8 /* opens a sub-page in F8 ("›") */
 const char *key_menu_mirror_title(unsigned page);       /* page title (English, fixed at the start) */
 const char *key_menu_mirror_label(unsigned page);       /* its row on Gripline's own page */
 const char *key_menu_mirror_description(unsigned page);
@@ -35,4 +42,7 @@ const char *key_menu_mirror_description(unsigned page);
 unsigned key_menu_mirror_rows(unsigned page, KeyMenuMirrorRow *out, unsigned capacity);
 /* A on a row: does what Enter does in F8 (saves, card). Returns 1 if the row was found. */
 int key_menu_mirror_choose(const char *key);
+/* V7.2: the values a row that A steps through can have (for a left/right choice); 0 if it isn't one */
+#define KEY_MENU_MIRROR_VALUE 48
+unsigned key_menu_mirror_values(const char *key, char (*out)[KEY_MENU_MIRROR_VALUE], unsigned cap, int *current);
 #endif

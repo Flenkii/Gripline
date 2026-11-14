@@ -2,7 +2,8 @@
 #define FH2_WALKING_H
 
 /* Walking (V7): get out of the car and walk around on foot, invisible, with collision.
-   Key Walk (FH2_Keyboard.ini, default F; controller: LS held + Y) gets out, offline only
+   Key Walk (FH2_Keyboard.ini, default F; controller: LS held + Y) gets out (V7.2: with the car's door,
+   noclip.c / car_doors.h), offline only
    like noclip. The car stays where it is (noclip.c holds it). Walk key / controller Y near the car
    (WALK_ENTER_DISTANCE) gets back in. The game's HUD is hidden while walking, a Gripline card at the
    top right shows the walking speed and how far the car is.
@@ -36,6 +37,29 @@ void walking_enter(const float position[3], const float right[3], const float fo
 /* Walking on/off (noclip.c, any thread). */
 void walking_set_active(int on);
 int walking_active(void);
+
+/* V7.2 getting out with the door (noclip.c, before walking starts): the side (-1 left, 1 right) and
+   how far behind the car's middle the walker stands. */
+void walking_set_exit(int side, float back);
+/* V7.2: the camera glides by itself (the walker stands). in = 0: from point to the walker's eye, at the
+   start of walking; in = 1: from the walker's eye to point, held there until walking ends. side = the
+   unit vector out of the door (the way goes along it first / last). */
+void walking_glide(int in, const float point[3], const float point_look[3], const float side[3], unsigned ms);
+/* V7.2: the eye and look direction the game's camera had in the last second before walking (any
+   camera / the driver or cockpit camera, not the dashboard cam). 0 = not known. */
+int walking_seen_camera(float eye[3], float look[3]);
+/* V7.2: the driver turns the head to the door (unit vector out of it) while still seated; NULL ends it. */
+void walking_head_turn(const float side[3]);
+/* V7.2 polish: the head fully turned at once (getting in: the door shuts in view), turned back over ms
+   (then it ends by itself), and the look of a seat camera with the head fully turned. */
+void walking_head_turned(const float side[3]);
+void walking_head_turn_back(unsigned ms);
+void walking_head_look(const float look[3], const float side[3], float out[3]);
+/* 1 = the camera glides (getting out / in) */
+int walking_gliding(void);
+/* door8: the glide just set ducks under the roof's edge (from / into a seat) */
+void walking_glide_duck(void);
+int walking_seat_eye(float eye[3], float look[3]);
 
 /* Metres (horizontal) between the walker and the parked car, -1 before the first step. */
 float walking_car_distance(void);

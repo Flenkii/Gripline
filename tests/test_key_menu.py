@@ -528,7 +528,7 @@ def mirror(page):
     text = bytes(e.mu.mem_read(b, 16384)).split(b'\0')[0].decode('utf-8')
     out = []
     for line in text.split('\n')[:n]:
-        label, value, key, style = line.split('|')
+        label, value, key, style, flags = line.split('|')
         out.append((label, value, key, int(style)))
     return out
 def choose(key):

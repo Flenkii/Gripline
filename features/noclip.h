@@ -47,6 +47,13 @@ void noclip_request(int mode);
 
 /* 1 while noclip or freecam is on. */
 int noclip_active(void);
+/* V7.2: getting out / in with the car's door (1, default) or the fade (0); [Gripline] WalkDoor. */
+void noclip_set_walk_door(int on);
+int noclip_walk_door(void);
+/* V7.2: the freecam key starts the freecam while driving (1, default, freecam_drive.h) or the old
+   freecam (0, the car stands); [Gripline] FreecamDrive. */
+void noclip_set_freecam_drive(int on);
+int noclip_freecam_drive(void);
 /* 1 while freecam is on (cockpit_view.c moves the camera, keyboard_pad.c keeps the arrows). */
 int noclip_freecam_active(void);
 /* 1 while freecam or walking is on: they look with the arrows / right stick themselves. */
