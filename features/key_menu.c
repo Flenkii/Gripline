@@ -1590,6 +1590,10 @@ static void captured(unsigned char key) {
 #define PAD_LEFT 16
 #define PAD_RIGHT 32
 static volatile LONG pad_now, pad_toggle;
+
+void key_menu_request_toggle(void) {
+    InterlockedExchange(&pad_toggle, 1);
+}
 static volatile LONG64 pad_tick;
 static LONG pad_was;
 

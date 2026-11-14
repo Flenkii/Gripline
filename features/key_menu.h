@@ -14,6 +14,8 @@ void key_menu_start(void);
    held + D-pad right opens/closes the menu; inside D-pad or left stick up/down move, A chooses, B goes
    back. Returns 1 while the menu has the controller: the reading is then emptied for the game. */
 int key_menu_pad_input(unsigned char *gamepad);
+/* V7.2 (ANNA menu): opens the menu (or closes it), as the F8 key does. Any thread. */
+void key_menu_request_toggle(void);
 /* NotifyTextFn for notify_show_deferred_call: own start card naming the menu key */
 int key_menu_start_card(char *out, unsigned size);
 

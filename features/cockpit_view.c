@@ -22,7 +22,7 @@
 #define OFFSET_FIELD 0x190
 
 static volatile LONG second_view, forward_mm = 350, up_mm = -50;
-static volatile LONG held_by[2];
+static volatile LONG held_by[3]; /* COCKPIT_VIEW_* */
 static void *last_camera;
 static float base[3], written[3];
 static int have_written;
@@ -56,7 +56,7 @@ static void set_view(LONG on) {
 }
 
 void cockpit_view_input(unsigned source, int held) {
-    if (source > 1) return;
+    if (source > COCKPIT_VIEW_ANNA) return;
     LONG before = InterlockedExchange(&held_by[source], held ? 1 : 0);
     if (held && !before) set_view(!second_view);
 }

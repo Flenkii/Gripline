@@ -26,6 +26,7 @@
 #include "features/key_menu.h"
 #include "features/mod_scan.h"
 #include "features/mod_partners.h"
+#include "features/anna_link.h"
 #include "features/nitro_link.h"
 #include "features/notify.h"
 #include "features/report.h"
@@ -618,6 +619,7 @@ static void start_features(void) {
     notify_set_telemetry_look(options.telemetry_pos, options.telemetry_opacity, options.telemetry_size);
     mod_scan_start(directory);
     mod_partners_start(game);
+    anna_link_set_game(game);
     version_check_start(game, directory);
     update_check_start(game, options.update_check);
     report_init(directory);
@@ -725,6 +727,8 @@ FH2MOD_EXPORT int fh2mod_init(const FH2ModApi *platform) {
         platform_log(keys ? "early keyboard hook: yes" : "early keyboard hook: no");
         platform_log(cards ? "early card hook: yes" : "early card hook: no");
     }
+    /* V7.2: Gripline's list in FH2 ANNA's menu (FH2ANNA.dll started before Gripline.dll, its interface is there) */
+    anna_link_add(api->api_version >= 2 && api->get_interface ? api->get_interface("FH2ANNA", 4) : NULL);
     add_rows();
     add_traffic_page();
     add_mirror_pages();

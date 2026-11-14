@@ -134,6 +134,11 @@ static volatile struct {
 static unsigned short pad_buttons[4];
 static volatile LONG pad_request; /* MODE_* asked for with LS + D-pad, handled on the watch thread */
 
+void noclip_request(int mode) {
+    if (mode == MODE_NOCLIP || mode == MODE_FREECAM || mode == MODE_WALK) InterlockedExchange(&pad_request, mode);
+}
+
+
 static float stick(short value) {
     float v = (float)value / 32767.0f, a = v < 0.0f ? -v : v;
     if (a < STICK_DEAD) return 0.0f;

@@ -6,6 +6,7 @@ What changed for players, newest first. Every version is on the [Releases](../..
 ## V7.2 *(in progress)*
 - **Gripline makes room for other mods**: with [FH2 Mouse & Keyboard](https://github.com/qiangqiang101/FH2MouseKeyboard) installed, its keyboard driving, menu cursor and mouse look are used and Gripline's own switch off (a card says so; Gripline's hotkeys such as noclip, freecam, walking and F8 keep working). F8 › Settings › *Let other mods take over* = Off keeps Gripline's own.
 - **NitroSystem** is switched off through its own switch while you walk, fly noclip/freecam, and online when *Nitro also online* is off (its gauge hides too).
+- **Gripline in ANNA's menu**: with [FH2 ANNA](https://github.com/qiangqiang101/FH2_ANNA) installed, D-pad down › *Gripline* has Dashboard Cam on/off, Get Out And Walk, Cruise Control, Telemetry, Free Camera and the Gripline menu – also as ANNA voice commands.
 - The problem report lists which parts Gripline left to which mod.
 
 ## V7.1
