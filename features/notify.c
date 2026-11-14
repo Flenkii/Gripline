@@ -256,6 +256,19 @@ static void show_card_full(const char *text, ULONGLONG hold, unsigned tag, int l
     ReleaseSRWLockExclusive(&lock);
 }
 
+void notify_fade_tag(unsigned tag) {
+    if (!tag) return;
+    ULONGLONG now = GetTickCount64();
+    AcquireSRWLockExclusive(&lock);
+    for (unsigned i = 0; i < card_count; ++i) {
+        if (cards[i].tag != tag) continue;
+        if (!cards[i].shown) cards[i].hold = 0;
+        else if (now - cards[i].shown < cards[i].hold) cards[i].hold = now - cards[i].shown;
+    }
+    InterlockedExchange(&cards_changed, 1);
+    ReleaseSRWLockExclusive(&lock);
+}
+
 void notify_set_color(int index) {
     if (index < 0 || index >= NOTIFY_COLOR_COUNT || InterlockedExchange(&color, index) == index) return;
     AcquireSRWLockExclusive(&lock);

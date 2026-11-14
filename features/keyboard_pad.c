@@ -2,6 +2,7 @@
 #include "keyboard_pad.h"
 #include "mod_scan.h"
 #include "mod_partners.h"
+#include "freecam_drive.h"
 #include "ini_migrate.h"
 #include "game_addresses.h"
 #include "logging.h"
@@ -1020,6 +1021,9 @@ static void keyboard_reading(PadReading *r) {
         /* noclip / freecam: the driving keys only fly (noclip.c), so they do not look like a controller there */
         if (flying && (b->kind == KIND_ACTION || b->kind == KIND_STEER || (b->kind == KIND_NAV && noclip_own_look())))
             pressed = 0; /* noclip keeps the arrows for the game's camera, freecam looks with them itself */
+        /* V7.2 freecam while driving: the arrows fly it, Page up / down too (not LB / RB then) */
+        if (freecam_drive_active() && (b->kind == KIND_NAV || (b->kind == KIND_FIXED && (b->target == IN_LB || b->target == IN_RB))))
+            pressed = 0;
         switch (b->kind) {
             case KIND_STEER:
                 if (pressed) steer_target += b->target ? 1.0 : -1.0;
@@ -1670,6 +1674,11 @@ const char *keyboard_key_ini_name(unsigned char vk, char buffer[8]) {
             if (names[i].vk == vk) return names[i].name;
     }
     return buffer;
+}
+
+/* V7.2: 1 = a keyboard drives the car (Gripline's keyboard gamepad, or FH2 Mouse & Keyboard's) */
+int keyboard_drives(void) {
+    return mod_partners_takes_keyboard() || (wrapped && values[KEY_SETTING_ENABLED]);
 }
 
 int keyboard_key_down(unsigned char vk) {

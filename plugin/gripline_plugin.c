@@ -38,6 +38,7 @@
 #include "features/records.h"
 #include "features/game_language.h"
 #include "features/noclip.h"
+#include "features/freecam_drive.h"
 #include "features/walking.h"
 #include "features/summon.h"
 #include "features/menu_mouse.h"
@@ -47,6 +48,7 @@
 #include "features/update_check.h"
 #include "features/ini_migrate.h"
 #include "features/cruise.h"
+#include "features/pause_tile.h"
 
 void keyboard_pad_game_start(unsigned char *game_image, const wchar_t *settings_directory);
 void report_init(const wchar_t *settings_directory);
@@ -503,6 +505,22 @@ static int azimuth_rotation(void) {
 }
 
 static FH2Hook *noclip_hook;
+static FH2Hook *tile_hooks[6];
+static unsigned tile_hook_count;
+
+/* pause_tile.c: the platform's shared hooks (switched on after pause_tile_start kept the originals) */
+static void *tile_hook_function(const char *name, void *target, void *detour, void **original) {
+    if (api->api_version < 3 || !api->hook_function || !api->enable_hooks || tile_hook_count >= 6) return NULL;
+    FH2Hook *hook = api->hook_function(mod, name, target, detour, original);
+    if (hook) tile_hooks[tile_hook_count++] = hook;
+    return hook;
+}
+
+static void pause_tile_install(void) {
+    if (!pause_tile_start(game, media_dir, tile_hook_function)) return; /* nothing switched on: details in the log */
+    for (unsigned i = 0; i < tile_hook_count; ++i)
+        if (!api->enable_hooks(mod, tile_hooks[i])) log_append("PAUSETILE: the platform could not switch a hook on.\r\n");
+}
 
 static int noclip_switch(int on) {
     return on ? api->enable_hooks(mod, noclip_hook) : api->disable_hooks(mod, noclip_hook);
@@ -601,12 +619,16 @@ static void start_features(void) {
     summon_set_style(options.summon_style);
     summon_set_sounds(options.summon_sounds);
     walking_set_handheld(options.walk_handheld);
+    noclip_set_walk_door(options.walk_door);
+    noclip_set_freecam_drive(options.freecam_drive);
+    freecam_drive_set_range(options.freecam_range);
     walk_gauge_set_style(options.walk_gauge);
     menu_mouse_start(game); /* after walking: both chain the UI frame */
     focus_guard_start();    /* Azimuth may miss "window active" at the start -> pause menu again and again */
     no_damage_bind(game);
     no_damage_set_mode(options.no_damage);
     noclip_install();
+    pause_tile_install(); /* V7.2: Gripline tile in the pause menu (CARS tab) */
     gripline_set_output_root(media_dir);
     traffic_files_start(mount_dir, options.traffic_level);
     world_files_start(mount_dir, options.speed_cameras, options.car_labels, options.event_icons, options.calm_drivatars);
@@ -726,6 +748,8 @@ FH2MOD_EXPORT int fh2mod_init(const FH2ModApi *platform) {
         int cards = notify_install(host);             /* game picture cards */
         platform_log(keys ? "early keyboard hook: yes" : "early keyboard hook: no");
         platform_log(cards ? "early card hook: yes" : "early card hook: no");
+        /* V7.2: the pause menu file, before the game first opens it */
+        platform_log(pause_tile_arm(host, mount_dir) ? "Gripline tile (CARS tab): menu file watched" : "Gripline tile (CARS tab): off");
     }
     /* V7.2: Gripline's list in FH2 ANNA's menu (FH2ANNA.dll started before Gripline.dll, its interface is there) */
     anna_link_add(api->api_version >= 2 && api->get_interface ? api->get_interface("FH2ANNA", 4) : NULL);

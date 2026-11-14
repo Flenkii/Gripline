@@ -7,6 +7,7 @@
 #include "keyboard_pad.h"
 #include "noclip.h"
 #include "walking.h"
+#include "freecam_drive.h"
 
 #define LOOK_RAD_PER_COUNT 0.0018f /* at DriveMouseLook=100, like walking */
 #define LOOK_EASE 0.035f           /* the camera follows the mouse a little behind (s) */
@@ -103,7 +104,7 @@ void drive_look_frame(void) {
     if (last.QuadPart && dt < 0.002f) return; /* several cameras in one frame */
     last = now;
     if (!(dt > 0.0f) || dt > 0.1f) dt = 1.0f / 60.0f;
-    if (walking_active() || noclip_active()) { /* they have the camera: start straight afterwards */
+    if (walking_active() || noclip_active() || freecam_drive_active()) { /* they have the camera: start straight afterwards */
         target_yaw = target_pitch = yaw = pitch = 0.0f;
         return;
     }
@@ -138,7 +139,7 @@ int drive_look_apply(void *camera, unsigned index, unsigned family, unsigned eye
     if (index >= SAVED_CAMERAS) return 0;
     saved[index].camera = NULL;
     if (yaw == 0.0f && pitch == 0.0f) return 0;
-    if (walking_active() || noclip_active()) return 0;
+    if (walking_active() || noclip_active() || freecam_drive_active()) return 0;
     unsigned char *c = (unsigned char *)camera;
     double e[3];
     float d[4];

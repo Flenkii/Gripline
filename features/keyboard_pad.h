@@ -70,6 +70,7 @@ void keyboard_binding_set(unsigned index, const unsigned char vk[4]); /* at once
 void keyboard_keys_text(const unsigned char vk[4], int german, wchar_t *out, unsigned capacity);
 const char *keyboard_key_ini_name(unsigned char vk, char buffer[8]);
 int keyboard_key_down(unsigned char vk); /* held and the game window has the focus */
+int keyboard_drives(void); /* V7.2: a keyboard drives the car (Gripline's or FH2 Mouse & Keyboard's) */
 /* 1 = the game, noclip and freecam get no key (menu open); 0 = keys held now stay ignored until released */
 void keyboard_block_input(int blocked);
 void keyboard_key_list_restore(void); /* after the menu: key list (F5) again if it was on, else nothing */

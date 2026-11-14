@@ -19,7 +19,7 @@ KEYS = ['TrafficLevel', 'RushHourAllDay', 'Notifications', 'SteeringAnimation', 
         'CockpitViewUp', 'CardColor', 'CardStyle', 'UpdateCheck', 'SpeedCameras', 'CarLabels', 'Telemetry',
         'TelemetryShow', 'EventIcons', 'NewsSeen', 'NoDamage', 'CardsHidden', 'CruiseCrashOff', 'CruiseMinSpeed', 'CruiseSlowOff',
         'TelemetryPosition', 'TelemetryOpacity', 'TelemetrySize', 'WalkHandheld', 'CalmDrivatars', 'WalkGauge',
-        'SummonStyle', 'SummonSounds', 'NitroOnline']
+        'SummonStyle', 'SummonSounds', 'NitroOnline', 'YieldToMods', 'WalkDoor', 'FreecamDrive', 'FreecamRange']
 
 
 def read(text):
@@ -75,6 +75,13 @@ check(v['CalmDrivatars'] == 0, 'CalmDrivatars Standard aus')
 check(v['SummonStyle'] == 1 and v['SummonSounds'] == 1, 'V7.1 Auto rufen Standard: Normal, Sounds an')
 ok, v, n, s = read('[Gripline]\r\nSummonStyle=2\r\nSummonSounds=0\r\n')
 check(ok == 1 and v['SummonStyle'] == 2 and v['SummonSounds'] == 0, 'V7.1 SummonStyle / SummonSounds gelesen')
+ok, v, n, s = read(None)
+check(v['WalkDoor'] == 1 and v['YieldToMods'] == 1, 'V7.2 Standard: Aussteigen mit Tuer, andere Mods vorlassen')
+ok, v, n, s = read('[Gripline]\r\nWalkDoor=0\r\n')
+check(ok == 1 and v['WalkDoor'] == 0, 'V7.2 WalkDoor gelesen')
+check(v['FreecamDrive'] == 1 and v['FreecamRange'] == 500, 'V7.2 Standard: Freecam mit fahrendem Auto, 500 m')
+ok, v, n, s = read('[Gripline]\r\nFreecamDrive=0\r\nFreecamRange=0\r\n')
+check(ok == 1 and v['FreecamDrive'] == 0 and v['FreecamRange'] == 0, 'V7.2 FreecamDrive / FreecamRange gelesen')
 
 print(f'\n{checks[0]} checks, {len(fails)} failed')
 sys.exit(1 if fails else 0)

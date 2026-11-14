@@ -35,6 +35,9 @@ const SettingDefinition setting_definitions[] = {
     SETTING("Gripline", "SummonSounds", summon_sounds, SETTING_MASK),
     SETTING("Gripline", "NitroOnline", nitro_online, SETTING_BOOLEAN),
     SETTING("Gripline", "YieldToMods", yield_to_mods, SETTING_BOOLEAN),
+    SETTING("Gripline", "WalkDoor", walk_door, SETTING_BOOLEAN),
+    SETTING("Gripline", "FreecamDrive", freecam_drive, SETTING_BOOLEAN),
+    SETTING("Gripline", "FreecamRange", freecam_range, SETTING_MASK),
 };
 
 const size_t setting_count = ARRAY_COUNT(setting_definitions);
@@ -55,6 +58,9 @@ void settings_defaults(ModOptions *options) {
         .event_icons = 1,
         .telemetry_show = -1, /* telemetry.c default */
         .walk_handheld = 2, /* medium (V7.1) */
+        .walk_door = 1, /* V7.2 */
+        .freecam_drive = 1, /* V7.2: the car drives on (Marvin 14.11.2026) */
+        .freecam_range = 500, /* metres from the car, 0 = no limit */
         .summon_style = 1,  /* normal (V7.1) */
         .summon_sounds = 1, /* on (V7.1, Marvin 08.11.2026) */
         .walk_gauge = 3, /* step pulse (V7.1, Marvin 08.11.2026) */

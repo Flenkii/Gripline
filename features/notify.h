@@ -16,6 +16,8 @@ void notify_show(const char *text);
 void notify_show_step(const char *text, unsigned tag, unsigned hold_ms);
 /* Same, for values updated several times a second (noclip height and speed): not logged. */
 void notify_show_live(const char *text, unsigned tag, unsigned hold_ms);
+/* V7.2 polish: the cards with this tag fade out now (e.g. the freecam keys when the game pauses) */
+void notify_fade_tag(unsigned tag);
 /* a card in a fixed colour (NOTIFY_COLOR_*, whatever the setting says); badge (UTF-8, may be NULL) goes after
    GRIPLINE in the title line, e.g. "WARNUNG" on red warning cards; long_hold = as long as a start card */
 void notify_show_tinted(const char *text, int color, const char *badge, int long_hold);

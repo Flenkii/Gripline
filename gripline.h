@@ -41,6 +41,9 @@ typedef struct {
     int walk_gauge; /* [Gripline] WalkGauge: walking gauge at the bottom right, 0 off, 1 ring, 2 racing bar, 3 step pulse (V7.1, walk_gauge.h) */
     int summon_style; /* [Gripline] SummonStyle: how the summoned car drives itself, 0 calm, 1 normal, 2 sporty (V7.1, summon.h) */
     int summon_sounds; /* [Gripline] SummonSounds: autopilot sounds at the start / end of a summon, 0 off, 1 on (V7.1) */
+    int freecam_drive; /* [Gripline] FreecamDrive: F7 freecam, 1 (default, V7.2) the car drives on, 0 the old one (the car stands), noclip.h */
+    int freecam_range; /* [Gripline] FreecamRange: metres the freecam while driving may be from the car, 0 = no limit (500, V7.2) */
+    int walk_door; /* [Gripline] WalkDoor: getting out / in with the car's door (1, default, V7.2) or the fade (0), noclip.h */
     int walk_handheld; /* [Gripline] WalkHandheld: walking camera like a phone in the hand, 0 off .. 3 strong (V7.1, walking.h) */
 } ModOptions;
 #endif

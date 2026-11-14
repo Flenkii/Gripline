@@ -31,6 +31,8 @@
 #include "walking.h"
 #include "drive_look.h"
 #include "summon.h"
+#include "car_doors.h"
+#include "freecam_drive.h"
 
 #define RVA_DYNAMICS_VTABLE 0x2eb4bb8u
 #define RVA_DYNAMICS_REF_VTABLE 0x2eb5e18u
@@ -117,6 +119,7 @@ int noclip_own_look(void) {
 #define XI_START 0x0010u
 #define XI_BACK 0x0020u
 #define XI_LS 0x0040u
+#define XI_RS 0x0080u
 #define XI_A 0x1000u
 #define XI_B 0x2000u
 #define XI_X 0x4000u
@@ -188,6 +191,13 @@ void noclip_pad_input(unsigned user, unsigned char *gamepad) {
     if (on == MODE_FREECAM) { /* the right stick looks for the freecam, not for the game's camera */
         short zero[2] = {0, 0};
         memory_copy(gamepad + 8, zero, sizeof(zero));
+    }
+    if (freecam_drive_active()) { /* V7.2 freecam while driving: right stick looks, its click fixes */
+        freecam_drive_pad(pads[user].rx, pads[user].ry, (pressed & XI_RS) != 0);
+        short zero[2] = {0, 0};
+        memory_copy(gamepad + 8, zero, sizeof(zero));
+        buttons &= (unsigned short)~XI_RS;
+        memory_copy(gamepad, &buttons, sizeof(buttons));
     }
     if (on == MODE_WALK) {
         /* on foot: Y gets back in; the game only keeps Start and Back (pause, map), the car stands */
@@ -663,6 +673,19 @@ static void card(const char *german, const char *english) {
     notify_show(game_language_is_german(game) ? german : english);
 }
 
+/* V7.2 polish (Marvin 14.11.2026: should feel like the game, not a mod): the key help of noclip /
+   freecam only the first time each, one card that a newer one replaces, gone when switched off or
+   when the game pauses (photo mode, menu) */
+#define KEYS_TAG 0x4e4b00u
+static void keys_card(int *shown, const char *german, const char *english) {
+    if ((*shown)++) return;
+    notify_show_step(game_language_is_german(game) ? german : english, KEYS_TAG, 7000);
+}
+
+static void keys_card_away(void) {
+    notify_fade_tag(KEYS_TAG);
+}
+
 static void tinted(const char *german, const char *english, int color) {
     int de = game_language_is_german(game);
     /* locked online: always the red warning, whatever card colour is set (rainbow too) */
@@ -733,7 +756,10 @@ static ULONGLONG fade_at;
 static int fade_shut; /* the door has shut (sound played) */
 
 static void walk_out_card(void) {
-    card("Ausgestiegen - Walking an\nWASD/linker Stick laufen, Maus/Pfeile/rechter Stick schauen, Shift/RT rennen, "
+    /* polish (Marvin 14.11.2026: should feel like the game, not a mod): the keys only the first time */
+    static int keys_shown;
+    if (!keys_shown++)
+        card("Ausgestiegen - Walking an\nWASD/linker Stick laufen, Maus/Pfeile/rechter Stick schauen, Shift/RT rennen, "
          "Strg/B ducken, Leertaste/A springen, F/Y einsteigen",
          "Out of the car - walking on\nWASD/left stick walk, mouse/arrows/right stick look, Shift/RT run, "
          "Ctrl/B crouch, Space/A jump, F/Y get in");
@@ -750,12 +776,14 @@ static void walk_out_card(void) {
 /* V7.1 (Marvin 07.11.2026): out of a cockpit view the car would be seen as the game's cut interior
    model. In the black the camera goes outside first; back in the car the old view comes back. */
 #define FADE_CAMERA_WAIT_MS 3000 /* at most this much longer black while the camera changes */
+static volatile LONG door_side; /* V7.2, below */
 static void fade_begin(LONG to) {
     fade_to = to;
     fade_stage = 1;
     fade_at = GetTickCount64();
     notify_fade_black(1000, FADE_DOWN_MS);
     if (to == MODE_WALK) {
+        walking_set_exit(door_side, 0.0f); /* V7.2: the driver's side if known (no door: next to it, looking ahead) */
         view_before = walking_view_camera();
         second_before = cockpit_view_second();
         view_changed = view_before >= 0 && !walking_view_outside();
@@ -774,6 +802,14 @@ static void fade_tick(ULONGLONG now) {
         /* out of the car: wait in the black until the outside camera is there */
         if (fade_to == MODE_WALK && cockpit_view_want_pending() && now < fade_at + FADE_DOWN_MS + FADE_CAMERA_WAIT_MS)
             return;
+        if (fade_to == MODE_WALK && view_changed && !walking_view_outside()) { /* V7.2: see door_stay */
+            cockpit_view_want_camera(view_before, second_before), view_changed = 0;
+            fade_stop();
+            log_append("NOCLIP: getting out stopped - the game did not change to an outside camera (rewind / replay?).\r\n");
+            card("Aussteigen geht gerade nicht\nDas Spiel wechselt die Kamera nicht (z.B. Rewind)",
+                 "Cannot get out right now\nThe game does not change the camera (e.g. rewind)");
+            return;
+        }
         walking_door_sound(0);
         set_on(fade_to);
         if (on != fade_to) { /* not switched (see the log) */
@@ -796,8 +832,7 @@ static void fade_tick(ULONGLONG now) {
     } else if (fade_stage == 2 && now >= fade_at + FADE_HOLD_MS &&
                !(cockpit_view_want_pending() && now < fade_at + FADE_HOLD_MS + FADE_CAMERA_WAIT_MS)) {
         notify_fade_black(0, FADE_UP_MS);
-        if (fade_to == MODE_WALK) walk_out_card();
-        else card("Eingestiegen", "Back in the car");
+        if (fade_to == MODE_WALK) walk_out_card(); /* (polish: no "back in the car" card any more) */
         fade_stage = 3;
         fade_at = now;
     } else if (fade_stage == 3 && now >= fade_at + FADE_UP_MS) {
@@ -805,11 +840,507 @@ static void fade_tick(ULONGLONG now) {
     }
 }
 
+/* V7.2 (Marvin 14.11.2026): getting out / in like in the game, without the black picture: the
+   driver's door opens (the car's own animation, car_doors.h), the camera glides out of the seat
+   through the door to the walker, the door shuts; getting in the other way round. Out of a cockpit
+   camera the game would show its cut interior model from outside, so there the picture dips to black
+   only while the camera changes (as short as it takes). A car without the door animation, or
+   [Gripline] WalkDoor=0 (F8 > Settings), gets the fade as before. */
+#define DOOR_ANSWER_MS 400     /* the car thread opens the door within this, else the fade */
+#define DOOR_SEEN_MS 1100      /* the door opens while still seated (the head turns to it) */
+/* polish (Marvin 14.11.2026, video 5: "noch nicht sehr gut"): longer, softer glides that turn evenly,
+   a blink rather than a black picture (down quick, up slow while the camera already moves) */
+#define DOOR_DIP_DOWN_MS 200
+#define DOOR_DIP_UP_MS 450
+#define DOOR_GLIDE_MS 1700     /* out of the seat / the camera before to the walker */
+#define DOOR_IN_GLIDE_MS 1400  /* the walker into the seat */
+#define DOOR_BACK_GLIDE_MS 1800 /* getting in with an outside camera: back to it (the door shuts on the way) */
+#define DOOR_SHUT_AFTER_MS 150 /* after the glide out: the door shuts (the walker looks at it) */
+#define DOOR_IN_SHUT_MS 250    /* back in a seat camera: the door shuts this long after the picture is back */
+#define DOOR_IN_LOOK_MS 500    /* ... and then the head turns back to the road */
+#define DOOR_SETTLE_MS 2500    /* after the door shut: the car's animation detail back (car_doors_settle) */
+#define DOOR_BACK 0.9f         /* the walker stands this far behind the car's middle (the door's way) */
+/* door8 (Tesla video 14.11.2026): from a cockpit camera the glide starts (getting in: ends) out here,
+   clear of the car's shell - 0.5 m out showed the mirror, the ground and the shell's dark inside for
+   about half a second. Seat eye about 0.4 m from the car's middle, its side about 0.6 m out of it. */
+#define DOOR_SEAT_OUT 1.0f
+#define DOOR_SEAT_BACK 0.35f /* behind the open door's edge */
+#define DOOR_SEAT_UP 0.05f
+/* door9 (Marvin's video 14.11.2026, 5 cars): looking out from there showed grass / road and black bits of the
+   open door (the game's outside model has no inside of the door: from behind only its edges show). Now the
+   look goes back at the seat, a little down: the car, its open side and the seats, the door out of view. */
+#define DOOR_SEAT_LOOK_DOWN 0.25f
+/* door10 (Marvin 14.11.2026: getting in, the camera stays too far out before the dip): into a cockpit
+   camera the glide goes on into the door opening, the picture gets dark on the way (dark when it passes
+   the car's side, the shell's inside is not seen) */
+#define DOOR_IN_SEAT_OUT 0.3f
+#define DOOR_IN_SEAT_BACK 0.1f
+#define DOOR_IN_DARK_BEFORE_MS 550 /* the dip starts this long before the glide ends */
+#define DOOR_IN_DIP_MS 320
+#define DOOR_OUTSIDE 0.5f      /* the glide starts / ends this far out of the seat: the car's outside model
+                                  has only a dark shell inside, the cockpit model is not drawn then */
+static volatile LONG walk_door = 1;
+static volatile LONG door_ask;    /* car thread: 1 open (getting out), 2 open (getting in), 3 close, 4 settle */
+static volatile LONG door_answer; /* 0 waiting, 1 open, -1 no door */
+static volatile LONG door_side = CAR_DOOR_LEFT;
+static float door_out[3];         /* world, unit: out of the door */
+static float door_back[3];        /* world, unit: to the car's back (door8) */
+static float seat_local[3];       /* the seat eye from the car's middle: right, up, forward */
+static float seat_look_local[3];
+static volatile LONG seat_known;
+static float view_local[3], view_look_local[3]; /* the outside camera before getting out, as seat_local */
+static volatile LONG view_known;
+static int door_stage;            /* watch thread: 1-6 getting out, 11-18 getting in */
+static ULONGLONG door_at, door_settle_at;
+static int door_dip, door_missing_logged;
+static ULONGLONG door_dark_at; /* the dip began (the time in the dark is logged) */
+static float door_from[3], door_from_look[3];
+
+void noclip_set_walk_door(int on) {
+    InterlockedExchange(&walk_door, on ? 1 : 0);
+}
+
+int noclip_walk_door(void) {
+    return walk_door != 0;
+}
+
+static float dot3(const float a[3], const float b[3]) {
+    return a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+}
+
+static void unit3(float v[3]) {
+    float n = root(dot3(v, v));
+    if (n > 0.0001f) v[0] /= n, v[1] /= n, v[2] /= n;
+}
+
+/* the car's place and its right / up / forward rows (unit), car update thread */
+static int car_rows(void *car, float p[3], float r[3], float u[3], float f[3]) {
+    void *dynamics = car_body(car);
+    GetStateFn get = dynamics ? (GetStateFn)slot(dynamics, SLOT_GET_STATE) : NULL;
+    if (!get) return 0;
+    _Alignas(16) BodyState state;
+    get(dynamics, &state);
+    _Alignas(16) float a[4], b[4], c[4], d[4];
+    _mm_store_ps(a, state.position), _mm_store_ps(b, state.right), _mm_store_ps(c, state.up), _mm_store_ps(d, state.forward);
+    for (unsigned i = 0; i < 3; ++i) {
+        p[i] = a[i], r[i] = b[i], u[i] = c[i], f[i] = d[i];
+        if (!float_is_finite(p[i]) || !float_is_finite(r[i]) || !float_is_finite(u[i]) || !float_is_finite(f[i])) return 0;
+    }
+    unit3(r), unit3(u), unit3(f);
+    return 1;
+}
+
+/* car update thread, the own car: what the watch thread asked for */
+static void door_car_step(void *car) {
+    LONG ask = InterlockedExchange(&door_ask, 0);
+    if (!ask) return;
+    if (ask == 3) {
+        car_door_move(game, car, door_side, 0);
+        return;
+    }
+    if (ask == 4) {
+        car_doors_settle(game, car);
+        return;
+    }
+    float p[3], r[3], u[3], f[3];
+    if (!car_rows(car, p, r, u, f)) {
+        InterlockedExchange(&door_answer, -1);
+        return;
+    }
+    if (ask == 1) { /* the driver's side from where the seat camera was (right-hand drive: right) */
+        float e[3], l[3];
+        if (walking_seat_eye(e, l)) {
+            float d[3] = {e[0] - p[0], e[1] - p[1], e[2] - p[2]};
+            seat_local[0] = dot3(d, r), seat_local[1] = dot3(d, u), seat_local[2] = dot3(d, f);
+            seat_look_local[0] = dot3(l, r), seat_look_local[1] = dot3(l, u), seat_look_local[2] = dot3(l, f);
+            InterlockedExchange(&seat_known, 1);
+            InterlockedExchange(&door_side, seat_local[0] > 0.1f ? CAR_DOOR_RIGHT : CAR_DOOR_LEFT);
+        }
+    }
+    if (ask == 1) { /* an outside camera: getting back in glides back to it (V7.2, Marvin: no cut) */
+        float e[3], l[3];
+        InterlockedExchange(&view_known, 0);
+        if (walking_view_outside() && walking_seen_camera(e, l)) {
+            float d[3] = {e[0] - p[0], e[1] - p[1], e[2] - p[2]};
+            view_local[0] = dot3(d, r), view_local[1] = dot3(d, u), view_local[2] = dot3(d, f);
+            view_look_local[0] = dot3(l, r), view_look_local[1] = dot3(l, u), view_look_local[2] = dot3(l, f);
+            InterlockedExchange(&view_known, 1);
+            char line[96];
+            size_t n = 0;
+            put_text_card(line, &n, "DOORS: outside camera before getting out, car-local cm: ");
+            for (unsigned i = 0; i < 3; ++i) put_int_card(line, &n, (int)(view_local[i] * 100.0f)), put_text_card(line, &n, " ");
+            put_text_card(line, &n, "\r\n");
+            log_append(line);
+        }
+    }
+    float side = door_side > 0 ? 1.0f : -1.0f;
+    door_out[0] = r[0] * side, door_out[1] = r[1] * side, door_out[2] = r[2] * side;
+    door_back[0] = -f[0], door_back[1] = -f[1], door_back[2] = -f[2];
+    int ok = car_door_exists(game, car, door_side) && car_door_move(game, car, door_side, 1);
+    InterlockedExchange(&door_answer, ok ? 1 : -1);
+}
+
+/* the seat in the world now, from the parked car (watch thread, getting in) */
+static void seat_world(float eye_out[3], float look_out[3]) {
+    _Alignas(16) float p[4], r[4], u[4], f[4];
+    _mm_store_ps(p, parked.position), _mm_store_ps(r, parked.right), _mm_store_ps(u, parked.up), _mm_store_ps(f, parked.forward);
+    unit3(r), unit3(u), unit3(f);
+    /* not known (an outside camera all the time): about where a driver's eyes are */
+    float side = door_side > 0 ? 1.0f : -1.0f;
+    float sl[3] = {side * 0.38f, 0.55f, -0.2f}, ll[3] = {0.0f, -0.08f, 1.0f};
+    if (seat_known) for (unsigned i = 0; i < 3; ++i) sl[i] = seat_local[i], ll[i] = seat_look_local[i];
+    for (unsigned i = 0; i < 3; ++i) {
+        eye_out[i] = p[i] + r[i] * sl[0] + u[i] * sl[1] + f[i] * sl[2];
+        look_out[i] = r[i] * ll[0] + u[i] * ll[1] + f[i] * ll[2];
+    }
+    unit3(look_out);
+    door_out[0] = r[0] * side, door_out[1] = r[1] * side, door_out[2] = r[2] * side;
+    door_back[0] = -f[0], door_back[1] = -f[1], door_back[2] = -f[2];
+}
+
+/* door8: the point beside the seat, clear of the car's shell, and the look from there */
+static void seat_outside(float eye[3], float look[3]) {
+    for (unsigned i = 0; i < 3; ++i) eye[i] += door_out[i] * DOOR_SEAT_OUT + door_back[i] * DOOR_SEAT_BACK;
+    eye[1] += DOOR_SEAT_UP;
+    if (!look) return;
+    for (unsigned i = 0; i < 3; ++i) look[i] = -(door_out[i] * DOOR_SEAT_OUT + door_back[i] * DOOR_SEAT_BACK);
+    look[1] -= DOOR_SEAT_UP + DOOR_SEAT_LOOK_DOWN;
+    unit3(look);
+}
+
+/* the outside camera from before getting out, from the parked car (watch thread, getting in) */
+static void view_world(float eye_out[3], float look_out[3]) {
+    _Alignas(16) float p[4], r[4], u[4], f[4];
+    _mm_store_ps(p, parked.position), _mm_store_ps(r, parked.right), _mm_store_ps(u, parked.up), _mm_store_ps(f, parked.forward);
+    unit3(r), unit3(u), unit3(f);
+    for (unsigned i = 0; i < 3; ++i) {
+        eye_out[i] = p[i] + r[i] * view_local[0] + u[i] * view_local[1] + f[i] * view_local[2];
+        look_out[i] = r[i] * view_look_local[0] + u[i] * view_look_local[1] + f[i] * view_look_local[2];
+    }
+    unit3(look_out);
+}
+
+static void door_close(ULONGLONG now) { /* watch thread */
+    InterlockedExchange(&door_ask, 3);
+    door_settle_at = now + DOOR_SETTLE_MS;
+}
+
+static void door_no_door(LONG to) {
+    if (!door_missing_logged) {
+        door_missing_logged = 1;
+        log_append("DOORS: this car has no door animation Gripline knows (or the game code differs) - fade instead.\r\n");
+    }
+    door_stage = 0;
+    fade_begin(to);
+}
+
+static void door_begin(LONG to, ULONGLONG now) {
+    InterlockedExchange(&door_answer, 0);
+    InterlockedExchange(&door_ask, to == MODE_WALK ? 1 : 2);
+    door_stage = to == MODE_WALK ? 1 : 11;
+    door_at = now;
+}
+
+static void door_stop(void) { /* online: everything back at once */
+    if (!door_stage) return;
+    walking_head_turn(NULL);
+    if (door_dip) notify_fade_black(0, 200), door_dip = 0;
+    door_stage = 0;
+    door_close(GetTickCount64());
+}
+
+/* out of a cockpit camera, but the game did not change the camera (Marvin's test 14.11.: in the
+   rewind menu): walking would show the car's cut interior model - stay in the car */
+static void door_stay(ULONGLONG now) {
+    walking_head_turn(NULL);
+    if (view_changed) cockpit_view_want_camera(view_before, second_before), view_changed = 0;
+    if (door_dip) notify_fade_black(0, DOOR_DIP_UP_MS), door_dip = 0;
+    door_close(now);
+    walking_door_sound(1);
+    door_stage = 0;
+    log_append("NOCLIP: getting out stopped - the game did not change to an outside camera (rewind / replay?).\r\n");
+    card("Aussteigen geht gerade nicht\nDas Spiel wechselt die Kamera nicht (z.B. Rewind)",
+         "Cannot get out right now\nThe game does not change the camera (e.g. rewind)");
+}
+
+static void door_walk(ULONGLONG now) {
+    walking_head_turn(NULL);
+    walking_set_exit(door_side, DOOR_BACK);
+    walking_glide(0, door_from, door_from_look, door_out, DOOR_GLIDE_MS);
+    if (view_changed) walking_glide_duck(); /* door8: out of the seat */
+    set_on(MODE_WALK);
+    if (on != MODE_WALK) { /* not switched (see the log): back as it was */
+        if (view_changed) cockpit_view_want_camera(view_before, second_before), view_changed = 0;
+        if (door_dip) notify_fade_black(0, 200), door_dip = 0;
+        door_close(now);
+        door_stage = 0;
+        return;
+    }
+    if (door_dip) {
+        log_append_value("DOORS: getting out - ms in the dark (the game's camera change): ", (int)(now - door_dark_at));
+        notify_fade_black(0, DOOR_DIP_UP_MS), door_dip = 0;
+    }
+    info_from = now + DOOR_GLIDE_MS + INFO_DELAY_MS;
+    log_append(door_side > 0 ? "NOCLIP: walking on (out of the car, right door)\r\n" : "NOCLIP: walking on (out of the car, left door)\r\n");
+    door_stage = 5;
+    door_at = now;
+}
+
+static void door_tick(ULONGLONG now) {
+    switch (door_stage) {
+        case 1: /* getting out: the door is opening? */
+        case 11: {
+            LONG to = door_stage == 1 ? MODE_WALK : 0;
+            LONG answer = door_answer;
+            if (answer < 0 || (!answer && now >= door_at + DOOR_ANSWER_MS)) {
+                door_no_door(to);
+                return;
+            }
+            if (!answer) return;
+            walking_door_sound(0);
+            door_at = now;
+            if (to == MODE_WALK) {
+                view_before = walking_view_camera();
+                second_before = cockpit_view_second();
+                view_changed = view_before >= 0 && !walking_view_outside();
+                if (view_changed && walking_seat_eye(door_from, door_from_look)) {
+                    /* door8: after the dip already outside, beside the open door (the seat's look turned
+                       a little out; the head turns to the door before the dip) */
+                    seat_outside(door_from, door_from_look);
+                    walking_head_turn(door_out);
+                } else if (!walking_seen_camera(door_from, door_from_look)) {
+                    seat_world(door_from, door_from_look); /* (not parked yet: only a rough start) */
+                }
+                door_stage = 2;
+            } else if (!view_changed && view_known) { /* an outside camera before: back to it */
+                float to[3], to_look[3];
+                view_world(to, to_look);
+                walking_glide(1, to, to_look, door_out, DOOR_BACK_GLIDE_MS);
+                door_stage = 15;
+            } else {
+                float seat[3], look_at[3];
+                seat_world(seat, look_at);
+                if (view_changed) { /* door10: into the door opening; door11 (Marvin: one does not get in head
+                                         first looking at the passenger seat): looking ahead like the
+                                         seat, as sitting down */
+                    for (unsigned i = 0; i < 3; ++i)
+                        seat[i] += door_out[i] * DOOR_IN_SEAT_OUT + door_back[i] * DOOR_IN_SEAT_BACK;
+                    /* door12 (Marvin: a little more out, like the cockpit camera): the look of the seat
+                       with the head turned to the door - the same as right after the dip */
+                    walking_head_look(look_at, door_out, look_at);
+                } else {
+                    for (unsigned i = 0; i < 3; ++i) seat[i] += door_out[i] * DOOR_OUTSIDE * 0.9f;
+                }
+                walking_glide(1, seat, look_at, door_out, DOOR_IN_GLIDE_MS);
+                if (view_changed) walking_glide_duck(); /* door8: into the seat */
+                door_stage = 12;
+            }
+            return;
+        }
+        case 2: /* seated, the door open: now out */
+            if (now < door_at + DOOR_SEEN_MS) return;
+            if (view_changed) { /* a cockpit camera: dip while it changes to an outside camera */
+                notify_fade_black(1000, DOOR_DIP_DOWN_MS);
+                door_dip = 1;
+                door_dark_at = now;
+                door_stage = 3;
+                door_at = now;
+                return;
+            }
+            door_walk(now);
+            return;
+        case 3: /* dark: now the camera button (V7.2: not before, one press, so the dark is short) */
+            if (now < door_at + DOOR_DIP_DOWN_MS) return;
+            cockpit_view_want_outside();
+            door_stage = 4;
+            door_at = now;
+            return;
+        case 4:
+            if (cockpit_view_want_pending() && now < door_at + FADE_CAMERA_WAIT_MS) return;
+            if (!walking_view_outside()) {
+                door_stay(now);
+                return;
+            }
+            door_walk(now);
+            return;
+        case 5: /* out, the camera glides: then the door shuts (door9: out of a cockpit camera already on the
+                   way, the open door shows only its edges from behind) */
+            if (now < door_at + (view_changed ? DOOR_GLIDE_MS * 50 / 100 : DOOR_GLIDE_MS + DOOR_SHUT_AFTER_MS)) return;
+            door_close(now);
+            walking_door_sound(1);
+            door_stage = 6;
+            return;
+        case 6: /* the glide done: walking */
+            if (now < door_at + DOOR_GLIDE_MS) return;
+            walk_out_card();
+            door_stage = 0;
+            return;
+        case 12: /* getting in: the camera glides into the seat */
+            if (now < door_at + (view_changed ? DOOR_IN_GLIDE_MS - DOOR_IN_DARK_BEFORE_MS : DOOR_IN_GLIDE_MS + 50)) return;
+            if (view_changed) { /* back to a cockpit camera: dip while it changes (door10: on the way in) */
+                notify_fade_black(1000, DOOR_IN_DIP_MS);
+                door_dip = 1;
+                door_dark_at = now;
+                door_stage = 13;
+                door_at = now;
+                return;
+            }
+            set_on(0);
+            door_close(now);
+            walking_door_sound(1);
+            log_append("NOCLIP: walking off - back in the car (door).\r\n");
+            door_stage = 0;
+            return;
+        case 13:
+            if (now < door_at + DOOR_IN_DIP_MS) return;
+            set_on(0); /* the camera from before comes back (set_on) */
+            /* polish: seated with the head still at the open door - it shuts in view (stage 17) */
+            walking_head_turned(door_out);
+            log_append("NOCLIP: walking off - back in the car (door).\r\n");
+            door_stage = 14;
+            door_at = now;
+            return;
+        case 14:
+            if (cockpit_view_want_pending() && now < door_at + FADE_CAMERA_WAIT_MS) return;
+            log_append_value("DOORS: getting in - ms in the dark (the game's camera change): ", (int)(now - door_dark_at));
+            notify_fade_black(0, DOOR_DIP_UP_MS);
+            door_dip = 0;
+            door_stage = 17;
+            door_at = now;
+            return;
+        case 17: /* the picture is back: the door shuts in view */
+            if (now < door_at + DOOR_IN_SHUT_MS) return;
+            door_close(now);
+            walking_door_sound(1);
+            door_stage = 18;
+            door_at = now;
+            return;
+        case 18: /* then the head turns back to the road */
+            if (now < door_at + DOOR_IN_LOOK_MS) return;
+            walking_head_turn_back(800);
+            door_stage = 0;
+            return;
+        case 15: /* gliding back to the outside camera: the door shuts on the way */
+            if (now < door_at + DOOR_BACK_GLIDE_MS * 55 / 100) return;
+            door_close(now);
+            walking_door_sound(1);
+            door_stage = 16;
+            return;
+        case 16: /* there: the game's camera again, from where the glide ended */
+            if (now < door_at + DOOR_BACK_GLIDE_MS + 50) return;
+            set_on(0);
+            log_append("NOCLIP: walking off - back in the car (door, back to the camera).\r\n");
+            door_stage = 0;
+            return;
+        default:
+            door_stage = 0;
+    }
+}
+
+/* V7.2 (Marvin 14.11.2026): freecam while driving (freecam_drive.h) - the car drives on, only the
+   picture is free. Out of a cockpit camera the game's camera changes to an outside one first (a short
+   dip, as getting out); off again: the camera from before. [Gripline] FreecamDrive=0: the old freecam. */
+static volatile LONG free_drive = 1;
+static int drive_stage; /* watch thread: 1 dipping, 2 the camera changes, 3 on */
+static ULONGLONG drive_at, drive_inside_since;
+static int drive_view_before = -1, drive_second_before, drive_view_changed, drive_dip;
+
+void noclip_set_freecam_drive(int value) {
+    InterlockedExchange(&free_drive, value ? 1 : 0);
+}
+
+int noclip_freecam_drive(void) {
+    return free_drive != 0;
+}
+
+static void drive_cam_start(void) {
+    freecam_drive_set(1);
+    drive_stage = 3;
+    drive_inside_since = 0;
+    if (drive_dip) notify_fade_black(0, DOOR_DIP_UP_MS), drive_dip = 0;
+    int arrows = freecam_drive_arrows();
+    log_append(arrows ? "NOCLIP: freecam while driving on (arrows fly: a keyboard drives the car)\r\n"
+                      : "NOCLIP: freecam while driving on\r\n");
+    static int shown_arrows, shown_wasd;
+    if (arrows)
+        keys_card(&shown_arrows, "Freecam an - das Auto f\xc3\xa4hrt weiter\nPfeile fliegen, Bild\xe2\x86\x91/\xe2\x86\x93 hoch/runter, rechte Shift schneller, "
+             "Maus/rechter Stick schauen, rechte Maustaste/Stick-Klick festsetzen, F7 aus",
+             "Freecam on - the car drives on\nArrows fly, Page up/down up/down, right Shift faster, "
+             "mouse/right stick look, right mouse button/stick click fix, F7 off");
+    else
+        keys_card(&shown_wasd, "Freecam an - das Auto f\xc3\xa4hrt weiter\nWASD fliegen, Leertaste/Strg hoch/runter, Shift schneller, "
+             "Maus/Pfeile/rechter Stick schauen, rechte Maustaste/Stick-Klick festsetzen, F7 aus",
+             "Freecam on - the car drives on\nWASD fly, Space/Ctrl up/down, Shift faster, "
+             "mouse/arrows/right stick look, right mouse button/stick click fix, F7 off");
+}
+
+static void drive_cam_on(ULONGLONG now) {
+    drive_view_before = walking_view_camera();
+    drive_second_before = cockpit_view_second();
+    drive_view_changed = drive_view_before >= 0 && !walking_view_outside();
+    if (drive_view_changed) { /* a cockpit camera: the picture would be the car's cut interior model */
+        notify_fade_black(1000, DOOR_DIP_DOWN_MS);
+        drive_dip = 1;
+        drive_stage = 1;
+        drive_at = now;
+        return;
+    }
+    drive_cam_start();
+}
+
+static void drive_cam_off(const char *why) {
+    if (!drive_stage) return;
+    freecam_drive_set(0);
+    drive_stage = 0;
+    if (drive_dip) notify_fade_black(0, 200), drive_dip = 0;
+    if (drive_view_changed) cockpit_view_want_camera(drive_view_before, drive_second_before), drive_view_changed = 0;
+    keys_card_away();
+    log_append(why);
+}
+
+static void drive_cam_tick(ULONGLONG now) {
+    switch (drive_stage) {
+        case 1: /* dark: now the camera button */
+            if (now < drive_at + DOOR_DIP_DOWN_MS) return;
+            cockpit_view_want_outside();
+            drive_stage = 2;
+            drive_at = now;
+            return;
+        case 2:
+            if (cockpit_view_want_pending() && now < drive_at + FADE_CAMERA_WAIT_MS) return;
+            if (!walking_view_outside()) {
+                drive_cam_off("NOCLIP: freecam while driving - the game did not change to an outside camera.\r\n");
+                card("Freecam geht gerade nicht\nDas Spiel wechselt die Kamera nicht", "Freecam not possible right now\nThe game does not change the camera");
+                return;
+            }
+            drive_cam_start();
+            return;
+        case 3:
+            if (freecam_drive_fix_changed())
+                card(freecam_drive_fixed() ? "Kamera festgesetzt\nSie bleibt stehen und schaut dem Auto nach" : "Kamera wieder frei",
+                     freecam_drive_fixed() ? "Camera fixed\nIt stays where it is and follows the car" : "Camera free again");
+            /* the player changed to a cockpit camera: the freecam ends (a short moment allowed) */
+            if (game_simulation_running() && !walking_view_outside()) {
+                if (!drive_inside_since) drive_inside_since = now;
+                else if (now - drive_inside_since > 800) {
+                    drive_view_changed = 0; /* the player chose that camera */
+                    drive_cam_off("NOCLIP: freecam while driving off - another camera was chosen.\r\n");
+                }
+            } else {
+                drive_inside_since = 0;
+            }
+            return;
+        default:
+            drive_stage = 0;
+    }
+}
+
 /* walking: the walk key / controller Y near the car gets back in */
 static void walk_key(void) {
     float distance = walking_car_distance();
     if (distance >= 0.0f && distance <= WALK_ENTER_DISTANCE) {
-        fade_begin(0); /* in the car while the picture is black */
+        if (walk_door && door_answer > 0 && summon_phase() == SUMMON_IDLE) door_begin(0, GetTickCount64()); /* the door that opened when getting out */
+        else fade_begin(0); /* in the car while the picture is black */
         return;
     }
     char de[96], en[96];
@@ -846,7 +1377,11 @@ static void handle_toggle(void) {
         }
         online_known = 1;
     }
-    if (online) fade_stop();
+    if (online) fade_stop(), door_stop();
+    if (online && drive_stage) {
+        drive_cam_off("NOCLIP: online session - freecam while driving off.\r\n");
+        tinted("Freecam gesperrt\nOnline-Sitzung (FH2MP)", "Freecam locked\nOnline session (FH2MP)", NOTIFY_COLOR_RED);
+    }
     if (on && online) { /* the first check already online */
         set_on(0);
         log_append("NOCLIP: online session - noclip / freecam off.\r\n");
@@ -861,12 +1396,18 @@ static void handle_toggle(void) {
                  "Freecam: please pick the cockpit camera\n(change camera, Tab)");
         }
     }
+    { /* polish: the game pauses (photo mode, menu, loading): the noclip / freecam cards go (video 14.11.) */
+        static int was_running = 1;
+        int running = game_simulation_running();
+        if (was_running && !running) keys_card_away(), notify_fade_tag(INFO_TAG);
+        was_running = running;
+    }
     int held = keyboard_held(KEYBOARD_HOLD_NOCLIP), free_held = keyboard_held(KEYBOARD_HOLD_FREECAM);
     int walk_held = keyboard_held(KEYBOARD_HOLD_WALK);
     { /* V7.1 summon key, only while walking (summon.h) */
         static int summon_held;
         int held_now = keyboard_held(KEYBOARD_HOLD_SUMMON);
-        if (held_now && !summon_held && on == MODE_WALK && !fade_stage) {
+        if (held_now && !summon_held && on == MODE_WALK && !fade_stage && !door_stage) {
             if (summon_ready()) summon_request();
             else summon_warning_sound(), card("Auto rufen geht nicht\nSpiel-Code anders (Gripline.log)", "Summon not working\nGame code differs (Gripline.log)");
         }
@@ -882,6 +1423,17 @@ static void handle_toggle(void) {
         fade_tick(now);
         return;
     }
+    if (door_stage) { /* V7.2: the same with the door */
+        door_tick(now);
+        return;
+    }
+    if (drive_stage) drive_cam_tick(now);
+    if (drive_stage == 1 || drive_stage == 2) return; /* keys wait until the picture is back */
+    if (drive_stage && (pressed || free_pressed || walk_pressed)) { /* any of the keys ends it */
+        drive_cam_off("NOCLIP: freecam while driving off\r\n");
+        return;
+    }
+    if (door_settle_at && now >= door_settle_at && InterlockedCompareExchange(&door_ask, 4, 0) == 0) door_settle_at = 0;
     if (!pressed && !free_pressed && !walk_pressed) return;
     LONG mode = pressed ? MODE_NOCLIP : free_pressed ? MODE_FREECAM : MODE_WALK;
     if (on == MODE_WALK && mode == MODE_WALK) {
@@ -891,15 +1443,13 @@ static void handle_toggle(void) {
     if (on == MODE_WALK) { /* F6 / F7 while walking: back in the car at once */
         set_on(0);
         log_append("NOCLIP: walking off (noclip/freecam key) - back in the car.\r\n");
-        card("Walking aus\nZur\xc3\xbc""ck im Auto", "Walking off\nBack in the car");
         return;
     }
     if (on) { /* either key ends what is on */
         LONG was = on;
         set_on(0);
         log_append(was == MODE_FREECAM ? "NOCLIP: freecam off\r\n" : "NOCLIP: off\r\n");
-        if (was == MODE_FREECAM) card("Freecam aus\nAuto steht wieder am Startpunkt", "Freecam off\nCar back where it was");
-        else card("Noclip aus", "Noclip off");
+        keys_card_away(); /* (polish: no "off" card, the picture says it) */
         return;
     }
     if (!game_simulation_running()) {
@@ -924,8 +1474,17 @@ static void handle_toggle(void) {
                    NOTIFY_COLOR_RED);
         return;
     }
-    if (mode == MODE_WALK) { /* out of the car while the picture is black */
-        fade_begin(MODE_WALK);
+    if (mode == MODE_FREECAM && free_drive && walking_ready()) { /* V7.2: the car drives on */
+        drive_cam_on(GetTickCount64());
+        return;
+    }
+    if (mode == MODE_WALK) { /* V7.2: with the door, else out of the car while the picture is black */
+        if (!game_simulation_running()) { /* paused, the rewind menu (Marvin's test 14.11.) */
+            log_append("NOCLIP: getting out - the game is paused (menu / rewind), not now.\r\n");
+            return;
+        }
+        if (walk_door && car_doors_ready(game)) door_begin(MODE_WALK, GetTickCount64());
+        else fade_begin(MODE_WALK);
         return;
     }
     set_on(mode);
@@ -933,11 +1492,13 @@ static void handle_toggle(void) {
     info_from = GetTickCount64() + INFO_DELAY_MS;
     if (mode == MODE_FREECAM) {
         log_append("NOCLIP: freecam on\r\n");
-        card("Freecam an\nPfeile/rechter Stick schauen, WASD/linker Stick fliegen, Leertaste/Strg/RT/LT hoch/runter",
+        static int shown_free;
+        keys_card(&shown_free, "Freecam an\nPfeile/rechter Stick schauen, WASD/linker Stick fliegen, Leertaste/Strg/RT/LT hoch/runter",
              "Freecam on\nArrows/right stick look, WASD/left stick fly, Space/Ctrl/RT/LT up/down");
     } else {
         log_append("NOCLIP: on\r\n");
-        card("Noclip an\nW/S/linker Stick fliegen, A/D drehen, Leertaste/Strg/RT/LT hoch/runter",
+        static int shown_noclip;
+        keys_card(&shown_noclip, "Noclip an\nW/S/linker Stick fliegen, A/D drehen, Leertaste/Strg/RT/LT hoch/runter",
              "Noclip on\nW/S/left stick fly, A/D turn, Space/Ctrl/RT/LT up/down");
     }
 }
@@ -1016,6 +1577,11 @@ void noclip_car_update(void *car, float dt, float frame_dt, unsigned frame) {
     if (local) traffic_load_reached(dt); /* the start reached the road (load guard, traffic_files.c) */
     void *park = NULL, *follow = NULL;
     int summon = SUMMON_IDLE;
+    if (local && door_ask) door_car_step(car); /* V7.2 getting out / in with the door */
+    if (local && freecam_drive_active()) { /* V7.2 freecam while driving: where the car is */
+        float p[3], r[3], u[3], f[3];
+        if (car_rows(car, p, r, u, f)) freecam_drive_car(p, r, f);
+    }
     if (local && (on == MODE_WALK || driver_hidden_car == car)) walk_driver(car, on == MODE_WALK && walking_active());
     if (on == MODE_WALK && local) {
         /* on foot: the car stands where it was; the walker is moved in the camera (walking.c) */
