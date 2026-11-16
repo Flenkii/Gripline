@@ -1,0 +1,22 @@
+name: Discord release post
+
+on:
+  release:
+    types: [published]
+
+jobs:
+  post:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Post release to Discord
+        env:
+          WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
+          NAME: ${{ github.event.release.name }}
+          BODY: ${{ github.event.release.body }}
+          URL: ${{ github.event.release.html_url }}
+          GAME: Forza Horizon 2
+        run: |
+          HEAD=$(printf '%s\n' "$BODY" | grep -m1 -E '^#{1,3} ' | sed -E 's/^#+ *//')
+          CONTENT=$(printf '🆕 **%s is out!** – for %s\n%s\n⬇️ %s' "$NAME" "$GAME" "$HEAD" "$URL")
+          jq -n --arg c "$CONTENT" '{content:$c}' > payload.json
+          curl -sS -f -X POST -H "Content-Type: application/json" --data @payload.json "$WEBHOOK"
