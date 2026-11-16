@@ -1096,6 +1096,7 @@ static void keyboard_reading(PadReading *r) {
 
 static void *real_statics;
 static int keyboard_only; /* late hook: Azimuth keeps its own real pads, ours is the keyboard */
+static volatile LONG cruise_pad_only; /* V7.2.1: FH2 Mouse & Keyboard drives - our pad only carries the cruise throttle */
 static GetPadsFn real_get_pads; /* set when the late hook patched the real statics' vtable */
 static void *real_pads[MAX_PADS];
 static unsigned real_count;
@@ -1226,7 +1227,7 @@ static HRESULT WINAPI pad_reading(void *self, PadReading *out) {
         if (magnitude(p.lx, p.ly) > magnitude(r.lx, r.ly)) r.lx = p.lx, r.ly = p.ly;
         if (magnitude(p.rx, p.ry) > magnitude(r.rx, r.ry)) r.rx = p.rx, r.ry = p.ry;
     }
-    if (user32_ready()) {
+    if (user32_ready() && !cruise_pad_only) {
         PadReading k = {0, 0, 0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0};
         keyboard_reading(&k);
         r.buttons |= k.buttons;
@@ -1406,8 +1407,12 @@ static HRESULT WINAPI hook_get_factory(void *name, const GUID *iid, void **out) 
         return original_get_factory(name, iid, out);
     }
     if (mod_partners_takes_keyboard()) { /* V7.2: its keys drive (mod_partners.c says so in the log) */
-        log_append("KEYBOARD: FH2 Mouse & Keyboard drives with the keyboard; Gripline keyboard off, gamepads unchanged.\r\n");
-        return original_get_factory(name, iid, out);
+        /* V7.2.1 (Marvin 16.11.2026, wheel: "Cruise Control funktioniert nicht mehr"): the Gripline pad is the
+           way the cruise throttle reaches the game (keyboard, gamepad and wheel), so it stays - only without
+               Gripline's keys */
+        InterlockedExchange(&cruise_pad_only, 1);
+        log_append("KEYBOARD: FH2 Mouse & Keyboard drives with the keyboard; Gripline keyboard off, "
+           "the Gripline pad stays for the cruise control.\r\n");
     }
     if (!real_statics) {
         void *real = NULL;
@@ -1531,7 +1536,8 @@ int keyboard_pad_late(void) {
     if (wrapped) return 1;
     if (!ini_path[0]) return 0;
     if (!loaded) settings_load();
-    if (!values[KEY_SETTING_ENABLED] || mod_scan_mapper_running() || mod_partners_takes_keyboard()) return 0;
+    if (!values[KEY_SETTING_ENABLED] || mod_scan_mapper_running()) return 0;
+    if (mod_partners_takes_keyboard()) InterlockedExchange(&cruise_pad_only, 1); /* V7.2.1: pad for the cruise control */
     HMODULE combase = LoadLibraryExW(L"combase.dll", NULL, LOAD_LIBRARY_SEARCH_SYSTEM32);
     if (!combase) return 0;
     GetFactoryFn get_factory = original_get_factory ? original_get_factory

@@ -6,11 +6,11 @@
 #include <windows.h>
 
 /* Gripline: an FH2 Mod Platform mod (fh2-mods\Gripline.dll) next to the official Extra Options. */
-#define GRIPLINE_VERSION "V7.2"
+#define GRIPLINE_VERSION "V7.2.2"
 /* this build as a release number: the update notice compares it with the newest GitHub release */
 #define GRIPLINE_RELEASE_MAJOR 7
 #define GRIPLINE_RELEASE_MINOR 2
-#define GRIPLINE_RELEASE_PATCH 0 /* third number of the release tag (fork6.4.1), update_check.c */
+#define GRIPLINE_RELEASE_PATCH 2 /* third number of the release tag (fork6.4.1), update_check.c */
 /* NewsSeen value of this version (71 = V7.1): what's-new cards and the F8 hint card show until then */
 #define GRIPLINE_NEWS_VERSION (GRIPLINE_RELEASE_MAJOR * 10 + GRIPLINE_RELEASE_MINOR)
 #define MOD_INI_NAME L"Gripline.ini"

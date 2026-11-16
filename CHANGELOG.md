@@ -3,6 +3,9 @@
 What changed for players, newest first. Every version is on the [Releases](../../releases) page.
 (Technical details: [docs/TECHNICAL_HISTORY.md](docs/TECHNICAL_HISTORY.md).)
 
+## V7.2.2
+- Fix: **cruise control** holds the speed again with FH2 Mouse & Keyboard installed - with wheel, controller and keyboard. Since V7.2 Gripline switched its own controller off next to that mod, and that controller is the way the cruise throttle reaches the game. It stays on now, only without Gripline's keys (driving with the keyboard stays with FH2 Mouse & Keyboard).
+
 ## V7.2
 *Includes everything from V7.1 (V7.1 was not released on its own).*
 - **Get out like in the game**: **F** opens the driver's door (right in right-hand drive cars) with the car's own animation, the camera glides out through the door and the door shuts behind you; getting back in goes the other way round. Cars without a door animation fade to black with door sounds. F8 › Settings › *Getting out*: Open the door / Fade to black.
