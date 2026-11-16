@@ -24,8 +24,12 @@ API_SIZE = 32 + 8 * len(names)
 
 root = tempfile.mkdtemp(prefix='gripline-plugin-')
 os.makedirs(os.path.join(root, 'Mount'))
+OLD = bool(os.environ.get('GL_OLD_LAYOUT'))  # older Extra Options: mods\loadorder.txt, no mods\Forza Horizon 2
+if OLD:
+    os.makedirs(os.path.join(root, 'mods'))
+    open(os.path.join(root, 'mods', 'loadorder.txt'), 'w').write('Gripline\n')
 eo_ini = ('[Global]\r\nEnabled=1\r\n[Files]\r\nEnableMediaOverrides=1\r\n[Traffic]\r\nTrafficLevel=5\r\n'
-          'RushHourAllDay=0\r\nWeather=1\r\nTimeOfDay=3\r\n[Gripline]\r\nNotifications=1\r\nSteeringAnimation=1\r\n'
+          'RushHourAllDay=0\r\nWeather=1\r\nTimeOfDay=3\r\n[Gripline]\r\nNotifications=0\r\nSteeringAnimation=1\r\n'
           '[Livery]\r\nEnable4K=1\r\n')
 open(os.path.join(root, 'FH2_ExtraOptions.ini'), 'w', newline='').write(eo_ini)
 
@@ -104,14 +108,39 @@ stubs = {
     'add_setting': add_setting,
     'wait_for_game': lambda: 0,
     'wait_for_code': lambda: 0,
+    'mod_version': lambda: 0,  # V7.2 partner check: no other mod installed
+    'get_interface': lambda: anna_api if cstr(e.arg(0)) == 'FH2ANNA' and e.arg(1) == 4 else 0,
 }
+# V7.2: a fake FH2 ANNA interface (fh2anna.h): add_entry records the entries
+anna_entries = []
+def anna_add_entry():
+    a = e.arg(0)
+    anna_entries.append({'key': cstr(e.rq(a + 8)), 'parent': cstr(e.rq(a + 16)) if e.rq(a + 16) else None,
+                         'label': cstr(e.rq(a + 24)), 'choose': e.rq(a + 32), 'label_now': e.rq(a + 48),
+                         'stays_open': e.rd(a + 64), 'enabled': e.rq(a + 72)})
+    return 1
+anna_api = e.alloc(48)
+e.mu.mem_write(anna_api, bytes(48))
+e.wd(anna_api, 48)
+e.wq(anna_api + 24, e.stub('anna_add_entry', anna_add_entry))
 for n in names:
     e.wq(api + offset[n], e.stub('api_' + n, stubs.get(n, e.missing('api.' + n))))
 
 print('start:')
 check(e.call('fh2mod_init', api) == 0, 'fh2mod_init returns 0')
-check(seen['info'] == ('Gripline', 'V7'), 'registered as Gripline V7: %r' % (seen['info'],))
+check(seen['info'] == ('Gripline', 'V7.2'), 'registered as Gripline V7.2: %r' % (seen['info'],))
 check(len(e.threads) == 1, 'start thread created (waits for the game)')
+print('FH2 ANNA menu (V7.2):')
+keys_anna = [a['key'] for a in anna_entries]
+check(keys_anna[:1] == ['gripline'] and anna_entries[0]['parent'] is None and anna_entries[0]['choose'] == 0,
+      'a "Gripline" list at ANNA\'s top level')
+check(keys_anna[1:] == ['gripline.dashcam', 'gripline.walk', 'gripline.cruise', 'gripline.telemetry', 'gripline.freecam', 'gripline.blinker', 'gripline.menu'],
+      'seven entries: %r' % keys_anna[1:])
+check(all(a['parent'] == 'gripline' and a['choose'] and a['label_now'] and a['label'] for a in anna_entries[1:]),
+      'each in the list, with a choice, a label and a label in the game language')
+check([a['stays_open'] for a in anna_entries[1:]] == [1, 0, 0, 1, 0, 1, 0], 'dashboard cam, telemetry and turn signals keep ANNA open')
+check(bool(anna_entries[1]['enabled']) and bool(anna_entries[2]['enabled']) and bool(anna_entries[5]['enabled']),
+      'dashboard cam, walking and freecam can be greyed out')
 
 print('INI files:')
 grip = open(os.path.join(root, 'Gripline.ini'), newline='').read()
@@ -122,11 +151,15 @@ eo = open(os.path.join(root, 'FH2_ExtraOptions.ini'), newline='').read()
 check('[Traffic]' not in eo and '[Gripline]' not in eo and 'TrafficLevel' not in eo, 'FH2_ExtraOptions.ini without Gripline keys')
 check('[Global]' in eo and 'Enable4K=1' in eo and 'EnableMediaOverrides=1' in eo, 'FH2_ExtraOptions.ini keeps its own keys')
 check(open(os.path.join(root, 'FH2_ExtraOptions.ini.before-gripline'), newline='').read() == eo_ini, 'backup of the old INI')
-check(os.path.isdir(os.path.join(root, 'mods', 'Gripline', 'media')), 'mods\\Gripline\\media made')
+if OLD:
+    check(os.path.isdir(os.path.join(root, 'mods', 'Gripline', 'media')) and not os.path.exists(os.path.join(root, 'mods', 'Forza Horizon 2')),
+          'old layout: mods\\Gripline\\media made')
+else:
+    check(os.path.isdir(os.path.join(root, 'mods', 'Forza Horizon 2', 'Gripline', 'media')), 'mods\\Forza Horizon 2\\Gripline\\media made (Extra Options 0.6.0 layout)')
 
 print('Mods page rows:')
 rows = seen['rows']
-check(len(rows) == 15, '%d rows (keyboard, traffic, cockpit, Gripline)' % len(rows))
+check(len(rows) == 15, '%d rows (keyboard, traffic, cockpit, Gripline; no Notifications row since V7.2)' % len(rows))
 check(not any(w in r['label'] for r in rows for w in ('Wheel', 'Weather', 'Time of Day', 'Profile')),
       'no wheel, weather, time of day or profile rows (Azimuth / Extra Options do those)')
 keys = [r['key'] for r in rows]
@@ -135,7 +168,10 @@ check(all(re.fullmatch(r'[A-Za-z0-9_]+', k) for k in keys), 'keys letters/digits
 check(all(r['label'] for r in rows), 'every row has a label')
 check(not any(r['label'] in ('Traffic: Preset', 'Traffic: Amount') for r in rows),
       'traffic preset and amount are not numbered sliders any more')
-check(seen['pages'] == [('Traffic', 'Gripline Traffic')], 'Traffic page with the presets by name: %r' % (seen['pages'],))
+check(seen['pages'] == [('Traffic', 'Gripline Traffic'), ('F8Mouse', 'Gripline Mouse'), ('F8Walking', 'Gripline Walking'),
+                        ('F8Driving', 'Gripline Driving'), ('F8Summon', 'Gripline Summon & Online'), ('F8Cards', 'Gripline Cards'),
+                        ('F8Logbook', 'Gripline Logbook')],
+      'Traffic page + the six F8 pages (V7.1 Mods page mirror): %r' % (seen['pages'],))
 check(any(r['kind'] == 0 for r in rows), 'on/off rows')
 check(any(r['restart'] for r in rows), 'restart rows marked')
 color = [r for r in rows if r['label'] == 'Gripline: Card Colour']
@@ -144,5 +180,8 @@ check(len(color) == 1 and color[0]['min'] == 0 and color[0]['max'] == 9 and not 
 for r in rows[:6]:
     print('     ', r['key'], r['label'], r['kind'], r['min'], r['max'])
 
+check(e.call('Fh2TestRetireNotifications') == 127, 'Notifications=0 -> Warnings only')
+grip = open(os.path.join(root, 'Gripline.ini'), newline='').read()
+check('Notifications=1' in grip and 'CardsHidden=127' in grip, 'V7.2: Notifications=0 became the preset Warnings only (CardsHidden)')
 print('%d checks, %d failed' % (checks[0], len(fails)))
 sys.exit(1 if fails else 0)

@@ -27,19 +27,21 @@ typedef struct {
 /* Names and defaults read from the game (AI/Spawning/..., AI/Traffic/Density/...). The density caps alone
    were not enough: the spawner only adds one car every 1-30 s (SpawnTrafficControl) and now and then a
    whole group at once (the convoys), so with a high cap the roads still filled slowly and unevenly. */
+/* 6 = no traffic (15.11.2026, cars still came with density 0 alone): no traffic / festival caps, no start
+   cars and a new car only every 10 minutes at most - together with density 0 in the traffic files. */
 static const Tunable tunables[] = {
-    {0x36e8f18, VT_FLOAT, 14.0f, {14, 30, 45, 70, 100, 200, 14, 14}, 1, "Spawning/MaxTraffic"},
-    {0x36e6e88, VT_FLOAT, 16.0f, {16, 30, 45, 70, 100, 200, 16, 16}, 1, "Traffic/MaxTraffic"},
-    {0x36e8d10, VT_FLOAT, 10.0f, {10, 16, 22, 30, 40, 80, 10, 80}, 1, "Spawning/MaxFestival"},
-    {0x36e6dd0, VT_FLOAT, 7.0f, {7, 12, 18, 24, 32, 60, 7, 80}, 1, "Traffic/MaxFestival"},
+    {0x36e8f18, VT_FLOAT, 14.0f, {14, 30, 45, 70, 100, 200, 0, 0}, 1, "Spawning/MaxTraffic"},
+    {0x36e6e88, VT_FLOAT, 16.0f, {16, 30, 45, 70, 100, 200, 0, 0}, 1, "Traffic/MaxTraffic"},
+    {0x36e8d10, VT_FLOAT, 10.0f, {10, 16, 22, 30, 40, 80, 0, 80}, 1, "Spawning/MaxFestival"},
+    {0x36e6dd0, VT_FLOAT, 7.0f, {7, 12, 18, 24, 32, 60, 0, 80}, 1, "Traffic/MaxFestival"},
     {0x34c80f8, VT_FLOAT, 8.0f, {8, 8, 8, 8, 7, 5, 8, 10}, 1, "MinDistanceFromOtherCars"},
-    {0x34c8578, VT_INT, 5.0f, {5, 10, 14, 20, 30, 60, 5, 10}, 1, "InitialSpawnMaxCars"},
+    {0x34c8578, VT_INT, 5.0f, {5, 10, 14, 20, 30, 60, 0, 10}, 1, "InitialSpawnMaxCars"},
     /* spawn rhythm: seconds between new cars (the game: 1 / 10 / 30 s, at least 0.5 s) */
-    {0x34c8080, VT_FLOAT, 1.0f, {1, 0.6f, 0.4f, 0.3f, 0.2f, 0.05f, 1, 0.4f}, 0, "SpawnTrafficControl/IntervalMin"},
-    {0x34c8428, VT_FLOAT, 10.0f, {10, 6, 4, 2, 1.5f, 0.5f, 10, 3}, 0, "SpawnTrafficControl/IntervalMed"},
-    {0x34c85a0, VT_FLOAT, 30.0f, {30, 15, 10, 5, 3, 1, 30, 8}, 0, "SpawnTrafficControl/IntervalMax"},
+    {0x34c8080, VT_FLOAT, 1.0f, {1, 0.6f, 0.4f, 0.3f, 0.2f, 0.05f, 600, 0.4f}, 1, "SpawnTrafficControl/IntervalMin"},
+    {0x34c8428, VT_FLOAT, 10.0f, {10, 6, 4, 2, 1.5f, 0.5f, 600, 3}, 1, "SpawnTrafficControl/IntervalMed"},
+    {0x34c85a0, VT_FLOAT, 30.0f, {30, 15, 10, 5, 3, 1, 600, 8}, 1, "SpawnTrafficControl/IntervalMax"},
     {0x34c7e68, VT_FLOAT, 0.5f, {0.5f, 0.4f, 0.3f, 0.25f, 0.15f, 0.05f, 0.5f, 0.3f}, 0, "SpawnTrafficControl/MinIntervalTime"},
-    {0x34c0b30, VT_FLOAT, 10.0f, {10, 6, 4, 2, 1.5f, 0.5f, 10, 3}, 0, "CivTrafficSpawnDelay"},
+    {0x34c0b30, VT_FLOAT, 10.0f, {10, 6, 4, 2, 1.5f, 0.5f, 600, 3}, 1, "CivTrafficSpawnDelay"},
     /* whole groups at once = the convoys with empty road in between */
     {0x34c7ff8, VT_FLOAT, 0.1f, {0.1f, 0.1f, 0.08f, 0.06f, 0.05f, 0.05f, 0.1f, 0.05f}, 0, "SpawnTrafficControl/GroupSpawnProbability"},
     {0x34c8120, VT_FLOAT, 0.25f, {0.25f, 0.25f, 0.2f, 0.15f, 0.1f, 0.05f, 0.25f, 0.05f}, 0, "FestivalGroupSpawns/Probability"},

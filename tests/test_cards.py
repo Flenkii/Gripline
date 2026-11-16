@@ -81,7 +81,7 @@ for eo, platform, version, want, want_text in cases:
     check(r == want and t == want_text, f'{version}: {r} {t!r}')
 
 print('Confirmation cards (English: no game image)')
-RIG_TRAFFIC_LEVEL, RIG_KEY_STEER, RIG_GRIP_NOTIFICATIONS, RIG_GRIP_CARD_COLOR, RIG_TRAFFIC_PRESET = 0, 3, 6, 10, 15
+RIG_TRAFFIC_LEVEL, RIG_KEY_STEER, RIG_GRIP_NOTIFICATIONS, RIG_GRIP_CARD_COLOR, RIG_TRAFFIC_PRESET = 0, 3, 6, 10, 16
 for args, want in [((RIG_GRIP_CARD_COLOR, 3), 'Gripline: Card Colour\nPurple'),
                    ((RIG_GRIP_CARD_COLOR, 0), 'Gripline: Card Colour\nBlue (original)'),
                    ((RIG_TRAFFIC_LEVEL, 4), 'Traffic: Amount\n100 Cars - after a restart'),
@@ -90,6 +90,29 @@ for args, want in [((RIG_GRIP_CARD_COLOR, 3), 'Gripline: Card Colour\nPurple'),
                    ((RIG_KEY_STEER, 250), 'Keyboard: Steering Time (ms)\n250')]:
     _, t = text(e, 'Fh2TestConfirmText', *args)
     check(t == want, f'{args}: {t!r}')
+
+print('V7.2 big card')
+def body(index):
+    lines = []
+    n = e.call('Fh2TestNotifyBody', index, 0, e.alloc(200))
+    for k in range(max(n, 0)):
+        out = e.alloc(200)
+        e.call('Fh2TestNotifyBody', index, k, out)
+        lines.append(e.wstr(out))
+    return n, lines
+e.call('Fh2TestNotifyBig', e.put_bytes(b'Title\nSub'), e.put_bytes(
+    b'one two three four five six seven eight nine ten eleven twelve\n\nlast'), 1, e.put_bytes(b'WARNING'))
+n, lines = body(0)
+check(n == 4 and lines[2] == '' and lines[3] == 'last', f'wrapped body {lines!r}')
+check(all(len(l) <= 48 for l in lines) and lines[0].endswith('nine ten') and lines[1] == 'eleven twelve', f'broken at a space {lines[0]!r}')
+l1, l2 = e.alloc(200), e.alloc(200)
+e.call('Fh2TestNotifyText', 0, l1, l2)
+check(e.wstr(l1) == 'Title' and e.wstr(l2) == 'Sub', 'title + subtitle')
+e.call('Fh2TestNotifyBig', e.put_bytes(b'Long'), e.put_bytes(b'x\n' * 20), -1, 0)
+n, lines = body(0)
+check(n == 7 and lines[-1].endswith('\u2026'), f'cut after 7 lines {lines[-1]!r}')
+e.call('Fh2TestNotifyShow', e.put_bytes(b'small\ncard'), 0xffffffff, 0)
+check(body(0)[0] == 0, 'normal card has no body')
 
 print('%d checks, %d failed' % (checks[0], len(fails)))
 sys.exit(1 if fails else 0)

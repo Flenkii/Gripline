@@ -23,11 +23,6 @@ size_t ini_set_value(const char *text, size_t length, const char *section, const
 int ini_find_text(const char *text, size_t length, const char *section, const char *key,
                   char *value, size_t capacity);
 
-/* Copies text to out with the first section/key line renamed to new_key (value, comments and
-   everything else unchanged). Returns the new length or 0 (key missing / no room). */
-size_t ini_rename_key(const char *text, size_t length, const char *section, const char *key,
-                      const char *new_key, char *out, size_t capacity);
-
 /* Decimal text of value; buffer needs 12 bytes. */
 const char *ini_format_int(int value, char buffer[12]);
 #endif

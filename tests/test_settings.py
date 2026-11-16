@@ -18,7 +18,8 @@ e = Emu(DLL, root)
 KEYS = ['TrafficLevel', 'RushHourAllDay', 'Notifications', 'SteeringAnimation', 'CockpitViewForward',
         'CockpitViewUp', 'CardColor', 'CardStyle', 'UpdateCheck', 'SpeedCameras', 'CarLabels', 'Telemetry',
         'TelemetryShow', 'EventIcons', 'NewsSeen', 'NoDamage', 'CardsHidden', 'CruiseCrashOff', 'CruiseMinSpeed', 'CruiseSlowOff',
-        'TelemetryPosition', 'TelemetryOpacity', 'TelemetrySize']
+        'TelemetryPosition', 'TelemetryOpacity', 'TelemetrySize', 'WalkHandheld', 'CalmDrivatars', 'WalkGauge',
+        'SummonStyle', 'SummonSounds', 'NitroOnline', 'YieldToMods', 'WalkDoor', 'FreecamDrive', 'FreecamRange']
 
 
 def read(text):
@@ -52,14 +53,40 @@ check(s.startswith('IGNORED') and 'line 2 (CardColor)' in s, f'Log nennt Zeile u
 ok, v, n, s = read('[Gripline]\r\nFutureKey=1\r\n[Unknown]\r\nNoDamage=1\r\n[Gripline]\r\nNoDamage=1\r\nmuell\r\n')
 check(ok == 0 and n == 3 and v['NoDamage'] == 1, f'unbekannter Schluessel/Abschnitt/Muell: {n} Zeilen, Rest gelesen {v}')
 
+ok, v, n, s = read('[Gripline]\r\nCardColor=3\r\n\r\n[DashCamCars]\r\nAUD_RS4_01=35 0\r\nMER_E63AMG_13=25 -5\r\n')
+check(ok == 1 and n == 0 and v['CardColor'] == 3, f'V7.2 [DashCamCars] still akzeptiert, keine Karte ({ok}, {n}, {s!r})')
+
 ok, v, n, s = read('[Traffic]\r\nWeather=1\r\nTrafficLevel=2\r\n')
 check(ok == 1 and n == 0 and v['TrafficLevel'] == 2, 'alte Schluessel (Weather) still ignoriert')
+ok, v, n, s = read('[Gripline]\r\nCockpitViewBack=10\r\nCardColor=3\r\n')
+check(ok == 1 and n == 0 and v['CardColor'] == 3, 'alter Schluessel CockpitViewBack still ignoriert')
 
 ok, v, n, s = read('\ufeff[Gripline]\r\nTelemetryShow=4095\r\n')
 check(ok == 1 and v['TelemetryShow'] == 4095, 'UTF-8 mit BOM')
 
 ok, v, n, s = read('[Gripline]\r\nCardsHidden=117\r\n')
 check(ok == 1 and v['CardsHidden'] == 117, 'CardsHidden gelesen')
+
+ok, v, n, s = read('[Gripline]\r\nWalkHandheld=3\r\n')
+check(ok == 1 and v['WalkHandheld'] == 3, 'V7.1 WalkHandheld gelesen')
+ok, v, n, s = read(None)
+check(v['WalkGauge'] == 3, 'V7.1 Lauf-Tacho Standard: Schritt-Puls (3)')
+ok, v, n, s = read('[Gripline]\r\nWalkGauge=1\r\n')
+check(ok == 1 and v['WalkGauge'] == 1, 'V7.1 WalkGauge gelesen')
+ok, v, n, s = read('[Gripline]\r\nCalmDrivatars=1\r\n')
+check(ok == 1 and v['CalmDrivatars'] == 1, 'V7.1 CalmDrivatars gelesen')
+ok, v, n, s = read(None)
+check(v['CalmDrivatars'] == 0, 'CalmDrivatars Standard aus')
+check(v['SummonStyle'] == 1 and v['SummonSounds'] == 1, 'V7.1 Auto rufen Standard: Normal, Sounds an')
+ok, v, n, s = read('[Gripline]\r\nSummonStyle=2\r\nSummonSounds=0\r\n')
+check(ok == 1 and v['SummonStyle'] == 2 and v['SummonSounds'] == 0, 'V7.1 SummonStyle / SummonSounds gelesen')
+ok, v, n, s = read(None)
+check(v['WalkDoor'] == 1 and v['YieldToMods'] == 1, 'V7.2 Standard: Aussteigen mit Tuer, andere Mods vorlassen')
+ok, v, n, s = read('[Gripline]\r\nWalkDoor=0\r\n')
+check(ok == 1 and v['WalkDoor'] == 0, 'V7.2 WalkDoor gelesen')
+check(v['FreecamDrive'] == 1 and v['FreecamRange'] == 500, 'V7.2 Standard: Freecam mit fahrendem Auto, 500 m')
+ok, v, n, s = read('[Gripline]\r\nFreecamDrive=0\r\nFreecamRange=0\r\n')
+check(ok == 1 and v['FreecamDrive'] == 0 and v['FreecamRange'] == 0, 'V7.2 FreecamDrive / FreecamRange gelesen')
 
 print(f'\n{checks[0]} checks, {len(fails)} failed')
 sys.exit(1 if fails else 0)

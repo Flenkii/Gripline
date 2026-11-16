@@ -439,9 +439,14 @@ static int patch_car_loading(const char *in, size_t size, Text *out, const Level
         } else {
             if (t == c) {
                 tag_set(&tag, "MaxActiveFestival", rule_max_festival, l);
+                /* no traffic: no Drivatars placed at the start either */
+                if (l->roads == ROADS_EMPTY) tag_set(&tag, "InitialNumFestival", rule_zero, l);
             } else if (t == a) {
                 tag_set(&tag, "MaxActiveTraffic", rule_max_active, l);
                 tag_set(&tag, "MaxActiveTypes", rule_types, l);
+                /* no traffic / Drivatars only: the game places InitialNumTraffic cars at the start whatever
+                   the road densities say (15.11.2026: "No Traffic" still showed cars) */
+                if (l->roads != ROADS_NORMAL) tag_set(&tag, "InitialNumTraffic", rule_zero, l);
             } else if (is_space(t[8])) {
                 tag_set(&tag, "MaxActive", rule_type_mult, l);
             }
@@ -547,8 +552,125 @@ static void remove_files(const wchar_t *mount_dir) {
     if (removed) log_append_value("TRAFFIC: original traffic - old Gripline traffic files removed: ", removed);
 }
 
+/* ------------------------------------------------------------------ live (V7.3) */
+
+/* traffic_live.c changes the densities the game already holds in memory. It needs the original files (to
+   compute any level) and the level whose files the game loads at this start. */
+static char *originals[ARRAY_COUNT(density_files)];
+static uint32_t original_sizes[ARRAY_COUNT(density_files)];
+static volatile LONG loaded_level = -1; /* the level of the files the game reads; 0 = the game's own */
+
+static void cache_originals(const wchar_t *mount_dir) {
+    static wchar_t zip[PATH_CAPACITY], backup[PATH_CAPACITY];
+    if (!mount_dir || !path_join(zip, mount_dir, L"media\\EntityModel.zip")) return;
+    if (path_join(backup, mount_dir, L"media\\EntityModel.zip.moretraffic-original") &&
+        GetFileAttributesW(backup) != INVALID_FILE_ATTRIBUTES)
+        memory_copy(zip, backup, sizeof(zip));
+    unsigned cached = 0;
+    for (unsigned i = 0; i < ARRAY_COUNT(density_files); ++i) {
+        uint32_t size = 0;
+        char *data = (char *)gripline_zip_extract(zip, density_files[i], &size);
+        if (!data) continue;
+        if (size >= 2 && (unsigned char)data[0] == 0xff && (unsigned char)data[1] == 0xfe) { /* UTF-16: not used */
+            gripline_zip_free(data);
+            continue;
+        }
+        originals[i] = data;
+        original_sizes[i] = size;
+        ++cached;
+    }
+    log_append_value("TRAFFIC LIVE: original density files kept for live changes: ", (int)cached);
+}
+
+static int skip_comment(const char **p, const char *end) {
+    if (*p + 4 <= end && memory_equal(*p, "<!--", 4)) {
+        const char *close = find(*p + 4, end, "-->");
+        *p = close ? close + 3 : end;
+        return 1;
+    }
+    return 0;
+}
+
+static float read_value(const char *tag, const char *end, const char *name, float fallback) {
+    size_t length;
+    const char *value = attribute(tag, end, name, &length);
+    double v;
+    return value && parse_number(value, length, &v) ? (float)v : fallback;
+}
+
+/* Reads the <Density> entries of one cartype the way the game's parser does (game+0x18D3F90): every
+   <Density> element of every <DensityList> with that cartype, in file order; min/max/speed default 0,
+   spawnIn/OutDistance -1. */
+static unsigned scan_densities(const char *in, size_t size, int cartype, TrafficDensity *out, unsigned capacity) {
+    const char *end = in + size, *p = in;
+    unsigned n = 0;
+    int list_type = 0;
+    while (p < end) {
+        if (*p != '<') {
+            ++p;
+            continue;
+        }
+        if (skip_comment(&p, end)) continue;
+        const char *gt = find(p, end, ">");
+        if (!gt) break;
+        if (p + 12 <= end && memory_equal(p, "<DensityList", 12) && (is_space(p[12]) || p[12] == '>')) {
+            list_type = attribute_is(p, gt, "cartype", "traffic") ? 2 : attribute_is(p, gt, "cartype", "festival") ? 1 : 4;
+        } else if (p + 9 <= end && memory_equal(p, "</Density", 9)) {
+            if (p + 13 <= end && memory_equal(p, "</DensityList", 13)) list_type = 0;
+        } else if (p + 8 <= end && memory_equal(p, "<Density", 8) && (is_space(p[8]) || p[8] == '/' || p[8] == '>')) {
+            if (list_type == cartype) {
+                if (n < capacity) {
+                    TrafficDensity *d = &out[n];
+                    d->min = read_value(p, gt, "min", 0.0f);
+                    d->max = read_value(p, gt, "max", 0.0f);
+                    d->speed = read_value(p, gt, "speed", 0.0f);
+                    d->spawn_in = read_value(p, gt, "spawnInDistance", -1.0f);
+                    d->spawn_out = read_value(p, gt, "spawnOutDistance", -1.0f);
+                }
+                ++n;
+            }
+        }
+        p = gt + 1;
+    }
+    return n;
+}
+
+static SRWLOCK patch_lock = SRWLOCK_INIT; /* patch_densities uses statics */
+
+unsigned traffic_density_values(unsigned file, int level, int cartype, TrafficDensity *out, unsigned capacity) {
+    if (file >= ARRAY_COUNT(density_files) || !originals[file] || level < 0 || level > 7) return 0;
+    unsigned n = 0;
+    AcquireSRWLockExclusive(&patch_lock);
+    int saved_changes = changes;
+    Text text = {0};
+    patch_densities(originals[file], original_sizes[file], &text, &levels[level]);
+    if (!text.failed) n = scan_densities(text.data, text.length, cartype, out, capacity);
+    text_free(&text);
+    changes = saved_changes;
+    ReleaseSRWLockExclusive(&patch_lock);
+    return n;
+}
+
+const char *traffic_density_file_name(unsigned file) {
+    return file < ARRAY_COUNT(density_files) ? density_files[file] : "?";
+}
+
+unsigned traffic_density_file_count(void) {
+    return ARRAY_COUNT(density_files);
+}
+
+int traffic_files_loaded_level(void) {
+    return (int)loaded_level;
+}
+
 void traffic_files_start(const wchar_t *mount_dir, int traffic_level) {
     if (state != 0) return;
+    __try {
+        cache_originals(mount_dir);
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        log_append("TRAFFIC LIVE: could not read the original density files - live changes off.\r\n");
+    }
+    InterlockedExchange(&loaded_level, 0);
     if (!mount_dir || traffic_level <= 0 || traffic_level > 7) {
         if (traffic_level == 0) remove_files(mount_dir);
         InterlockedExchange(&state, 3);
@@ -569,6 +691,7 @@ void traffic_files_start(const wchar_t *mount_dir, int traffic_level) {
     } else {
         log_append("TRAFFIC: could not make the traffic files; only the density caps are raised.\r\n");
     }
+    if (ok) InterlockedExchange(&loaded_level, traffic_level);
     InterlockedExchange(&state, ok ? 2 : 3);
 }
 

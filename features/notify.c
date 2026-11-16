@@ -18,8 +18,13 @@
 #include "logging.h"
 #include "support.h"
 #include "notify.h"
+/* the small line above a big card's title: follows the version in gripline.h */
+static const wchar_t card_badge[] = L"GRIPLINE  " GRIPLINE_VERSION;
 #include "gripline_logo.h"
 #include "gripline_symbol.h"
+#include "walk_gauge.h"
+#include "blinker.h"
+#include "walking.h"
 
 #define MAX_CARDS 3
 #define CARD_MS 5000u
@@ -27,6 +32,10 @@
 #define FADE_IN_MS 250u
 #define FADE_OUT_MS 500u
 #define TEXT_CAPACITY 96
+/* V7.2 big card (notify_show_big): a taller card with a few lines of text under the title */
+#define BIG_LINES 7
+#define BIG_WRAP 48 /* characters per body line (Segoe UI 14 px in the text column) */
+#define BIG_CARD_MS 20000u
 
 typedef struct {
     wchar_t line1[TEXT_CAPACITY], line2[TEXT_CAPACITY];
@@ -36,6 +45,8 @@ typedef struct {
     unsigned tag; /* notify_show_step: the card a later step replaces (0 = none) */
     int color; /* fixed NOTIFY_COLOR_* of this card, -1 = the colour from the settings */
     wchar_t badge[24]; /* line above the text, e.g. WARNUNG; empty = none (the logo carries the name) */
+    unsigned body_lines; /* V7.2 big card: lines of body text under line1/line2, 0 = normal card */
+    wchar_t body[BIG_LINES][BIG_WRAP + 4];
 } Card;
 
 static SRWLOCK lock = SRWLOCK_INIT;
@@ -142,6 +153,7 @@ static volatile LONG pending_count;
 static ULONGLONG first_present;
 
 static void show_card_full(const char *text, ULONGLONG hold, unsigned tag, int logged, int color, const char *badge);
+static void store_card(Card *card);
 #define show_card_logged(text, hold, tag, logged) show_card_full(text, hold, tag, logged, -1, NULL)
 #define show_card(text, hold, tag) show_card_logged(text, hold, tag, 1)
 
@@ -227,6 +239,7 @@ static void show_card_full(const char *text, ULONGLONG hold, unsigned tag, int l
     card.shown = 0;
     card.hold = hold;
     card.tag = tag;
+    card.body_lines = 0;
     card.color = color;
     card.badge[0] = 0;
     if (badge && *badge) {
@@ -236,20 +249,118 @@ static void show_card_full(const char *text, ULONGLONG hold, unsigned tag, int l
         for (const wchar_t *b = wide; *b && i + 1 < sizeof(card.badge) / sizeof(card.badge[0]); ++b) card.badge[i++] = *b;
         card.badge[i] = 0;
     }
+    store_card(&card);
+}
+
+static void store_card(Card *card) {
+    unsigned tag = card->tag;
     AcquireSRWLockExclusive(&lock);
     if (tag && card_count && cards[0].tag == tag) { /* the next step of the same card: new text in place */
-        if (cards[0].shown) card.hold += GetTickCount64() - cards[0].shown;
-        card.shown = cards[0].shown;
-        card.id = next_id++; /* new id: the text is drawn again */
-        cards[0] = card;
+        if (cards[0].shown) card->hold += GetTickCount64() - cards[0].shown;
+        card->shown = cards[0].shown;
+        card->id = next_id++; /* new id: the text is drawn again */
+        cards[0] = *card;
         InterlockedExchange(&cards_changed, 1);
         ReleaseSRWLockExclusive(&lock);
         return;
     }
-    card.id = next_id++;
+    card->id = next_id++;
     for (unsigned i = MAX_CARDS - 1; i > 0; --i) cards[i] = cards[i - 1];
-    cards[0] = card;
+    cards[0] = *card;
     if (card_count < MAX_CARDS) ++card_count;
+    InterlockedExchange(&cards_changed, 1);
+    ReleaseSRWLockExclusive(&lock);
+}
+
+/* V7.2 big card: title (+ "\n" subtitle) like a normal card, then body word-wrapped into up to BIG_LINES lines
+   ("\n" starts a new line, "\n\n" leaves one empty). Everything also goes to Gripline.log in one line. */
+void notify_show_big(const char *title, const char *body, int color, const char *badge, unsigned hold_ms) {
+    if (!title) return;
+    if (color < 0 || color >= NOTIFY_COLOR_COUNT) color = -1;
+    if (badge && *badge) {
+        log_append("[");
+        log_append(badge);
+        log_append("] ");
+    }
+    log_append("GRIPLINE: ");
+    for (const char *p = title; *p; ++p) {
+        char one[2] = {*p, 0};
+        log_append(*p == '\n' ? " - " : one);
+    }
+    if (body && *body) {
+        log_append(" - ");
+        for (const char *p = body; *p; ++p) {
+            char one[2] = {*p, 0};
+            if (*p == '\n') {
+                if (p[1] != '\n' && p[1]) log_append(" ");
+            } else {
+                log_append(one);
+            }
+        }
+    }
+    log_append("\r\n");
+    static Card card; /* big: kept off the stack */
+    static SRWLOCK big_lock = SRWLOCK_INIT;
+    AcquireSRWLockExclusive(&big_lock); /* the static card is shared by callers on other threads */
+    memset(&card, 0, sizeof(card));
+    size_t first = 0;
+    while (title[first] && title[first] != '\n') ++first;
+    utf8_line(title, first, card.line1);
+    utf8_line(title[first] ? title + first + 1 : title + first, title[first] ? text_length(title + first + 1) : 0,
+              card.line2);
+    card.hold = hold_ms ? hold_ms : BIG_CARD_MS;
+    card.color = color;
+    if (badge && *badge) {
+        wchar_t wide[TEXT_CAPACITY];
+        utf8_line(badge, text_length(badge), wide);
+        unsigned i = 0;
+        for (const wchar_t *b = wide; *b && i + 1 < sizeof(card.badge) / sizeof(card.badge[0]); ++b) card.badge[i++] = *b;
+        card.badge[i] = 0;
+    }
+    static wchar_t text[BIG_LINES * BIG_WRAP + 64];
+    int length = body && *body ? MultiByteToWideChar(CP_UTF8, 0, body, -1, text, (int)(sizeof(text) / sizeof(text[0])) - 1) : 0;
+    text[length > 0 ? length : 0] = 0;
+    unsigned lines = 0;
+    const wchar_t *p = text;
+    while (*p && lines < BIG_LINES) {
+        /* one line: up to BIG_WRAP characters, broken at the last space, or at "\n" */
+        unsigned n = 0, cut = 0;
+        while (p[n] && p[n] != L'\n' && n < BIG_WRAP) {
+            if (p[n] == L' ') cut = n;
+            ++n;
+        }
+        unsigned take = n, skip = n;
+        if (p[n] == L' ') skip = n + 1; /* the line is full right before a space */
+        else if (p[n] && p[n] != L'\n' && cut) take = cut, skip = cut + 1; /* too long: break at the space */
+        else if (p[n] == L'\n') skip = n + 1;
+        if (take > BIG_WRAP) take = BIG_WRAP;
+        for (unsigned i = 0; i < take; ++i) card.body[lines][i] = p[i];
+        card.body[lines][take] = 0;
+        ++lines;
+        p += skip;
+    }
+    if (*p && lines == BIG_LINES) { /* more than fits: the last line ends in ... (the log has it all) */
+        wchar_t *last = card.body[BIG_LINES - 1];
+        unsigned n = 0;
+        while (last[n]) ++n;
+        if (n > BIG_WRAP - 2) n = BIG_WRAP - 2;
+        last[n] = 0x2026, last[n + 1] = 0;
+    }
+    while (lines && !card.body[lines - 1][0]) --lines; /* no empty lines at the end */
+    card.body_lines = lines;
+    store_card(&card);
+    ReleaseSRWLockExclusive(&big_lock);
+}
+
+void notify_fade_tag(unsigned tag) {
+    if (!tag) return;
+    ULONGLONG now = GetTickCount64();
+    AcquireSRWLockExclusive(&lock);
+    for (unsigned i = 0; i < card_count; ++i) {
+        if (cards[i].tag != tag) continue;
+        if (!cards[i].shown) cards[i].hold = 0;
+        else if (now - cards[i].shown < cards[i].hold) cards[i].hold = now - cards[i].shown;
+    }
     InterlockedExchange(&cards_changed, 1);
     ReleaseSRWLockExclusive(&lock);
 }
@@ -314,6 +425,15 @@ void notify_fade_black(int permille, unsigned ms) {
     black_start = now;
     black_ms = ms;
     ReleaseSRWLockExclusive(&lock);
+}
+
+/* V7.1 menu mouse pointer (menu_mouse.c): drawn by the card window, at client pixel (x, y) */
+static volatile LONG cursor_on, cursor_x, cursor_y;
+
+void notify_cursor(int show, int x, int y) {
+    InterlockedExchange(&cursor_x, x);
+    InterlockedExchange(&cursor_y, y);
+    InterlockedExchange(&cursor_on, show ? 1 : 0);
 }
 
 void notify_panel_set(const wchar_t *title, const NotifyPanelRow *rows, unsigned count) {
@@ -483,9 +603,28 @@ static Layout layout_for(UINT screen_height) {
     return l;
 }
 
+/* V7.2 big cards: height in pixels of one card (with its glow), of the space for all cards, and the top of card i */
+static int big_line_px(const Layout *l) {
+    return (int)(19 * l->scale);
+}
+static int big_extra_px(const Layout *l, unsigned lines) {
+    return lines ? (int)lines * big_line_px(l) + (int)(12 * l->scale) : 0;
+}
+static int card_px(const Layout *l, const Card *c) {
+    return l->height + big_extra_px(l, c->body_lines);
+}
+static int card_rows_max(const Layout *l) {
+    return MAX_CARDS * (l->height + big_extra_px(l, BIG_LINES));
+}
+static int card_top(const Layout *l, const Card *list, unsigned index) {
+    int top = 0;
+    for (unsigned i = 0; i < index; ++i) top += card_px(l, &list[i]);
+    return top;
+}
+
 /* top left corner of the telemetry panel (pw x ph) on a w x h screen; cards (count, layout l) stay top right */
-static void tele_place(int pos, const Layout *l, unsigned count, int w, int h, int pw, int ph, int *x, int *y) {
-    int below_cards = l->margin + (int)count * (l->height + l->gap);
+static void tele_place(int pos, const Layout *l, const Card *list, unsigned count, int w, int h, int pw, int ph, int *x, int *y) {
+    int below_cards = l->margin + card_top(l, list, count) + (int)count * l->gap;
     int left = pos >= NOTIFY_TELE_LEFT_TOP;
     int row = pos == NOTIFY_TELE_RIGHT_TOP || pos == NOTIFY_TELE_LEFT_TOP ? 0
             : pos == NOTIFY_TELE_RIGHT_BOTTOM || pos == NOTIFY_TELE_LEFT_BOTTOM ? 2 : 1;
@@ -850,8 +989,8 @@ static void clear_bitmap(unsigned char *px, int w, int h) {
 static int draw_cards_v7(const Card *list, unsigned count, const Layout *l, unsigned char *pixels, int pitch) {
     static BITMAPINFO info;
     void *bits = NULL;
-    int w = l->width, h = l->height * MAX_CARDS, g = l->glow;
-    int cw = w - 2 * g, ch = l->height - 2 * g;
+    int w = l->width, h = card_rows_max(l), g = l->glow;
+    int cw = w - 2 * g, head = l->height - 2 * g; /* head = a normal card; a big card has its body below */
     info.bmiHeader.biSize = sizeof(info.bmiHeader);
     info.bmiHeader.biWidth = w;
     info.bmiHeader.biHeight = -h;
@@ -873,8 +1012,8 @@ static int draw_cards_v7(const Card *list, unsigned count, const Layout *l, unsi
         const unsigned char(*tone)[3] = palette[list[c].color >= 0 ? list[c].color : color];
         const unsigned char logo[3] = {mix8(tone[1][2], 255, 0.15f), mix8(tone[1][1], 255, 0.15f),
                                        mix8(tone[1][0], 255, 0.15f)};
-        int top = (int)c * l->height;
-        int ix = g + l->skew * 6 / 10 + l->bar + (int)(9 * s), iy = top + g + (ch - l->icon) / 2;
+        int top = card_top(l, list, c), ch = card_px(l, &list[c]) - 2 * g;
+        int ix = g + l->skew * 6 / 10 + l->bar + (int)(9 * s), iy = top + g + (head - l->icon) / 2;
         if (l->style == NOTIFY_STYLE_OVERDRIVE) { /* banner; logo in white (dark on light cards) with a shadow */
             paint_overdrive_back(px, w, g, top + g, cw, ch, 0, l, tone);
             const unsigned char ink[3] = {0, 0, 0}, white[3] = {255, 255, 255}, dark[3] = {40, 26, 18};
@@ -906,11 +1045,12 @@ static int draw_cards_v7(const Card *list, unsigned count, const Layout *l, unsi
     int shade = s >= 1.5f ? 2 : 1;
     int pill_h = (int)(18 * s), pill_pad = (int)(7 * s);
     ULONGLONG now = GetTickCount64();
-    int line_y[MAX_CARDS][3], pill_w[MAX_CARDS];
+    int line_y[MAX_CARDS][3], pill_w[MAX_CARDS], tops[MAX_CARDS + 1];
+    for (unsigned c = 0; c <= count; ++c) tops[c] = card_top(l, list, c);
     /* V7 overhaul: the text block stands in the middle of the card (measured with the real font);
        the badge sits on a pill; a carbon weave and a glowing colour line finish the card */
     for (unsigned c = 0; c < count; ++c) {
-        int top = (int)c * l->height + g;
+        int top = tops[c] + g, ch = tops[c + 1] - tops[c] - 2 * g;
         int has2 = list[c].line2[0] != 0, badge = list[c].badge[0] != 0;
         const unsigned char(*tone)[3] = palette[list[c].color >= 0 ? list[c].color : color];
         const unsigned char accent[3] = {tone[0][2], tone[0][1], tone[0][0]};
@@ -918,7 +1058,8 @@ static int draw_cards_v7(const Card *list, unsigned count, const Layout *l, unsi
         const unsigned char accent2[3] = {second[2], second[1], second[0]};
         int gap1 = (int)(7 * s), gap2 = (int)(9 * s);
         int total = (badge ? pill_h + gap1 : 0) + cap_1 + (has2 ? gap2 + cap_2 : 0);
-        int y = top + (ch - total) / 2;
+        int y = top + (head - total) / 2;
+        if (list[c].body_lines) y = top + (int)(16 * s); /* big card: title block at the top */
         line_y[c][0] = y;
         if (badge) y += pill_h + gap1;
         line_y[c][1] = y - (asc_1 - cap_1);
@@ -989,7 +1130,7 @@ static int draw_cards_v7(const Card *list, unsigned count, const Layout *l, unsi
     }
     gdi.GdiFlush();
     for (unsigned c = 0; c < count; ++c) {
-        int top = (int)c * l->height + g;
+        int top = tops[c] + g, ch = tops[c + 1] - tops[c] - 2 * g;
         RECT clip = {tx, top, g + cw - l->pad - l->skew, top + ch};
         int has2 = list[c].line2[0] != 0, badge = list[c].badge[0] != 0;
         const unsigned char(*tone)[3] = palette[list[c].color >= 0 ? list[c].color : color];
@@ -1018,13 +1159,23 @@ static int draw_cards_v7(const Card *list, unsigned count, const Layout *l, unsi
             gdi.ExtTextOutW(dc, tx, line_y[c][2], ETO_CLIPPED, &clip, list[c].line2, (UINT)text_width_chars(list[c].line2),
                             NULL);
         }
+        if (list[c].body_lines) { /* V7.2 big card: the body lines under the title block */
+            int baseline = has2 ? line_y[c][2] + asc_2 : line_y[c][1] + asc_1; /* of the line above */
+            int by = baseline + (int)(14 * s) - (asc_2 - cap_2);
+            gdi.SelectObject(dc, small);
+            gdi.SetTextColor(dc, dark_text ? RGB(30, 34, 46) : RGB(222, 228, 238));
+            for (unsigned k = 0; k < list[c].body_lines; ++k, by += big_line_px(l))
+                if (list[c].body[k][0])
+                    gdi.ExtTextOutW(dc, tx, by, ETO_CLIPPED, &clip, list[c].body[k], (UINT)text_width_chars(list[c].body[k]), NULL);
+        }
     }
     gdi.SelectObject(dc, old_font);
     gdi.GdiFlush();
-    for (int y = 0; y < h; ++y) {
+    for (int y = 0, card = 0; y < h; ++y) {
         unsigned char *src = px + (size_t)y * w * 4;
         unsigned char *dst = pixels + (size_t)y * pitch;
-        int card = y / l->height, cy = y % l->height;
+        while ((unsigned)card < count && y >= tops[card + 1]) ++card;
+        int cy = (unsigned)card < count ? y - tops[card] : 0;
         const unsigned char(*tone)[3] =
             palette[(unsigned)card < count && list[card].color >= 0 ? list[card].color : color];
         for (int x = 0; x < w; ++x) {
@@ -1032,7 +1183,7 @@ static int draw_cards_v7(const Card *list, unsigned count, const Layout *l, unsi
                 dst[x * 4 + 0] = dst[x * 4 + 1] = dst[x * 4 + 2] = dst[x * 4 + 3] = 0;
                 continue;
             }
-            finish_pixel(src + x * 4, dst + x * 4, x, cy, w, l->height, g, l, 0.95f, tone);
+            finish_pixel(src + x * 4, dst + x * 4, x, cy, w, tops[card + 1] - tops[card], g, l, 0.95f, tone);
         }
     }
     gdi.SelectObject(dc, old_bitmap);
@@ -1075,7 +1226,7 @@ static void paint_pill(unsigned char *px, int w, int x0, int y0, int pw, int ph,
 /* V7 overhaul: the Gripline menu (panel at the top) gets a taller header and roomier rows while it is
    short enough; the key list (F5) and the telemetry keep the compact rows */
 static int panel_roomy(const Layout *l, unsigned count) {
-    return l->style != NOTIFY_STYLE_CLASSIC && ((draw_kind == 1 && count <= 24) || draw_kind == 2);
+    return l->style != NOTIFY_STYLE_CLASSIC && ((draw_kind == 1 && count <= 26) || draw_kind == 2);
 }
 static int panel_header_px(const Layout *l, unsigned count) {
     return panel_roomy(l, count) && draw_kind == 1 ? (int)(76 * l->scale) : l->panel_header;
@@ -1543,7 +1694,7 @@ static int draw_panel_v7(const wchar_t *title, const NotifyPanelRow *rows, unsig
         gdi.SelectObject(dc, tiny);
         RECT kclip = {title_x, g, right - l->pad, g + header};
         gdi.SetTextColor(dc, over && over_light_card(tone) ? RGB(40, 30, 20) : RGB(mix8(tone[1][0], 255, 0.55f), mix8(tone[1][1], 255, 0.55f), mix8(tone[1][2], 255, 0.55f)));
-        gdi.ExtTextOutW(dc, title_x + (int)(2 * s), g + header / 2 - (int)(25 * s), ETO_CLIPPED, &kclip, L"GRIPLINE  V7", 12, NULL);
+        gdi.ExtTextOutW(dc, title_x + (int)(2 * s), g + header / 2 - (int)(25 * s), ETO_CLIPPED, &kclip, card_badge, (UINT)(sizeof(card_badge) / sizeof(card_badge[0]) - 1), NULL);
         gdi.SelectObject(dc, main);
         HFONT fit = NULL; /* long titles step down a size instead of being cut */
         if (text_px(dc, title, 15.0f * s) > clip.right - clip.left) {
@@ -1693,7 +1844,9 @@ static int draw_panel_v7(const wchar_t *title, const NotifyPanelRow *rows, unsig
 static int draw_cards_classic(const Card *list, unsigned count, const Layout *l, unsigned char *pixels, int pitch) {
     static BITMAPINFO info;
     void *bits = NULL;
-    int w = l->width, h = l->height * MAX_CARDS;
+    int w = l->width, h = card_rows_max(l);
+    int tops[MAX_CARDS + 1];
+    for (unsigned c = 0; c <= count; ++c) tops[c] = card_top(l, list, c);
     info.bmiHeader.biSize = sizeof(info.bmiHeader);
     info.bmiHeader.biWidth = w;
     info.bmiHeader.biHeight = -h;
@@ -1714,8 +1867,8 @@ static int draw_cards_classic(const Card *list, unsigned count, const Layout *l,
         const unsigned char(*tone)[3] = palette[list[c].color >= 0 ? list[c].color : color];
         const unsigned char accent[3] = {tone[0][2], tone[0][1], tone[0][0]}; /* B, G, R */
         const unsigned char logo[3] = {tone[1][2], tone[1][1], tone[1][0]};
-        int top = (int)c * l->height;
-        for (int y = 0; y < l->height; ++y) {
+        int top = tops[c];
+        for (int y = 0; y < tops[c + 1] - top; ++y) {
             unsigned char *row = px + (size_t)(top + y) * w * 4;
             for (int x = 0; x < w; ++x) {
                 const unsigned char *col = x < l->bar ? accent : bg;
@@ -1758,10 +1911,10 @@ static int draw_cards_classic(const Card *list, unsigned count, const Layout *l,
     gdi.SetBkMode(dc, TRANSPARENT);
     int tx = l->bar + l->pad + l->icon + l->pad;
     for (unsigned c = 0; c < count; ++c) {
-        int top = (int)c * l->height;
-        RECT clip = {tx, top, w - l->pad, top + l->height};
+        int top = tops[c];
+        RECT clip = {tx, top, w - l->pad, tops[c + 1]};
         int has2 = list[c].line2[0] != 0;
-        int y = top + (int)((has2 ? 12 : 20) * s);
+        int y = top + (int)((has2 || list[c].body_lines ? 12 : 20) * s);
         const unsigned char(*tone)[3] = palette[list[c].color >= 0 ? list[c].color : color];
         wchar_t heading[40] = L"GRIPLINE";
         if (list[c].badge[0]) { /* classic title line: GRIPLINE · WARNUNG */
@@ -1784,6 +1937,14 @@ static int draw_cards_classic(const Card *list, unsigned count, const Layout *l,
             gdi.ExtTextOutW(dc, tx, y, ETO_CLIPPED, &clip, list[c].line2, (UINT)text_width_chars(list[c].line2),
                             NULL);
         }
+        if (list[c].body_lines) { /* V7.2 big card */
+            y += (int)((has2 ? 24 : 30) * s);
+            gdi.SelectObject(dc, small);
+            gdi.SetTextColor(dc, RGB(215, 222, 232));
+            for (unsigned k = 0; k < list[c].body_lines; ++k, y += big_line_px(l))
+                if (list[c].body[k][0])
+                    gdi.ExtTextOutW(dc, tx, y, ETO_CLIPPED, &clip, list[c].body[k], (UINT)text_width_chars(list[c].body[k]), NULL);
+        }
         gdi.SelectObject(dc, old_font);
     }
     gdi.GdiFlush();
@@ -1791,9 +1952,11 @@ static int draw_cards_classic(const Card *list, unsigned count, const Layout *l,
     for (int y = 0; y < h; ++y) {
         unsigned char *src = px + (size_t)y * w * 4;
         unsigned char *dst = pixels + (size_t)y * pitch;
-        int card = y / l->height, cy = y % l->height;
+        int card = 0;
+        while ((unsigned)card < count && y >= tops[card + 1]) ++card;
+        int cy = (unsigned)card < count ? y - tops[card] : 0, chh = (unsigned)card < count ? tops[card + 1] - tops[card] : 1;
         for (int x = 0; x < w; ++x) {
-            float a = (unsigned)card < count ? 0.94f * card_coverage(x, cy, w, l->height, l->radius) : 0.0f;
+            float a = (unsigned)card < count ? 0.94f * card_coverage(x, cy, w, chh, l->radius) : 0.0f;
             dst[x * 4 + 0] = (unsigned char)(src[x * 4 + 0] * a + 0.5f);
             dst[x * 4 + 1] = (unsigned char)(src[x * 4 + 1] * a + 0.5f);
             dst[x * 4 + 2] = (unsigned char)(src[x * 4 + 2] * a + 0.5f);
@@ -2240,7 +2403,7 @@ static int animating(unsigned count) {
 }
 
 static void render(IDXGISwapChain *swapchain) {
-    Card list[MAX_CARDS];
+    static Card list[MAX_CARDS]; /* only the present thread draws */
     unsigned count;
     ULONGLONG now = GetTickCount64();
     AcquireSRWLockExclusive(&lock);
@@ -2285,7 +2448,7 @@ static void render(IDXGISwapChain *swapchain) {
         gpu.drawn_count = (unsigned)-1;
     }
     const Layout *l = &gpu.layout;
-    int card_rows = l->height * MAX_CARDS;
+    int card_rows = card_rows_max(l);
     /* V7: the telemetry panel is drawn at its own size (sharp text, not stretched) */
     int tele = tele_n != 0;
     static Layout tele_layout;
@@ -2396,7 +2559,7 @@ static void render(IDXGISwapChain *swapchain) {
     if (tele) {
         float ph = (float)panel_pixels(pl, tele_n), a = 1.0f;
         int tx, ty;
-        tele_place((int)tele_pos, l, count, (int)width, (int)height, pl->width, (int)ph, &tx, &ty);
+        tele_place((int)tele_pos, l, list, count, (int)width, (int)height, pl->width, (int)ph, &tx, &ty);
         if (l->style == NOTIFY_STYLE_CLASSIC) a = (float)tele_opacity / 100.0f; /* V7 looks: background only */
         float x0 = (float)tx, y0 = (float)ty;
         float c[12] = {x0 / width * 2.0f - 1.0f,
@@ -2438,17 +2601,17 @@ static void render(IDXGISwapChain *swapchain) {
         float c[12] = {x0 / width * 2.0f - 1.0f,
                        1.0f - y / height * 2.0f,
                        (x0 + l->width) / width * 2.0f - 1.0f,
-                       1.0f - (y + l->height) / height * 2.0f,
+                       1.0f - (y + card_px(l, &list[i])) / height * 2.0f,
                        0.0f,
-                       (float)(i * l->height) / gpu.tex_height,
+                       (float)card_top(l, list, i) / gpu.tex_height,
                        (float)l->width / gpu.tex_width,
-                       (float)((i + 1) * l->height) / gpu.tex_height,
+                       (float)card_top(l, list, i + 1) / gpu.tex_height,
                        a, 0.0f, 0.0f, 0.0f};
         if (a > 0.0f) {
             ID3D12GraphicsCommandList_SetGraphicsRoot32BitConstants(gpu.list, 1, 12, c, 0);
             ID3D12GraphicsCommandList_DrawInstanced(gpu.list, 4, 1, 0, 0);
         }
-        y += l->height + l->gap;
+        y += card_px(l, &list[i]) + l->gap;
     }
     barrier(back, D3D12_RESOURCE_STATE_RENDER_TARGET, D3D12_RESOURCE_STATE_PRESENT);
     ID3D12GraphicsCommandList_Close(gpu.list);
@@ -2552,6 +2715,119 @@ static void blend_block(unsigned char *frame, int frame_w, int frame_h, int x, i
     }
 }
 
+/* tan(fov / 2) for a view angle up to 2.5 rad (series, exact to ~1e-4) */
+static float sin_cos_tan_half(float fov) {
+    float a = fov * 0.5f, a2 = a * a;
+    float sn = a * (1.0f - a2 / 6.0f * (1.0f - a2 / 20.0f * (1.0f - a2 / 42.0f * (1.0f - a2 / 72.0f))));
+    float cs = 1.0f - a2 / 2.0f * (1.0f - a2 / 12.0f * (1.0f - a2 / 30.0f * (1.0f - a2 / 56.0f)));
+    return cs > 0.05f ? sn / cs : 20.0f;
+}
+
+/* V7.1 car marker (walking.h walking_car_marker): an arrow in the card colour (F8, also rainbow) pointing at (dx, dy)
+   with its tip at (tx, ty), drawn straight into the frame with a soft edge and a dark rim */
+static void draw_marker(unsigned char *frame, int frame_w, int frame_h, float tx, float ty, float dx, float dy,
+                        float size, float alpha, const unsigned char blue[3], const unsigned char light[3]) {
+    float l = dx * dx + dy * dy;
+    if (l < 1e-6f) dx = 0.0f, dy = 1.0f;
+    else {
+        float r = 1.0f / root(l);
+        dx *= r, dy *= r;
+    }
+    float px = -dy, py = dx; /* across the arrow */
+    float bx = tx - dx * size, by = ty - dy * size; /* middle of the back edge */
+    float ax[3] = {tx, bx + px * size * 0.6f, bx - px * size * 0.6f};
+    float ay[3] = {ty, by + py * size * 0.6f, by - py * size * 0.6f};
+    int x0 = (int)(tx - size * 1.4f), x1 = (int)(tx + size * 1.4f), y0 = (int)(ty - size * 1.4f), y1 = (int)(ty + size * 1.4f);
+    float rim = size * 0.12f + 1.0f;
+    for (int y = y0; y <= y1; ++y) {
+        if (y < 0 || y >= frame_h) continue;
+        for (int x = x0; x <= x1; ++x) {
+            if (x < 0 || x >= frame_w) continue;
+            float qx = (float)x + 0.5f, qy = (float)y + 0.5f, d = 1e9f;
+            int inside = 1;
+            for (int e = 0; e < 3; ++e) { /* signed distance to each edge (positive = inside) */
+                float ex = ax[(e + 1) % 3] - ax[e], ey = ay[(e + 1) % 3] - ay[e];
+                float el = root(ex * ex + ey * ey);
+                if (el < 1e-3f) continue;
+                float cx = ax[(e + 2) % 3] - ax[e], cy = ay[(e + 2) % 3] - ay[e];
+                float side = (ex * cy - ey * cx) >= 0.0f ? 1.0f : -1.0f;
+                float sd = side * (ex * (qy - ay[e]) - ey * (qx - ax[e])) / el;
+                if (sd < d) d = sd;
+                if (sd < 0.0f) inside = 0;
+            }
+            (void)inside;
+            float cover = d + rim + 0.5f; /* rim + fill */
+            if (cover <= 0.0f) continue;
+            if (cover > 1.0f) cover = 1.0f;
+            float fill = d + 0.5f;
+            fill = fill < 0.0f ? 0.0f : fill > 1.0f ? 1.0f : fill;
+            float shade = d / size; /* lighter towards the middle */
+            shade = shade < 0.0f ? 0.0f : shade > 0.35f ? 1.0f : shade / 0.35f;
+            float a = cover * alpha;
+            unsigned char *o = frame + ((size_t)y * frame_w + x) * 4;
+            float col[3];
+            for (int c = 0; c < 3; ++c) {
+                float f = (float)blue[c] + ((float)light[c] - (float)blue[c]) * shade * 0.6f;
+                col[c] = (f * fill + 10.0f * (1.0f - fill)); /* dark rim outside the fill */
+            }
+            /* premultiplied over, BGRA */
+            float keep = 1.0f - a;
+            float v[4] = {col[2] * a + o[0] * keep, col[1] * a + o[1] * keep, col[0] * a + o[2] * keep, 255.0f * a + o[3] * keep};
+            for (int c = 0; c < 4; ++c) o[c] = (unsigned char)(v[c] > 255.0f ? 255.0f : v[c]);
+        }
+    }
+}
+
+/* the menu pointer: a white arrow with a dark rim (premultiplied BGRA, size x size, tip at 0,0) */
+#define CURSOR_MAX 72
+static unsigned char cursor_pixels[CURSOR_MAX * CURSOR_MAX * 4];
+static int cursor_size;
+
+static float edge_distance(float px, float py, float ax, float ay, float bx, float by) {
+    float ex = bx - ax, ey = by - ay, wx = px - ax, wy = py - ay;
+    float t = (wx * ex + wy * ey) / (ex * ex + ey * ey);
+    if (t < 0.0f) t = 0.0f;
+    if (t > 1.0f) t = 1.0f;
+    float dx = wx - ex * t, dy = wy - ey * t;
+    return root(dx * dx + dy * dy);
+}
+
+static void make_cursor(int screen_h) {
+    int size = (int)(30.0f * (float)screen_h / 1080.0f + 0.5f);
+    if (size < 20) size = 20;
+    if (size > CURSOR_MAX) size = CURSOR_MAX;
+    if (size == cursor_size) return;
+    /* arrow in a 13 x 21 unit box */
+    static const float ux[7] = {1.0f, 1.0f, 4.9f, 7.6f, 11.0f, 8.3f, 13.4f};
+    static const float uy[7] = {1.0f, 18.0f, 14.6f, 21.0f, 19.6f, 13.4f, 13.4f};
+    float k = (float)size / 22.0f, px[7], py[7], rim = 0.9f * (k > 1.0f ? k : 1.0f);
+    for (int i = 0; i < 7; ++i) px[i] = ux[i] * k, py[i] = uy[i] * k;
+    for (int y = 0; y < size; ++y)
+        for (int x = 0; x < size; ++x) {
+            float white = 0.0f, dark = 0.0f;
+            for (int sy = 0; sy < 4; ++sy)
+                for (int sx = 0; sx < 4; ++sx) {
+                    float qx = (float)x + (sx + 0.5f) / 4.0f, qy = (float)y + (sy + 0.5f) / 4.0f;
+                    int inside = 0;
+                    float d = 1e9f;
+                    for (int i = 0, j = 6; i < 7; j = i++) {
+                        if ((py[i] > qy) != (py[j] > qy) && qx < (px[j] - px[i]) * (qy - py[i]) / (py[j] - py[i]) + px[i])
+                            inside = !inside;
+                        float e = edge_distance(qx, qy, px[j], py[j], px[i], py[i]);
+                        if (e < d) d = e;
+                    }
+                    if (inside && d > rim) white += 1.0f / 16.0f;
+                    else if (inside || d < 0.6f * k) dark += 1.0f / 16.0f;
+                }
+            unsigned char *o = cursor_pixels + ((size_t)y * size + x) * 4;
+            float a = white + dark * 0.85f;
+            unsigned v = (unsigned)(white * 255.0f + dark * 0.85f * 24.0f + 0.5f);
+            o[0] = o[1] = o[2] = (unsigned char)(v > 255 ? 255 : v);
+            o[3] = (unsigned char)(a * 255.0f + 0.5f > 255.0f ? 255 : (unsigned)(a * 255.0f + 0.5f));
+        }
+    cursor_size = size;
+}
+
 static DWORD WINAPI overlay_thread(void *unused) {
     (void)unused;
     HINSTANCE instance = GetModuleHandleW(NULL);
@@ -2570,9 +2846,10 @@ static DWORD WINAPI overlay_thread(void *unused) {
         return 0;
     }
     log_append("NOTIFY: in-game cards ready (window over the game picture).\r\n");
-    static unsigned char scratch_cards[1200 * 110 * 3 * 4 * 3]; /* up to 2.5x scale (with the glow), see layout_for */
+    static unsigned char scratch_cards[1200 * 1900 * 4]; /* up to 2.5x scale (with the glow, big cards), see card_rows_max */
     static unsigned char scratch_panel[1200 * 1200 * 4];
     static unsigned char scratch_tele[1200 * 1200 * 4]; /* V7: telemetry has its own panel */
+    static unsigned char scratch_gauge[330 * 380 * 4 * 25 / 4 + 64]; /* V7.1 walking gauge, up to 2.5x */
     unsigned char *frame = NULL;
     size_t frame_bytes = 0;
     HDC dc = gdi.CreateCompatibleDC(NULL);
@@ -2586,7 +2863,7 @@ static DWORD WINAPI overlay_thread(void *unused) {
         while (win.PeekMessageW(&msg, NULL, 0, 0, PM_REMOVE)) win.DispatchMessageW(&msg);
         Sleep(16);
         if (!win.IsWindow(game_window)) break;
-        Card list[MAX_CARDS];
+        static Card list[MAX_CARDS]; /* this window thread only */
         ULONGLONG now = GetTickCount64();
         AcquireSRWLockExclusive(&lock);
         for (unsigned i = 0; i < card_count; ++i)
@@ -2613,7 +2890,36 @@ static DWORD WINAPI overlay_thread(void *unused) {
         HWND top = win.GetForegroundWindow();
         int focused = top && (top == game_window || win.GetAncestor(game_window, GA_ROOT) == top);
         if (!enabled) count = 0, panel = 0, tele_n = 0;
-        if ((!count && !panel && !tele_n && !dark) || !focused /* black shows even with cards off */ || win.IsIconic(game_window)) {
+        int pointer = cursor_on != 0; /* V7.1 menu pointer, shown even with cards off */
+        int pointer_x = (int)cursor_x, pointer_y = (int)cursor_y;
+        /* V7.1 walking gauge at the bottom right (walk_gauge.h): its own switch, so also with cards off;
+           fades in after the black of getting out and goes with the black of getting in */
+        static WalkGaugeData gauge_data;
+        static float gauge_alpha;
+        static ULONGLONG gauge_tick;
+        int gauge_style = walk_gauge_style();
+        WalkGaugeData fresh;
+        int gauge_want = gauge_style != WALK_GAUGE_OFF && !dark && walking_gauge_data(&fresh);
+        if (gauge_want) gauge_data = fresh;
+        float gauge_dt = gauge_tick && now > gauge_tick ? (float)(now - gauge_tick) / 1000.0f : 0.0f;
+        gauge_tick = now;
+        gauge_alpha += (gauge_want ? gauge_dt / 0.35f : -gauge_dt / 0.2f);
+        gauge_alpha = gauge_alpha < 0.0f ? 0.0f : gauge_alpha > 1.0f ? 1.0f : gauge_alpha;
+        if (gauge_style == WALK_GAUGE_OFF) gauge_alpha = 0.0f;
+        int gauge = gauge_alpha > 0.0f;
+        /* V7.1 car marker: a blue arrow over the hidden car's place */
+        static float marker_alpha;
+        float m_tx = 0.0f, m_ty = 0.0f, m_ahead = 0.0f, m_fov = 1.0f, m_dist = 0.0f;
+        int marker_want = !dark && walking_car_marker(&m_tx, &m_ty, &m_ahead, &m_fov, &m_dist);
+        marker_alpha += marker_want ? gauge_dt / 0.3f : -gauge_dt / 0.2f;
+        marker_alpha = marker_alpha < 0.0f ? 0.0f : marker_alpha > 1.0f ? 1.0f : marker_alpha;
+        int marker = marker_want && marker_alpha > 0.0f;
+        gauge = gauge || marker; /* keeps the window up */
+        /* V7.2 turn signal arrows above the game's speedometer (blinker.h), their own switch */
+        int blink_mode = 0, blink_lit = 0;
+        float blink_alpha = 0.0f;
+        int blink = !dark && blinker_display(&blink_mode, &blink_lit, &blink_alpha);
+        if ((!count && !panel && !tele_n && !dark && !pointer && !gauge && !blink) || !focused /* black shows even with cards off */ || win.IsIconic(game_window)) {
             if (visible) win.ShowWindow(window, SW_HIDE);
             visible = 0;
             continue;
@@ -2623,8 +2929,46 @@ static DWORD WINAPI overlay_thread(void *unused) {
         if (!win.GetClientRect(game_window, &client) || !win.ClientToScreen(game_window, &origin)) continue;
         int screen_w = client.right - client.left, screen_h = client.bottom - client.top;
         if (screen_w < 320 || screen_h < 240) continue;
+        if (pointer) make_cursor(screen_h);
+        if (pointer && !count && !panel && !tele_n && !dark && !gauge && !blink) { /* only the pointer: a small window at the pointer */
+            static unsigned char *small_bits;
+            static HBITMAP small_bitmap;
+            static HDC small_dc;
+            static int small_size;
+            if (small_size != cursor_size) {
+                if (!small_dc) small_dc = gdi.CreateCompatibleDC(NULL);
+                if (small_bitmap) gdi.DeleteObject(small_bitmap);
+                BITMAPINFO info;
+                memset(&info, 0, sizeof(info));
+                info.bmiHeader.biSize = sizeof(info.bmiHeader);
+                info.bmiHeader.biWidth = cursor_size;
+                info.bmiHeader.biHeight = -cursor_size;
+                info.bmiHeader.biPlanes = 1;
+                info.bmiHeader.biBitCount = 32;
+                info.bmiHeader.biCompression = BI_RGB;
+                void *bits = NULL;
+                small_bitmap = small_dc ? gdi.CreateDIBSection(small_dc, &info, DIB_RGB_COLORS, &bits, NULL, 0) : NULL;
+                if (!small_bitmap || !bits) {
+                    small_bitmap = NULL, small_size = 0;
+                    continue;
+                }
+                gdi.SelectObject(small_dc, small_bitmap);
+                small_bits = (unsigned char *)bits;
+                small_size = cursor_size;
+                memory_copy(small_bits, cursor_pixels, (size_t)cursor_size * cursor_size * 4);
+            }
+            gdi.GdiFlush();
+            POINT position = {origin.x + pointer_x, origin.y + pointer_y}, source = {0, 0};
+            SIZE size = {small_size, small_size};
+            BLENDFUNCTION blend = {AC_SRC_OVER, 0, 255, AC_SRC_ALPHA};
+            win.UpdateLayeredWindow(window, NULL, &position, &size, small_dc, &source, 0, &blend, ULW_ALPHA);
+            if (!visible) win.ShowWindow(window, SW_SHOWNOACTIVATE);
+            visible = 1;
+            frame_w = 0; /* the big frame is set up again when cards come */
+            continue;
+        }
         Layout l = layout_for((UINT)screen_h);
-        if ((size_t)l.width * l.height * MAX_CARDS * 4 > sizeof(scratch_cards) ||
+        if ((size_t)l.width * card_rows_max(&l) * 4 > sizeof(scratch_cards) ||
             (size_t)l.width * l.panel_height * 4 > sizeof(scratch_panel))
             continue;
         /* V7: the telemetry panel at its own size and place (left: the window spans the whole width) */
@@ -2636,7 +2980,14 @@ static DWORD WINAPI overlay_thread(void *unused) {
         }
         int want_w = l.margin + 2 * l.width + l.gap + (int)(40.0f * l.scale) + 4;
         if (tele && (tele_pos >= NOTIFY_TELE_LEFT_TOP || pl.width + l.margin + 4 > want_w)) want_w = screen_w;
-        if (dark || want_w > screen_w) want_w = screen_w;
+        int gauge_w = 0, gauge_h = 0, gauge_margin = walk_gauge_margin(screen_h);
+        if (gauge && gauge_style != WALK_GAUGE_OFF && gauge_alpha > 0.0f) {
+            walk_gauge_size(gauge_style, screen_h, &gauge_w, &gauge_h);
+            if ((size_t)gauge_w * gauge_h * 4 > sizeof(scratch_gauge)) gauge = 0;
+            else if (gauge_w + gauge_margin + 4 > want_w) want_w = gauge_w + gauge_margin + 4;
+        }
+        if (blink && blinker_width(screen_h) + 4 > want_w) want_w = blinker_width(screen_h) + 4;
+        if (dark || pointer || marker || want_w > screen_w) want_w = screen_w;
         if (want_w != frame_w || screen_h != frame_h) {
             if (bitmap) gdi.DeleteObject(bitmap);
             BITMAPINFO info;
@@ -2691,7 +3042,7 @@ static DWORD WINAPI overlay_thread(void *unused) {
         int shift = 0;
         if (tele) {
             int ph = panel_pixels(&pl, tele_n), tx, ty;
-            tele_place((int)tele_pos, &l, count, frame_w, screen_h, pl.width, ph, &tx, &ty);
+            tele_place((int)tele_pos, &l, list, count, frame_w, screen_h, pl.width, ph, &tx, &ty);
             float a = l.style == NOTIFY_STYLE_CLASSIC ? (float)tele_opacity / 100.0f : 1.0f; /* V7 looks: background only */
             blend_block(frame, frame_w, frame_h, tx, ty, scratch_tele, pl.width * 4, pl.width, ph, a);
         }
@@ -2710,10 +3061,64 @@ static DWORD WINAPI overlay_thread(void *unused) {
             float a = card_alpha(now - list[i].shown, list[i].hold, &slide);
             int x0 = frame_w - l.margin - l.width - shift + (int)(slide * 40.0f * l.scale);
             if (a > 0.0f)
-                blend_block(frame, frame_w, frame_h, x0, y, scratch_cards + (size_t)i * l.height * l.width * 4,
-                            l.width * 4, l.width, l.height, a);
-            y += l.height + l.gap;
+                blend_block(frame, frame_w, frame_h, x0, y, scratch_cards + (size_t)card_top(&l, list, i) * l.width * 4,
+                            l.width * 4, l.width, card_px(&l, &list[i]), a);
+            y += card_px(&l, &list[i]) + l.gap;
         }
+        /* the rainbow moves on also while only the gauge / the marker are up (Marvin 08.11.2026: without a
+           card or the menu the gauge's rainbow stood still) */
+        if ((marker || gauge) && color == NOTIFY_COLOR_RAINBOW) rainbow_tick();
+        if (marker) {
+            float half_h = (float)screen_h * 0.5f, half_w = (float)screen_w * 0.5f;
+            float tan_v = sin_cos_tan_half(m_fov), tan_h = tan_v * (float)screen_w / (float)screen_h;
+            float sx = half_w + m_tx / tan_h * half_w, sy = half_h - m_ty / tan_v * half_h;
+            float size = (float)screen_h * 0.028f, edge = size * 2.2f;
+            int on = m_ahead > 0.5f && sx > edge && sx < screen_w - edge && sy > edge && sy < screen_h - edge;
+            if (on) {
+                draw_marker(frame, frame_w, frame_h, sx - (float)(screen_w - frame_w), sy - size * 0.4f, 0.0f, 1.0f, size,
+                            marker_alpha, palette[color][0], palette[color][1]);
+            } else { /* at the edge, pointing the way to turn */
+                float dx = m_ahead > 0.5f ? sx - half_w : (m_tx >= 0.0f ? 1.0f : -1.0f) * half_w;
+                float dy = m_ahead > 0.5f ? sy - half_h : 0.0f;
+                float ax = dx < 0.0f ? -dx : dx, ay = dy < 0.0f ? -dy : dy;
+                float k1 = ax > 1e-3f ? (half_w - edge) / ax : 1e9f, k2 = ay > 1e-3f ? (half_h - edge) / ay : 1e9f;
+                float k = k1 < k2 ? k1 : k2;
+                if (k > 1e8f) k = 0.0f, dx = 0.0f, dy = 1.0f;
+                draw_marker(frame, frame_w, frame_h, half_w + dx * k - (float)(screen_w - frame_w), half_h + dy * k, dx, dy,
+                            size, marker_alpha * 0.9f, palette[color][0], palette[color][1]);
+            }
+        }
+        if (gauge && gauge_style != WALK_GAUGE_OFF && gauge_alpha > 0.0f) {
+            /* drawn again when what it shows changed, and every frame while something moves on it */
+            static int drawn_style = -1, drawn_h, drawn_value = -1, drawn_mode = -1, drawn_dist = -1, drawn_dir = 99999,
+                       drawn_colour = -1;
+            static ULONGLONG moved_at;
+            int value = (int)(gauge_data.speed * 36.0f + 0.5f);
+            int dist = (int)(gauge_data.distance * 10.0f);
+            int dir = (int)(gauge_data.car_ahead * 60.0f) * 1000 + (int)(gauge_data.car_right * 60.0f);
+            if (gauge_data.speed > 0.05f) moved_at = now;
+            int animated = (gauge_style == WALK_GAUGE_PULSE && now - moved_at < 3000) ||
+                           (gauge_style == WALK_GAUGE_BAR && gauge_data.speed > 3.0f) || color == NOTIFY_COLOR_RAINBOW;
+            if (animated || drawn_style != gauge_style || drawn_h != screen_h || drawn_value != value ||
+                drawn_mode != gauge_data.mode || drawn_dist != dist || drawn_dir != dir || drawn_colour != (int)color) {
+                const unsigned char(*tone)[3] = palette[color];
+                if (!walk_gauge_draw(gauge_style, &gauge_data, now, screen_h, tone[1], tone[0], second_colour(tone),
+                                     scratch_gauge)) {
+                    log_append("NOTIFY: could not draw the walking gauge; it stays off.\r\n");
+                    walk_gauge_set_style(WALK_GAUGE_OFF);
+                    gauge = 0;
+                }
+                drawn_style = gauge_style, drawn_h = screen_h, drawn_value = value, drawn_mode = gauge_data.mode;
+                drawn_dist = dist, drawn_dir = dir, drawn_colour = (int)color;
+            }
+            if (gauge)
+                blend_block(frame, frame_w, frame_h, frame_w - gauge_margin - gauge_w, screen_h - gauge_margin - gauge_h,
+                            scratch_gauge, gauge_w * 4, gauge_w, gauge_h, gauge_alpha);
+        }
+        if (blink) blinker_draw(frame, frame_w, frame_h, screen_h, blink_mode, blink_lit, blink_alpha);
+        if (pointer) /* the frame spans the whole width here */
+            blend_block(frame, frame_w, frame_h, pointer_x - (screen_w - frame_w), pointer_y, cursor_pixels,
+                        cursor_size * 4, cursor_size, cursor_size, 1.0f);
         gdi.GdiFlush();
         POINT position = {origin.x + screen_w - frame_w, origin.y}, source = {0, 0};
         SIZE size = {frame_w, frame_h};
@@ -2881,11 +3286,39 @@ static HRESULT STDMETHODCALLTYPE hook_resize1(IDXGISwapChain3 *swapchain, UINT c
     return original_resize1(swapchain, count, width, height, format, flags, mask, queues);
 }
 
+/* plugin build: the cards always go into the window over the game, also when the early hook sees the swap
+   chain made (the game re-made its device after Gripline was loaded). The D3D12 overlay draws only the
+   cards; the walking gauge and the fade to black exist only in the window (Marvin 08.11.2026: speedometer
+   and black fade gone in a start where the early hook caught the swap chain). */
+static volatile LONG prefer_window;
+void notify_prefer_window(void) {
+    InterlockedExchange(&prefer_window, 1);
+}
+
 static void hook_swapchain(IUnknown *device, IDXGISwapChain *swapchain) {
     ID3D12CommandQueue *q = NULL;
     if (making_helper || !swapchain || !device ||
         FAILED(IUnknown_QueryInterface(device, &IID_ID3D12CommandQueue, (void **)&q)))
         return; /* not a D3D12 swap chain (or a helper window) */
+    if (prefer_window) {
+        ID3D12CommandQueue_Release(q);
+        HWND output = NULL;
+        __try {
+            DXGI_SWAP_CHAIN_DESC sd;
+            if (SUCCEEDED(IDXGISwapChain_GetDesc(swapchain, &sd))) output = sd.OutputWindow;
+        } __except (EXCEPTION_EXECUTE_HANDLER) {
+            output = NULL;
+        }
+        if (!output) return; /* the late hook takes it */
+        swapchain_seen = swapchain; /* Present: deferred cards; no D3D12 drawing (queue stays NULL) */
+        void **vt = *(void ***)swapchain;
+        int hooked = swap_slot(&vt[8], (void *)hook_present, (void **)&original_present) &&
+                     swap_slot(&vt[22], (void *)hook_present1, (void **)&original_present1);
+        log_append(hooked ? "NOTIFY: game swap chain found early; cards go into a window over the game.\r\n"
+                          : "NOTIFY: game swap chain found early; Present not hooked, cards in a window over the game.\r\n");
+        start_window_overlay(output);
+        return;
+    }
     idle_gpu();
     if (queue && queue != q) {
         /* a new queue (device re-created): start over with fresh objects */
@@ -3098,6 +3531,15 @@ __declspec(dllexport) void Fh2TestNotifyShow(const char *text, int tint, const c
     if (tint < 0) notify_show(text);
     else notify_show_tinted(text, tint, badge, 0);
 }
+/* V7.2 big card (tests/test_cards.py, tools/render_cards.py) */
+__declspec(dllexport) void Fh2TestNotifyBig(const char *title, const char *body, int tint, const char *badge) {
+    notify_show_big(title, body, tint, badge, 0);
+}
+__declspec(dllexport) int Fh2TestNotifyBody(unsigned index, unsigned line, wchar_t *out) {
+    if (index >= card_count) return -1;
+    if (line < cards[index].body_lines) memory_copy(out, cards[index].body[line], sizeof(cards[index].body[line]));
+    return (int)cards[index].body_lines;
+}
 __declspec(dllexport) unsigned Fh2TestNotifyCount(void) {
     return card_count;
 }
@@ -3128,7 +3570,7 @@ __declspec(dllexport) int Fh2TestNotifyDraw(unsigned height, unsigned char *pixe
                                             int *rows) {
     Layout l = layout_for(height);
     *width = l.width;
-    *rows = l.height * MAX_CARDS;
+    *rows = card_rows_max(&l);
     if (!pixels) return 1;
     if (!gdi_ready()) return 0;
     return draw_cards(cards, card_count, &l, pixels, pitch);
@@ -3153,6 +3595,13 @@ __declspec(dllexport) int Fh2TestNotifyPanelRow(unsigned index, wchar_t *label, 
 }
 
 /* Key list panel: rows/width of its bitmap; with pixels, draws it (l.panel_height rows). */
+/* tests/test_key_menu.py: drawn height of the panel shown now (the Gripline menu keeps its roomy rows) */
+__declspec(dllexport) int Fh2TestNotifyPanelPixels(unsigned height) {
+    Layout l = layout_for(height);
+    draw_kind = (int)panel_at_top;
+    return panel_pixels(&l, (unsigned)panel_count);
+}
+
 __declspec(dllexport) int Fh2TestNotifyPanelDraw(unsigned height, unsigned char *pixels, int pitch, int *width,
                                                  int *rows, unsigned *count, wchar_t *first_label,
                                                  wchar_t *first_keys) {
