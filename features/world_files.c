@@ -12,6 +12,13 @@
  *                      HUDStatusARActivationProviderComponent (the race / event symbols standing on the
  *                      road in free roam) draws on HudID "ar_hud"; Gripline points them at the game's own
  *                      "debug_hud", which is never shown. Checkpoints in races (ARCheckpoint) stay.
+ *   Calm Drivatars     EntityModel.zip AI/Difficulty.xml <Global> holds how the open-world Drivatars cruise:
+ *                      CruiseMinimum / CruiseMedium / CruiseHigh, each with a Chance (0.6 / 0.2 / 0.2) and
+ *                      limits for throttle, braking and cornering, and CruiseReaction (a Drivatar reacts for
+ *                      ReactionTime s when the player comes within ActivationDistance m). V7.1 (wish of
+ *                      MRAlexis99: Drivatars keeping to the speed limit): every Drivatar gets the calmest
+ *                      style (chances 1 / 0 / 0) and CruiseReaction is switched off. Only the <Global> block
+ *                      changes; the race difficulty levels, road trips and hero drives keep their values.
  * The game files are never changed. Option back on = Gripline deletes its copy. Read once by the game:
  * applies after a restart. */
 #include "gripline.h"
@@ -110,6 +117,75 @@ static int place(const wchar_t *root, const char *zip, const char *name, const c
     return ok;
 }
 
+/* Difficulty.xml: inside <Global>, the <Chance value=".."/> of CruiseMinimum -> 1.0, CruiseMedium and
+   CruiseHigh -> 0.0, and CruiseReaction's <Enabled value="true"/> -> false. Only these values change, the
+   rest stays byte for byte. Copies in[*p .. value) to out and moves *p behind the old value. */
+static int replace_value(char *out, size_t *n, const char **p, const char *end, const char *block_name,
+                         const char *element, const char *value) {
+    char open[48], close[48];
+    size_t a = 0, b = 0;
+    open[a++] = '<';
+    close[b++] = '<';
+    close[b++] = '/';
+    for (const char *c = block_name; *c && a < 40; ++c) open[a++] = close[b++] = *c;
+    open[a++] = '>';
+    close[b++] = '>';
+    open[a] = close[b] = 0;
+    const char *block = find(*p, end, open);
+    const char *block_end = block ? find(block, end, close) : NULL;
+    const char *tag = block_end ? find(block, block_end, element) : NULL;
+    const char *v = tag ? find(tag, block_end, "value=\"") : NULL;
+    const char *v_end = v ? find(v + 7, block_end, "\"") : NULL;
+    if (!v_end) return 0;
+    v += 7;
+    memory_copy(out + *n, *p, (size_t)(v - *p));
+    *n += (size_t)(v - *p);
+    for (const char *c = value; *c;) out[(*n)++] = *c++;
+    *p = v_end;
+    return 1;
+}
+
+/* returns a new buffer (caller frees) or NULL when the file is not laid out as expected */
+static char *drivatars_calm(const char *in, uint32_t size, size_t *out_length, int *changed) {
+    static const char *const blocks[] = {"CruiseMinimum", "CruiseMedium", "CruiseHigh", "CruiseReaction"};
+    static const char *const elements[] = {"<Chance ", "<Chance ", "<Chance ", "<Enabled "};
+    static const char *const values[] = {"1.0", "0.0", "0.0", "false"};
+    const char *end = in + size;
+    const char *global = find(in, end, "<Global>");
+    const char *global_end = global ? find(global, end, "</Global>") : NULL;
+    *changed = 0;
+    if (!global_end) return NULL;
+    char *out = (char *)HeapAlloc(GetProcessHeap(), 0, (SIZE_T)size + 64);
+    if (!out) return NULL;
+    const char *p = in;
+    size_t n = 0;
+    for (unsigned i = 0; i < ARRAY_COUNT(blocks); ++i) /* in file order */
+        if (replace_value(out, &n, &p, global_end, blocks[i], elements[i], values[i])) ++*changed;
+    memory_copy(out + n, p, (size_t)(end - p));
+    n += (size_t)(end - p);
+    *out_length = n;
+    if (*changed != (int)ARRAY_COUNT(blocks)) { /* unknown layout: the game keeps its own file */
+        HeapFree(GetProcessHeap(), 0, out);
+        return NULL;
+    }
+    return out;
+}
+
+/* Test hook (tests/test_world_files.py): patches a Difficulty.xml in memory. */
+__declspec(dllexport) int Fh2TestCalmDrivatars(const char *in, uint32_t size, char *out, uint32_t capacity) {
+    size_t length = 0;
+    int changed = 0;
+    char *result = drivatars_calm(in, size, &length, &changed);
+    if (!result) return -1;
+    int ok = length < capacity;
+    if (ok) {
+        memory_copy(out, result, length);
+        out[length] = 0;
+    }
+    HeapFree(GetProcessHeap(), 0, result);
+    return ok ? (int)length : -2;
+}
+
 /* "HUD\CarLabelMaxDistance 110" -> "... 0"; returns a new buffer (caller frees) or NULL */
 static char *labels_off(const char *in, uint32_t size, size_t *out_length, int *changed) {
     static const char *const keys[] = {"HUD\\CarLabelMaxDistance ", "HUD\\CarLabelMaxFadeDistance "};
@@ -144,7 +220,8 @@ static char *labels_off(const char *in, uint32_t size, size_t *out_length, int *
     return out;
 }
 
-void world_files_start(const wchar_t *mount_dir, int speed_cameras, int car_labels, int event_icons) {
+void world_files_start(const wchar_t *mount_dir, int speed_cameras, int car_labels, int event_icons,
+                       int calm_drivatars) {
     const wchar_t *root = gripline_output_root();
     if (!root || !root[0]) {
         if (!speed_cameras || !car_labels) log_append("WORLD: no media folder - speed cameras / car labels stay original.\r\n");
@@ -178,6 +255,26 @@ void world_files_start(const wchar_t *mount_dir, int speed_cameras, int car_labe
                 if (data) gripline_zip_free(data);
             }
             log_append_value("WORLD: event icons on the road off (activation symbols moved to the debug HUD): ", total);
+        }
+        if (!calm_drivatars) {
+            place(root, "EntityModel/", "AI/Difficulty.xml", NULL, 0, 0);
+        } else {
+            static wchar_t zip[PATH_CAPACITY];
+            if (mount_dir && path_join(zip, mount_dir, L"media\\EntityModel.zip.moretraffic-original") &&
+                GetFileAttributesW(zip) == INVALID_FILE_ATTRIBUTES)
+                path_join(zip, mount_dir, L"media\\EntityModel.zip");
+            uint32_t size = 0;
+            unsigned char *data = mount_dir ? gripline_zip_extract(zip, "AI/Difficulty.xml", &size) : NULL;
+            size_t length = 0;
+            int changed = 0;
+            char *out = data ? drivatars_calm((const char *)data, size, &length, &changed) : NULL;
+            if (out && place(root, "EntityModel/", "AI/Difficulty.xml", out, length, 1))
+                log_append_value("WORLD: calm Drivatars (Difficulty.xml: calmest cruise style for all, no reaction to the player): ",
+                                 changed);
+            else
+                log_append("WORLD: calm Drivatars: AI/Difficulty.xml not found or not as expected - Drivatars stay original.\r\n");
+            if (out) HeapFree(GetProcessHeap(), 0, out);
+            if (data) gripline_zip_free(data);
         }
         if (car_labels) {
             place(root, "GameTunableSettings/", "GameTunableSettings.ini", NULL, 0, 0);

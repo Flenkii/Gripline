@@ -139,8 +139,24 @@ static int make_card(char *out, unsigned size) {
 
 /* the start check's card: red, with WARNUNG / WARNING in the title */
 static int show_card(char *out, unsigned size) {
-    if (make_card(out, size))
-        notify_show_tinted(out, NOTIFY_COLOR_RED, game_language_is_german(game) ? "WARNUNG" : "WARNING", 1);
+    int de = game_language_is_german(game);
+    if (!make_card(out, size)) return 0;
+    /* V7.2: big card. Title short, the two lines of the check and what they mean below */
+    static char body[480];
+    size_t n = 0;
+    for (const char *p = out; *p && n + 3 < sizeof(body); ++p) {
+        if (*p == '\n') {
+            body[n++] = '.', body[n++] = ' ';
+            continue;
+        }
+        body[n++] = *p;
+    }
+    body[n] = 0;
+    put(body, &n, sizeof(body), de ? ".\n\nGripline startet trotzdem. Falls etwas nicht geht oder abstürzt, liegt es "
+                                     "wahrscheinlich daran.\nDetails: Gripline.log (Zeile VERSIONS)."
+                                   : ".\n\nGripline starts anyway. If something does not work or crashes, this is "
+                                     "the likely reason.\nDetails: Gripline.log (line VERSIONS).");
+    notify_show_big(de ? "Versionen prüfen" : "Check your versions", body, NOTIFY_COLOR_RED, de ? "WARNUNG" : "WARNING", 0);
     return 0;
 }
 

@@ -1,4 +1,5 @@
 /* Gripline key menu (V7). See key_menu.h. */
+#include "drive_look.h"
 #include "key_menu.h"
 #include "keyboard_pad.h"
 #include "notify.h"
@@ -13,8 +14,14 @@
 #include "support.h"
 #include "report.h"
 #include "no_damage.h"
+#include "nitro_link.h"
 #include "update_check.h"
+#include "mod_partners.h"
 #include "cruise.h"
+#include "summon.h"
+#include "walking.h"
+#include "noclip.h"
+#include "blinker.h"
 
 #define VK_UP_ 0x26
 #define VK_LEFT_ 0x25
@@ -29,15 +36,16 @@
 #define MAX_ROWS (NOTIFY_PANEL_ROWS - 1)
 
 enum { LEVEL_CLOSED, LEVEL_GROUPS, LEVEL_LIST, LEVEL_BINDING, LEVEL_CAPTURE, LEVEL_RESET_ALL, LEVEL_STYLE, LEVEL_MOUSE, LEVEL_TELEMETRY, LEVEL_WORLD, LEVEL_LOGBOOK, LEVEL_RECORDS, LEVEL_DAMAGE,
-       LEVEL_SETTINGS, LEVEL_COLOR, LEVEL_VIEW_FORWARD, LEVEL_VIEW_UP, LEVEL_TRAFFIC, LEVEL_CARDS, LEVEL_CRUISE, LEVEL_COUNT };
+       LEVEL_SETTINGS, LEVEL_COLOR, LEVEL_VIEW_FORWARD, LEVEL_VIEW_UP, LEVEL_TRAFFIC, LEVEL_CARDS, LEVEL_CRUISE, LEVEL_HANDHELD, LEVEL_LOOK, LEVEL_GAUGE, LEVEL_HEAD, LEVEL_BLINKER, LEVEL_COUNT };
 
 /* first page: rows after the binding pages */
 enum { TOP_STYLE = 100, TOP_RESET = 101, TOP_MOUSE = 102, TOP_TELEMETRY = 103, TOP_WORLD = 104, TOP_LOGBOOK = 105, TOP_RECORDS = 106, TOP_REPORT = 108, TOP_DAMAGE = 109,
-       TOP_SETTINGS = 110, TOP_CARDS = 111, TOP_TRAFFIC = 112, TOP_CRUISE = 113 };
+       TOP_SETTINGS = 110, TOP_CARDS = 111, TOP_TRAFFIC = 112, TOP_CRUISE = 113, TOP_HANDHELD = 114, TOP_LOOK = 115, TOP_GAUGE = 116,
+       TOP_MENU_MOUSE = 117 };
 
 /* settings page (V7): rows */
-enum { SET_COLOR, SET_STEERING, SET_VIEW_FORWARD, SET_VIEW_UP, SET_UPDATE };
-/* cockpit view 2 choices in cm (rig_settings.c ranges -20..80 and -20..30) */
+enum { SET_COLOR, SET_STEERING, SET_VIEW_FORWARD, SET_VIEW_UP, SET_UPDATE, SET_SUMMON_STYLE, SET_SUMMON_SOUNDS, SET_NITRO, SET_YIELD, SET_WALK_DOOR, SET_FREECAM_DRIVE, SET_HEAD_TURN, SET_HEAD_DETAIL, SET_BLINKER };
+/* dashboard cam choices in cm (rig_settings.c ranges -20..80 and -20..30) */
 #define VIEW_STEP 5
 #define VIEW_FORWARD_MIN (-20)
 #define VIEW_FORWARD_MAX 80
@@ -80,6 +88,12 @@ static const wchar_t *const dead_names[DEAD_CHOICES] = {L"0 %", L"10 %", L"20 %"
 static const wchar_t *const center_english[CENTER_CHOICES] = {L"Never", L"after 1 second", L"after 2 seconds",
                                                               L"after 3 seconds", L"after 5 seconds"};
 
+/* V7.1 mouse in the game's menus: FH2_Keyboard.ini MenuMouse, Enter steps On -> only once moved -> Off */
+#define MENU_MOUSE_CHOICES 3
+static const int menu_mouse_order[MENU_MOUSE_CHOICES] = {MENU_MOUSE_ON, MENU_MOUSE_MOVED, MENU_MOUSE_OFF};
+static const wchar_t *const menu_mouse_german[3] = {L"Aus", L"An", L"Nur bei Bewegung"};  /* by MenuMouse value */
+static const wchar_t *const menu_mouse_english[3] = {L"Off", L"On", L"Only when moved"};
+
 static const wchar_t *const style_names[NOTIFY_STYLE_COUNT] = {L"Classic", L"Enhanced", L"Overdrive"};
 
 /* the pages of the first level; every binding is in exactly one (tests/test_key_menu.py) */
@@ -89,7 +103,7 @@ static const wchar_t *const group_driving[] = {L"Throttle", L"Brake", L"SteerLef
 static const wchar_t *const group_camera[] = {L"Camera", L"LookBack", L"LookLeft", L"LookRight", L"CockpitView",
                                               L"ArrowUp", L"ArrowDown", L"ArrowLeft", L"ArrowRight", NULL};
 static const wchar_t *const group_gripline[] = {L"Nitro", L"Noclip", L"NoclipUp", L"NoclipDown", L"NoclipFast",
-                                                L"Freecam", L"Keybinds", L"KeyMenu", L"CruiseControl", L"Walk", NULL};
+                                                L"Freecam", L"Keybinds", L"KeyMenu", L"CruiseControl", L"Walk", L"Summon", NULL};
 static const wchar_t *const group_menu[] = {L"Pause", L"Confirm", L"Back", L"ButtonX", L"ButtonY", L"TabLeft",
                                             L"TabRight", L"DpadUp", L"DpadDown", L"DpadLeft", L"DpadRight", NULL};
 static const struct {
@@ -303,6 +317,11 @@ static int save_gripline_digit(const char *key, int digit) { /* one writer at a 
     return ok;
 }
 
+/* V7.2 head into the turn ([Gripline] HeadTurn, drive_look.c) */
+#define HEAD_LEVELS 5 /* 4 = own values (Marvin 15.11.2026) */
+static const wchar_t *const head_german[HEAD_LEVELS] = {L"Aus", L"Leicht", L"Mittel", L"Stark", L"Eigene"};
+static const wchar_t *const head_english[HEAD_LEVELS] = {L"Off", L"Light", L"Medium", L"Strong", L"Custom"};
+
 static int save_style(int style) {
     return save_gripline_digit("CardStyle", style);
 }
@@ -312,16 +331,16 @@ static int save_mouse_now(const char *key, int value) {
     size_t length;
     char text[4];
     unsigned n = 0;
-    if (value >= 100) text[n++] = '1', text[n++] = '0', text[n++] = '0';
-    else {
-        if (value >= 10) text[n++] = (char)('0' + value / 10);
-        text[n++] = (char)('0' + value % 10);
-    }
+    if (value < 0) value = 0;
+    if (value > 999) value = 999;
+    if (value >= 100) text[n++] = (char)('0' + value / 100);
+    if (value >= 10) text[n++] = (char)('0' + value / 10 % 10);
+    text[n++] = (char)('0' + value % 10);
     text[n] = 0;
     if (!read_file_at(ini_path, &length)) return 0;
     size_t written = ini_set_value(file_text, length, "Keyboard", key, text, edit_text[0], FILE_LIMIT + 1);
     if (!written || written > FILE_LIMIT || !write_file_at(ini_path, edit_text[0], written)) {
-        log_append("KEYMENU: FH2_Keyboard.ini could not be written - mouse steering not saved.\r\n");
+        log_append("KEYMENU: FH2_Keyboard.ini could not be written - mouse setting not saved.\r\n");
         return 0;
     }
     return 1;
@@ -543,6 +562,69 @@ static void tele_look_step(int action, int dir) {
     notify_show_step(text, 0x7e1e00u, 2500);
 }
 
+/* V7.1 mouse look sensitivity (Marvin 08.11.2026): walking and in the car, FH2_Keyboard.ini WalkMouseLook /
+   DriveMouseLook in percent (100 = standard, 0 = off). Left / right change the selected row, Enter steps on
+   and starts again at the end, like the telemetry look; works at once */
+enum { LOOK_WALK = 70, LOOK_DRIVE, LOOK_RESET };
+static const int look_values[] = {0, 25, 40, 50, 60, 70, 80, 90, 100, 110, 120, 135, 150, 175, 200, 250, 300};
+
+static void look_value_text(int value, wchar_t out[16]) {
+    if (!value) wcopy(out, 0, 16, tr(L"Aus", L"Off"));
+    else percent_text(value, out);
+}
+
+static int look_set(int action, int value, int card) {
+    int walk = action == LOOK_WALK;
+    if (walk) keyboard_set_walk_mouse_look(value);
+    else keyboard_set_drive_mouse_look(value);
+    int saved = save_mouse(walk ? "WalkMouseLook" : "DriveMouseLook", value);
+    log_append_value(walk ? "KEYMENU: walking mouse look percent " : "KEYMENU: driving mouse look percent ", value);
+    if (!card) return saved;
+    wchar_t line[128], v[16];
+    look_value_text(value, v);
+    unsigned n = wcopy(line, 0, 128, walk ? tr(L"Maus-Blick Laufen: ", L"Mouse look walking: ") : tr(L"Maus-Blick Fahren: ", L"Mouse look driving: "));
+    n = wcopy(line, n, 128, v);
+    if (!saved) wcopy(line, n, 128, tr(L"\nNicht gespeichert (INI gesperrt?)", L"\nNot saved (INI locked?)"));
+    else if (!walk && value && keyboard_mouse_steering())
+        wcopy(line, n, 128, tr(L"\nAus, solange Maus-Lenkung an ist", L"\nOff while mouse steering is on"));
+    else wcopy(line, n, 128, tr(L"\nWirkt sofort", L"\nTakes effect at once"));
+    char text[192];
+    unsigned t = 0;
+    utf8(line, text, sizeof(text), &t);
+    text[t] = 0;
+    notify_show_step(text, 0x7e1e00u, 2500);
+    return saved;
+}
+
+static void look_step(int action, int dir) {
+    if (action == LOOK_RESET) {
+        int saved = look_set(LOOK_WALK, 100, 0) & look_set(LOOK_DRIVE, 100, 0);
+        notify_show_step(saved ? (m.german ? "Maus-Blick: Laufen und Fahren 100 %\nWirkt sofort" : "Mouse look: walking and driving 100 %\nTakes effect at once")
+                               : (m.german ? "Maus-Blick: 100 %\nNicht gespeichert (INI gesperrt?)" : "Mouse look: 100 %\nNot saved (INI locked?)"),
+                         0x7e1e00u, 2500);
+        return;
+    }
+    int now = action == LOOK_WALK ? keyboard_walk_mouse_look() : keyboard_drive_mouse_look();
+    int at = -1;
+    for (int i = 0; i < (int)ARRAY_COUNT(look_values); ++i)
+        if (look_values[i] == now) at = i;
+    int value;
+    if (at < 0) { /* own value from the INI: the next list value in that direction */
+        int count = (int)ARRAY_COUNT(look_values);
+        value = dir == -1 ? look_values[0] : dir == 2 ? look_values[0] : look_values[count - 1];
+        if (dir == -1) {
+            for (int i = 0; i < count; ++i)
+                if (look_values[i] < now) value = look_values[i];
+        } else {
+            for (int i = count - 1; i >= 0; --i)
+                if (look_values[i] > now) value = look_values[i];
+        }
+    } else {
+        value = step_in(look_values, (int)ARRAY_COUNT(look_values), now, dir);
+    }
+    look_set(action, value, 1);
+}
+
 /* "12,3 km" below 100, else "1234 km" (miles when the game shows mph) */
 static void distance_text(double metres, wchar_t out[32]) {
     int imperial = game_units_imperial(keyboard_game_image());
@@ -561,10 +643,23 @@ static void distance_text(double metres, wchar_t out[32]) {
 
 static int confirm_clear; /* records page: first Enter asks */
 
-static const unsigned world_ids[3] = {RIG_GRIP_SPEED_CAMERAS, RIG_GRIP_CAR_LABELS, RIG_GRIP_EVENT_ICONS};
-static const wchar_t *const world_german[3] = {L"Blitzer", L"Namen über Autos", L"Event-Symbole auf der Straße"};
-static const wchar_t *const world_english[3] = {L"Speed cameras", L"Names above cars", L"Event icons on the road"};
+#define WORLD_ROWS 4
+static const unsigned world_ids[WORLD_ROWS] = {RIG_GRIP_SPEED_CAMERAS, RIG_GRIP_CAR_LABELS, RIG_GRIP_EVENT_ICONS,
+                                               RIG_GRIP_CALM_DRIVATARS};
+static const wchar_t *const world_german[WORLD_ROWS] = {L"Blitzer", L"Namen über Autos", L"Event-Symbole auf der Straße",
+                                                        L"Drivatare fahren ruhig"};
+static const wchar_t *const world_english[WORLD_ROWS] = {L"Speed cameras", L"Names above cars", L"Event icons on the road",
+                                                         L"Calm Drivatars"};
 
+/* V7.1 summon: how the car drives itself (summon.h) */
+static const wchar_t *const summon_german[SUMMON_STYLE_COUNT] = {L"Gemütlich", L"Normal", L"Sportlich"};
+static const wchar_t *const summon_english[SUMMON_STYLE_COUNT] = {L"Calm", L"Normal", L"Sporty"};
+/* V7.1 walking: handheld camera levels (walking.h) */
+static const wchar_t *const hand_german[WALK_HANDHELD_COUNT] = {L"Aus (ruhig)", L"Leicht", L"Mittel", L"Stark"};
+static const wchar_t *const hand_english[WALK_HANDHELD_COUNT] = {L"Off (steady)", L"Light", L"Medium", L"Strong"};
+/* V7.1 walking gauge looks (walk_gauge.h) */
+static const wchar_t *const gauge_german[WALK_GAUGE_COUNT] = {L"Aus", L"Ring", L"Racing-Leiste", L"Schritt-Puls"};
+static const wchar_t *const gauge_english[WALK_GAUGE_COUNT] = {L"Off", L"Ring", L"Racing bar", L"Step pulse"};
 static const wchar_t *const damage_german[NO_DAMAGE_COUNT] = {L"Aus (wie im Spiel)", L"Andere Autos", L"Alle Autos"};
 static const wchar_t *const damage_english[NO_DAMAGE_COUNT] = {L"Off (as in the game)", L"Other cars", L"All cars"};
 static const wchar_t *const damage_short_german[NO_DAMAGE_COUNT] = {L"Aus", L"Andere", L"Alle"};
@@ -599,6 +694,174 @@ static void speed_text(int kmh, wchar_t out[32]) {
     wcopy(out, n, 32, imperial ? L" mph" : L" km/h");
 }
 
+/* V7.2 head into the turn, own values (Marvin 15.11.2026: how far, how fast ...): F8 > Settings > Head into
+   turns: fine-tuning. Each row "name < value >": left / right change it, Enter steps on and starts again at
+   the end. Changing a value while a level (light, medium, strong) is on starts from that level's values
+   and makes it "Custom"; the levels stay as they were. [Gripline] HeadTurnAngle ... (drive_look.h). */
+enum { HEAD_ROW_LEVEL = 80, HEAD_ROW_ANGLE, HEAD_ROW_SENSITIVITY, HEAD_ROW_SPEED, HEAD_ROW_RETURN, HEAD_ROW_FROM, HEAD_ROW_RESET };
+static const int head_angles[] = {3, 5, 8, 11, 15, 19, 22, 26, 30, 35, 40, 45, 50, 60};    /* degrees (11, 19, 26: the levels) */
+static const int head_sensitivities[] = {25, 40, 58, 75, 100, 120, 145, 170, 200, 250, 300}; /* % (58, 100, 145: the levels) */
+static const int head_speeds[] = {25, 40, 50, 65, 80, 100, 125, 150, 200, 250, 300};        /* %, more = faster */
+static const int head_froms[] = {0, 5, 11, 20, 30, 40, 50, 60, 80};                          /* km/h */
+static const char *const head_keys[DRIVE_LOOK_HEAD_VALUES] = {"HeadTurnAngle", "HeadTurnSensitivity", "HeadTurnSpeed",
+                                                              "HeadTurnReturn", "HeadTurnFrom"};
+static const int head_standard[DRIVE_LOOK_HEAD_VALUES] = {19, 100, 100, 100, 11}; /* = medium */
+
+static void head_list(int which, const int **list, int *count) {
+    switch (which) {
+        case DRIVE_LOOK_HEAD_ANGLE: *list = head_angles, *count = (int)ARRAY_COUNT(head_angles); break;
+        case DRIVE_LOOK_HEAD_SENSITIVITY: *list = head_sensitivities, *count = (int)ARRAY_COUNT(head_sensitivities); break;
+        case DRIVE_LOOK_HEAD_FROM: *list = head_froms, *count = (int)ARRAY_COUNT(head_froms); break;
+        default: *list = head_speeds, *count = (int)ARRAY_COUNT(head_speeds); break;
+    }
+}
+
+/* "19°", "100 %", "11 km/h" */
+static void head_value_text(int which, int value, wchar_t out[32]) {
+    if (which == DRIVE_LOOK_HEAD_FROM) {
+        speed_text(value, out);
+    } else if (which == DRIVE_LOOK_HEAD_ANGLE) {
+        unsigned n = wuint(out, 0, (unsigned)value);
+        out[n++] = 0x00B0, out[n] = 0;
+    } else {
+        percent_text(value, out);
+    }
+}
+
+static const wchar_t *head_row_name(int which) {
+    static const wchar_t *const german[DRIVE_LOOK_HEAD_VALUES] = {L"Max. Winkel", L"Kurven-Empfindlichkeit", L"Tempo in die Kurve",
+                                                                  L"Tempo zurück", L"Ab Geschwindigkeit"};
+    static const wchar_t *const english[DRIVE_LOOK_HEAD_VALUES] = {L"Max angle", L"Turn sensitivity", L"Speed into the turn",
+                                                                   L"Speed back", L"From speed"};
+    return tr(german[which], english[which]);
+}
+
+/* the next list value from `now` (also from a value of its own from the INI) */
+static int head_next(const int *list, int count, int now, int dir) {
+    int at = -1;
+    for (int i = 0; i < count; ++i)
+        if (list[i] == now) at = i;
+    if (at >= 0) return step_in(list, count, now, dir);
+    if (dir == -1) {
+        int value = list[0];
+        for (int i = 0; i < count; ++i)
+            if (list[i] < now) value = list[i];
+        return value;
+    }
+    for (int i = count - 1; i >= 0; --i)
+        if (list[i] > now) return dir == 2 && i == 0 ? list[0] : list[i];
+    return dir == 2 ? list[0] : list[count - 1];
+}
+
+static int head_save_all(int level) {
+    int saved = save_gripline_digit("HeadTurn", level);
+    for (int i = 0; i < DRIVE_LOOK_HEAD_VALUES; ++i) saved &= save_gripline_int(head_keys[i], drive_look_head_own(i));
+    return saved;
+}
+
+static void head_card(const wchar_t *what, const wchar_t *value, int saved) {
+    wchar_t line[160];
+    unsigned n = wcopy(line, 0, 160, tr(L"Kopf in die Kurve: ", L"Head into turns: "));
+    n = wcopy(line, n, 160, what);
+    if (value[0]) n = wcopy(line, n, 160, L" "), n = wcopy(line, n, 160, value);
+    wcopy(line, n, 160, saved ? tr(L"\nWirkt sofort (Fahrer- und Cockpitansicht)", L"\nTakes effect at once (driver and cockpit view)")
+                              : tr(L"\nNicht gespeichert (INI gesperrt?)", L"\nNot saved (INI locked?)"));
+    char text[256];
+    unsigned t = 0;
+    utf8(line, text, sizeof(text), &t);
+    text[t] = 0;
+    notify_show_step(text, 0x7e1f00u, 2500);
+}
+
+static void head_step(int action, int dir) {
+    if (action == HEAD_ROW_RESET) { /* medium, and the own values like medium */
+        for (int i = 0; i < DRIVE_LOOK_HEAD_VALUES; ++i) drive_look_set_head_value(i, head_standard[i]);
+        drive_look_set_head_turn(2);
+        int saved = head_save_all(2);
+        head_card(tr(L"Standard (Mittel)", L"default (medium)"), L"", saved);
+        log_append("KEYMENU: head into turns back to the default (medium).\r\n");
+        return;
+    }
+    if (action == HEAD_ROW_LEVEL) {
+        int level = drive_look_head_turn();
+        level = dir == 2 ? (level + 1) % HEAD_LEVELS : level + dir;
+        if (level < 0 || level >= HEAD_LEVELS) return; /* at an end */
+        drive_look_set_head_turn(level);
+        int saved = save_gripline_digit("HeadTurn", level);
+        head_card(tr(head_german[level], head_english[level]), L"", saved);
+        log_append_value("KEYMENU: head into turns, level ", level);
+        return;
+    }
+    int which = action - HEAD_ROW_ANGLE;
+    if (which < 0 || which >= DRIVE_LOOK_HEAD_VALUES) return;
+    int level = drive_look_head_turn();
+    if (level >= 1 && level <= 3) { /* start from what the level does */
+        int now[DRIVE_LOOK_HEAD_VALUES];
+        for (int i = 0; i < DRIVE_LOOK_HEAD_VALUES; ++i) now[i] = drive_look_head_value(i);
+        for (int i = 0; i < DRIVE_LOOK_HEAD_VALUES; ++i) drive_look_set_head_value(i, now[i]);
+    }
+    const int *list;
+    int count;
+    head_list(which, &list, &count);
+    int value = head_next(list, count, drive_look_head_own(which), dir);
+    drive_look_set_head_value(which, value);
+    drive_look_set_head_turn(DRIVE_LOOK_HEAD_OWN);
+    int saved = head_save_all(DRIVE_LOOK_HEAD_OWN);
+    wchar_t v[32];
+    head_value_text(which, value, v);
+    head_card(head_row_name(which), v, saved);
+    log_append_value(which == DRIVE_LOOK_HEAD_ANGLE ? "KEYMENU: head into turns, own angle "
+                     : which == DRIVE_LOOK_HEAD_SENSITIVITY ? "KEYMENU: head into turns, own sensitivity "
+                     : which == DRIVE_LOOK_HEAD_SPEED ? "KEYMENU: head into turns, own speed "
+                     : which == DRIVE_LOOK_HEAD_RETURN ? "KEYMENU: head into turns, own speed back "
+                                                       : "KEYMENU: head into turns, own km/h from ", value);
+}
+
+/* V7.2 turn signals (Marvin 15.11.2026): F8 > Settings > Turn signals. Arrows and click on / off,
+   the click's volume "name < value >" (blinker.h). */
+enum { BLINK_ROW_ARROWS = 90, BLINK_ROW_SOUND, BLINK_ROW_VOLUME };
+static const int blink_volumes[] = {20, 40, 60, 80, 100};
+
+static void blinker_step(int action, int dir) {
+    wchar_t line[160];
+    unsigned n = 0;
+    int saved;
+    if (action == BLINK_ROW_ARROWS) {
+        int on = !blinker_arrows();
+        blinker_set_arrows(on);
+        saved = save_gripline_digit("BlinkerArrows", on);
+        n = wcopy(line, 0, 160, on ? tr(L"Blinker-Anzeige an\nGrüne Pfeile über dem Tacho, wenn dein Auto blinkt", L"Turn signal arrows on\nGreen arrows above the speedometer when your car signals")
+                                   : tr(L"Blinker-Anzeige aus", L"Turn signal arrows off"));
+        log_append(on ? "KEYMENU: turn signal arrows on\r\n" : "KEYMENU: turn signal arrows off\r\n");
+    } else if (action == BLINK_ROW_SOUND) {
+        int on = !blinker_sound();
+        blinker_set_sound(on);
+        saved = save_gripline_digit("BlinkerSound", on);
+        n = wcopy(line, 0, 160, on ? tr(L"Blinker-Ton an\nKlick-Klack im Takt der Blinker", L"Turn signal sound on\nTick-tock in time with the lights")
+                                   : tr(L"Blinker-Ton aus", L"Turn signal sound off"));
+        log_append(on ? "KEYMENU: turn signal sound on\r\n" : "KEYMENU: turn signal sound off\r\n");
+    } else if (action == BLINK_ROW_VOLUME) {
+        int now = blinker_volume(), next = step_in(blink_volumes, (int)ARRAY_COUNT(blink_volumes), now, dir);
+        if (next == now && dir != 2) return; /* at an end */
+        blinker_set_volume(next);
+        saved = save_gripline_int("BlinkerVolume", next);
+        blinker_preview(); /* one click at the new volume */
+        wchar_t v[16];
+        percent_text(next, v);
+        n = wcopy(line, 0, 160, tr(L"Blinker-Ton: Lautstärke ", L"Turn signal sound: volume "));
+        n = wcopy(line, n, 160, v);
+        log_append_value("KEYMENU: turn signal volume ", next);
+    } else {
+        return;
+    }
+    if (!saved) wcopy(line, n, 160, tr(L"\nNicht gespeichert (INI gesperrt?)", L"\nNot saved (INI locked?)"));
+    char text[256];
+    unsigned t = 0;
+    utf8(line, text, sizeof(text), &t);
+    text[t] = 0;
+    notify_show(text);
+}
+
 static void build_page(wchar_t *title) {
     row_count = 0;
     title[0] = 0;
@@ -612,6 +875,12 @@ static void build_page(wchar_t *title) {
             for (unsigned g = 0; g < GROUP_COUNT; ++g) row_add(tr(groups[g].german, groups[g].english), L"›", 0, (int)g);
             row_add(tr(L"Maus-Lenkung (experimentell)", L"Mouse steering (experimental)"), tr(mouse_german[mouse_choice()], mouse_english[mouse_choice()]), 0,
                     TOP_MOUSE);
+            /* V7.2: a part another mod does (mod_partners.h) says so instead of Gripline's value */
+            row_add(tr(L"Maus-Blick: Empfindlichkeit", L"Mouse look: sensitivity"),
+                    mod_partners_takes_drive_look() ? tr(L"über FH2 Mouse", L"via FH2 Mouse") : L"›", 0, TOP_LOOK);
+            row_add(tr(L"Maus im Spielmenü", L"Mouse in the game menus"),
+                    mod_partners_takes_menu_mouse() ? tr(L"über FH2 Mouse", L"via FH2 Mouse")
+                    : tr(menu_mouse_german[keyboard_menu_mouse_mode()], menu_mouse_english[keyboard_menu_mouse_mode()]), 0, TOP_MENU_MOUSE);
             row_add(tr(L"Fahren & Daten", L"Driving & data"), L"", NOTIFY_ROW_SECTION, -1);
             row_add(tr(L"Live-Telemetrie", L"Live telemetry"), telemetry_enabled() ? tr(L"An", L"On") : tr(L"Aus", L"Off"), 0,
                     TOP_TELEMETRY);
@@ -631,12 +900,16 @@ static void build_page(wchar_t *title) {
             }
             row_add(tr(L"Rekorde", L"Records"), L"›", 0, TOP_RECORDS);
             row_add(tr(L"Welt & Autos", L"World & cars"), L"", NOTIFY_ROW_SECTION, -1);
-            row_add(tr(L"Welt: Blitzer, Namen, Symbole", L"World: cameras, names, icons"), L"›", 0, TOP_WORLD);
+            row_add(tr(L"Welt: Blitzer, Drivatare …", L"World: cameras, Drivatars …"), L"›", 0, TOP_WORLD);
             row_add(tr(L"Verkehr", L"Traffic"), traffic_name(rig_setting_get(RIG_TRAFFIC_PRESET)), 0, TOP_TRAFFIC);
             row_add(tr(L"Kein Schaden an Autos", L"No damage on cars"),
                     tr(damage_short_german[no_damage_mode()], damage_short_english[no_damage_mode()]), 0, TOP_DAMAGE);
             row_add(L"Gripline", L"", NOTIFY_ROW_SECTION, -1);
             row_add(tr(L"Einstellungen", L"Settings"), L"›", 0, TOP_SETTINGS);
+            row_add(tr(L"Laufen: Handkamera", L"Walking: handheld camera"),
+                    tr(hand_german[walking_handheld()], hand_english[walking_handheld()]), 0, TOP_HANDHELD);
+            row_add(tr(L"Laufen: Tacho", L"Walking: speedometer"),
+                    tr(gauge_german[walk_gauge_style()], gauge_english[walk_gauge_style()]), 0, TOP_GAUGE);
             row_add(tr(L"Karten & Hinweise", L"Cards & notices"), cards_preset_name(), 0, TOP_CARDS);
             row_add(tr(L"Karten-Design", L"Card design"), style_names[style_saved], 0, TOP_STYLE);
             row_add(tr(L"Problem-Bericht erstellen", L"Create problem report"), L"ZIP", 0, TOP_REPORT);
@@ -650,12 +923,26 @@ static void build_page(wchar_t *title) {
                     SET_STEERING);
             wchar_t cm[32];
             centimetres(rig_setting_get(RIG_GRIP_VIEW_FORWARD), cm);
-            row_add(tr(L"Cockpit-Ansicht 2: nach vorn", L"Cockpit view 2: forward"), cm, 0, SET_VIEW_FORWARD);
+            row_add(tr(L"Dashboard Cam: nach vorn", L"Dashboard Cam: forward"), cm, 0, SET_VIEW_FORWARD);
             centimetres(rig_setting_get(RIG_GRIP_VIEW_UP), cm);
-            row_add(tr(L"Cockpit-Ansicht 2: Höhe", L"Cockpit view 2: height"), cm, 0, SET_VIEW_UP);
+            row_add(tr(L"Dashboard Cam: Höhe", L"Dashboard Cam: height"), cm, 0, SET_VIEW_UP);
+            row_add(tr(L"Kopf in die Kurve", L"Head into turns"), tr(head_german[drive_look_head_turn()], head_english[drive_look_head_turn()]), 0,
+                    SET_HEAD_TURN);
+            row_add(tr(L"Kopf: Feineinstellung", L"Head: fine-tuning"), L"›", 0, SET_HEAD_DETAIL);
             row_add(tr(L"Update-Hinweis beim Start", L"Update notice at start"), update_check_enabled() ? tr(L"An", L"On") : tr(L"Aus", L"Off"), 0,
                     SET_UPDATE);
-            row_add(tr(L"Lenkrad-Animation, Update:", L"Steering animation, update:"), L"", NOTIFY_ROW_INFO, -1);
+            row_add(tr(L"Auto rufen: Fahrstil", L"Summon car: driving style"),
+                    tr(summon_german[summon_style()], summon_english[summon_style()]), 0, SET_SUMMON_STYLE);
+            row_add(tr(L"Auto rufen: Autopilot-Sounds", L"Summon car: autopilot sounds"), summon_sounds() ? tr(L"An", L"On") : tr(L"Aus", L"Off"), 0,
+                    SET_SUMMON_SOUNDS);
+            row_add(tr(L"Nitro auch online", L"Nitro also online"), nitro_online_allowed() ? tr(L"An", L"On") : tr(L"Aus", L"Off"), 0, SET_NITRO);
+            row_add(tr(L"Andere Mods vorlassen", L"Let other mods take over"), mod_partners_yield() ? tr(L"An", L"On") : tr(L"Aus", L"Off"), 0,
+                    SET_YIELD);
+            row_add(tr(L"Aussteigen", L"Getting out"), noclip_walk_door() ? tr(L"Tür öffnen", L"Open the door") : tr(L"Abblenden", L"Fade to black"), 0,
+                    SET_WALK_DOOR);
+            row_add(tr(L"Blinker (Extra Options)", L"Turn signals (Extra Options)"), L"›", 0, SET_BLINKER);
+            /* SET_FREECAM_DRIVE: the old freecam (car stands) is no choice any more (Marvin 15.11.2026) */
+            row_add(tr(L"Lenkrad-Animation, Update, Mods:", L"Steering animation, update, mods:"), L"", NOTIFY_ROW_INFO, -1);
             row_add(tr(L"wirken nach Spiel-Neustart", L"take effect after a restart"), L"", NOTIFY_ROW_INFO, -1);
             hint(0);
             break;
@@ -672,7 +959,7 @@ static void build_page(wchar_t *title) {
         case LEVEL_VIEW_UP: {
             int forward = m.level == LEVEL_VIEW_FORWARD;
             int now = rig_setting_get(forward ? RIG_GRIP_VIEW_FORWARD : RIG_GRIP_VIEW_UP);
-            wcopy(title, 0, 64, forward ? tr(L"Cockpit 2: nach vorn", L"Cockpit 2: forward") : tr(L"Cockpit 2: Höhe", L"Cockpit 2: height"));
+            wcopy(title, 0, 64, forward ? tr(L"Dashboard Cam: nach vorn", L"Dashboard Cam: forward") : tr(L"Dashboard Cam: Höhe", L"Dashboard Cam: height"));
             int low = forward ? VIEW_FORWARD_MIN : VIEW_UP_MIN, high = forward ? VIEW_FORWARD_MAX : VIEW_UP_MAX;
             int standard = forward ? 35 : -5;
             for (int v = low; v <= high; v += VIEW_STEP) {
@@ -688,7 +975,7 @@ static void build_page(wchar_t *title) {
             int now = rig_setting_get(RIG_TRAFFIC_PRESET);
             for (int p = 1; p < RIG_DENSITY_COUNT; ++p)
                 row_add(traffic_name(p), p == now ? tr(L"✓ aktiv", L"✓ active") : L"", 0, p);
-            if (!now) row_add(tr(L"Jetzt: eigene Werte", L"Now: own values (Mods page)"), L"", NOTIFY_ROW_INFO, -1);
+            if (!now) row_add(tr(L"Jetzt: eigene Werte (Mods-Seite)", L"Now: own values (Mods page)"), L"", NOTIFY_ROW_INFO, -1);
             row_add(tr(L"Wirkt nach Spiel-Neustart", L"Takes effect after a restart"), L"", NOTIFY_ROW_INFO, -1);
             hint(0);
             break;
@@ -867,17 +1154,84 @@ static void build_page(wchar_t *title) {
                 }
                 row_add(m.german ? (imperial ? names_de_mph[i] : names_de[i]) : (imperial ? names_mph[i] : names_en[i]), text, 0, -1);
             }
-            row_add(confirm_clear ? tr(L"Sicher? Nochmal Enter", L"Sure? Enter again") : tr(L"Alle Rekorde löschen", L"Clear all records"),
+            row_add(confirm_clear ? tr(L"Sicher? Nochmal Enter/A", L"Sure? Enter/A again") : tr(L"Alle Rekorde löschen", L"Clear all records"),
                     L"", 0, 0);
             hint(0);
             break;
         }
         case LEVEL_WORLD:
             wcopy(title, 0, 64, tr(L"Welt", L"World"));
-            for (unsigned i = 0; i < 3; ++i)
+            for (unsigned i = 0; i < WORLD_ROWS; ++i)
                 row_add(tr(world_german[i], world_english[i]), rig_setting_get(world_ids[i]) ? tr(L"An", L"On") : tr(L"Aus", L"Off"), 0,
                         (int)i);
             row_add(tr(L"Wirkt nach Spiel-Neustart", L"Takes effect after a restart"), L"", NOTIFY_ROW_INFO, -1);
+            hint(0);
+            break;
+        case LEVEL_HEAD: {
+            wcopy(title, 0, 64, tr(L"Kopf in die Kurve", L"Head into turns"));
+            int level = drive_look_head_turn();
+            row_add(tr(L"Stärke", L"Strength"), tr(head_german[level], head_english[level]), 0, HEAD_ROW_LEVEL);
+            for (int i = 0; i < DRIVE_LOOK_HEAD_VALUES; ++i) {
+                wchar_t v[32];
+                head_value_text(i, drive_look_head_value(i), v);
+                row_add(head_row_name(i), v, 0, HEAD_ROW_ANGLE + i);
+            }
+            row_add(tr(L"Alles auf Standard (Mittel)", L"All to default (medium)"), L"", 0, HEAD_ROW_RESET);
+            row_add(tr(L"◄ ► ändern, Enter = weiter", L"◄ ► change, Enter = next"), L"", NOTIFY_ROW_INFO, -1);
+            row_add(tr(L"Wert ändern: Stärke = Eigene", L"Changing a value: Custom"), L"", NOTIFY_ROW_INFO, -1);
+            row_add(tr(L"Tempo: mehr % = schneller", L"Speed: more % = faster"), L"", NOTIFY_ROW_INFO, -1);
+            hint(0);
+            break;
+        }
+        case LEVEL_BLINKER: {
+            wcopy(title, 0, 64, tr(L"Blinker", L"Turn signals"));
+            row_add(tr(L"Blinker-Anzeige", L"Turn signal arrows"), blinker_arrows() ? tr(L"An", L"On") : tr(L"Aus", L"Off"), 0, BLINK_ROW_ARROWS);
+            row_add(tr(L"Blinker-Ton", L"Turn signal sound"), blinker_sound() ? tr(L"An", L"On") : tr(L"Aus", L"Off"), 0, BLINK_ROW_SOUND);
+            wchar_t v[16];
+            percent_text(blinker_volume(), v);
+            row_add(tr(L"Blinker-Ton: Lautstärke", L"Turn signal sound: volume"), v, 0, BLINK_ROW_VOLUME);
+            row_add(tr(L"Für Blinker von Extra Options", L"For Extra Options' turn signals"), L"", NOTIFY_ROW_INFO, -1);
+            if (mod_partners_takes_signal_arrows() || mod_partners_takes_signal_sound())
+                row_add(mod_partners_takes_signal_arrows() && mod_partners_takes_signal_sound() ? tr(L"EO hat Pfeile + Ton selbst: Gripline aus", L"EO has arrows + sound: Gripline's off")
+                        : mod_partners_takes_signal_arrows() ? tr(L"EO hat eigene Pfeile: Gripline-Pfeile aus", L"EO has own arrows: Gripline's off")
+                                                             : tr(L"EO hat eigenen Ton: Gripline-Ton aus", L"EO has own sound: Gripline's off"),
+                        L"", NOTIFY_ROW_INFO, -1);
+            row_add(tr(L"Pfeile über dem Tacho, wirkt sofort", L"Arrows above the speedometer, at once"), L"", NOTIFY_ROW_INFO, -1);
+            row_add(tr(L"◄ ► Lautstärke, Enter = weiter", L"◄ ► volume, Enter = next"), L"", NOTIFY_ROW_INFO, -1);
+            hint(0);
+            break;
+        }
+        case LEVEL_LOOK: {
+            wcopy(title, 0, 64, tr(L"Maus-Blick: Empfindlichkeit", L"Mouse look: sensitivity"));
+            wchar_t v[16];
+            look_value_text(keyboard_walk_mouse_look(), v);
+            row_add(tr(L"Beim Laufen", L"While walking"), v, 0, LOOK_WALK);
+            look_value_text(keyboard_drive_mouse_look(), v);
+            row_add(tr(L"Beim Fahren", L"While driving"), v, 0, LOOK_DRIVE);
+            row_add(tr(L"Beide auf Standard (100 %)", L"Both to default (100 %)"), L"", 0, LOOK_RESET);
+            row_add(tr(L"◄ ► ändern, Enter = weiter", L"◄ ► change, Enter = next"), L"", NOTIFY_ROW_INFO, -1);
+            if (keyboard_mouse_steering())
+                row_add(tr(L"Fahren aus: Maus-Lenkung ist an", L"Driving off: mouse steering on"), L"", NOTIFY_ROW_INFO, -1);
+            row_add(tr(L"Wirkt sofort", L"Takes effect at once"), L"", NOTIFY_ROW_INFO, -1);
+            hint(0);
+            break;
+        }
+        case LEVEL_GAUGE:
+            wcopy(title, 0, 64, tr(L"Laufen: Tacho", L"Walking: speedometer"));
+            for (int i = 0; i < WALK_GAUGE_COUNT; ++i)
+                row_add(tr(gauge_german[i], gauge_english[i]),
+                        i == walk_gauge_style() ? tr(L"✓ aktiv", L"✓ active") : i == WALK_GAUGE_DEFAULT ? tr(L"Standard", L"default") : L"",
+                        0, i);
+            row_add(tr(L"Unten rechts, wenn du läufst", L"Bottom right while on foot"), L"", NOTIFY_ROW_INFO, -1);
+            row_add(tr(L"Wirkt sofort", L"Takes effect at once"), L"", NOTIFY_ROW_INFO, -1);
+            hint(0);
+            break;
+        case LEVEL_HANDHELD:
+            wcopy(title, 0, 64, tr(L"Laufen: Handkamera", L"Walking: handheld camera"));
+            for (int i = 0; i < WALK_HANDHELD_COUNT; ++i)
+                row_add(tr(hand_german[i], hand_english[i]), i == walking_handheld() ? tr(L"✓ aktiv", L"✓ active") : L"", 0, i);
+            row_add(tr(L"Wie ein Handy in der Hand", L"Like a phone in your hand"), L"", NOTIFY_ROW_INFO, -1);
+            row_add(tr(L"Wirkt sofort", L"Takes effect at once"), L"", NOTIFY_ROW_INFO, -1);
             hint(0);
             break;
         case LEVEL_DAMAGE:
@@ -905,7 +1259,12 @@ static void build_page(wchar_t *title) {
     }
 }
 
+static SRWLOCK menu_lock = SRWLOCK_INIT; /* V7.1: menu thread + Mods page callbacks (mirror below) */
+static volatile int mirror_level = -1; /* V7.1: F8's real level while a mirror call borrows m (pad input reads it) */
+static int mirror_quiet; /* V7.1: a Mods page row is being chosen - no F8 panel */
+
 static void show(void) {
+    if (mirror_quiet) return;
     wchar_t title[64];
     build_page(title);
     notify_panel_show(title, rows, row_count, 1);
@@ -950,6 +1309,11 @@ static void back(void) {
         case LEVEL_TELEMETRY: m.level = LEVEL_GROUPS; break;
         case LEVEL_WORLD: m.level = LEVEL_GROUPS; break;
         case LEVEL_DAMAGE: m.level = LEVEL_GROUPS; break;
+        case LEVEL_HANDHELD: m.level = LEVEL_GROUPS; break;
+        case LEVEL_LOOK: m.level = LEVEL_GROUPS; break;
+        case LEVEL_HEAD: m.level = LEVEL_SETTINGS; break;
+        case LEVEL_BLINKER: m.level = LEVEL_SETTINGS; break;
+        case LEVEL_GAUGE: m.level = LEVEL_GROUPS; break;
         case LEVEL_LOGBOOK: m.level = LEVEL_GROUPS; break;
         case LEVEL_RECORDS: confirm_clear = 0; m.level = LEVEL_GROUPS; break;
         case LEVEL_BINDING: m.level = LEVEL_LIST; break;
@@ -995,7 +1359,28 @@ static void choose(void) {
     if (action < 0) return;
     switch (m.level) {
         case LEVEL_GROUPS:
-            if (action == TOP_REPORT) {
+            if (action == TOP_MENU_MOUSE) {
+                int now = keyboard_menu_mouse_mode(), next = MENU_MOUSE_ON;
+                for (int i = 0; i < MENU_MOUSE_CHOICES; ++i)
+                    if (menu_mouse_order[i] == now) next = menu_mouse_order[(i + 1) % MENU_MOUSE_CHOICES];
+                keyboard_set_menu_mouse_mode(next);
+                int saved = save_mouse("MenuMouse", next);
+                static const wchar_t *const help_german[3] = {L"\nKein Zeiger, keine Klicks im Menü", L"\nZeiger erscheint beim Öffnen",
+                                                              L"\nZeiger erst, wenn du die Maus bewegst"};
+                static const wchar_t *const help_english[3] = {L"\nNo pointer, no clicks in the menus", L"\nPointer shows when a menu opens",
+                                                               L"\nPointer only once you move the mouse"};
+                wchar_t line[128];
+                unsigned n = wcopy(line, 0, 128, tr(L"Maus im Spielmenü: ", L"Mouse in the game menus: "));
+                n = wcopy(line, n, 128, tr(menu_mouse_german[next], menu_mouse_english[next]));
+                wcopy(line, n, 128, saved ? tr(help_german[next], help_english[next])
+                                          : tr(L"\nNur bis zum Spielende (nicht gespeichert)", L"\nUntil the game closes (not saved)"));
+                char text[192];
+                unsigned t = 0;
+                utf8(line, text, sizeof(text), &t);
+                text[t] = 0;
+                notify_show(text);
+                log_append_value("KEYMENU: mouse in the game menus ", next);
+            } else if (action == TOP_REPORT) {
                 report_create_lang(m.german);
             } else if (action == TOP_RESET) {
                 m.level = LEVEL_RESET_ALL;
@@ -1007,6 +1392,15 @@ static void choose(void) {
             } else if (action == TOP_LOGBOOK) {
                 m.level = LEVEL_LOGBOOK;
                 m.sel[LEVEL_LOGBOOK] = 0;
+            } else if (action == TOP_LOOK) {
+                m.level = LEVEL_LOOK;
+                m.sel[LEVEL_LOOK] = 0;
+            } else if (action == TOP_GAUGE) {
+                m.level = LEVEL_GAUGE;
+                m.sel[LEVEL_GAUGE] = walk_gauge_style();
+            } else if (action == TOP_HANDHELD) {
+                m.level = LEVEL_HANDHELD;
+                m.sel[LEVEL_HANDHELD] = walking_handheld();
             } else if (action == TOP_DAMAGE) {
                 m.level = LEVEL_DAMAGE;
                 m.sel[LEVEL_DAMAGE] = no_damage_mode();
@@ -1066,6 +1460,15 @@ static void choose(void) {
             }
             break;
         }
+        case LEVEL_LOOK:
+            look_step(action, 2);
+            break;
+        case LEVEL_HEAD:
+            head_step(action, 2);
+            break;
+        case LEVEL_BLINKER:
+            blinker_step(action, 2);
+            break;
         case LEVEL_TELEMETRY: {
             if (action >= TELE_LOOK_POS && action <= TELE_LOOK_SIZE) {
                 tele_look_step(action, 2);
@@ -1098,6 +1501,38 @@ static void choose(void) {
                 }
             }
             break;
+        case LEVEL_GAUGE: {
+            if (action < 0 || action >= WALK_GAUGE_COUNT) break;
+            walk_gauge_set_style(action);
+            int saved = save_gripline_digit("WalkGauge", action);
+            char text[192];
+            unsigned t = 0;
+            wchar_t line[128];
+            unsigned n = wcopy(line, 0, 128, tr(L"Lauf-Tacho: ", L"Walking speedometer: "));
+            n = wcopy(line, n, 128, tr(gauge_german[action], gauge_english[action]));
+            if (!saved) wcopy(line, n, 128, tr(L"\nNur bis zum Spielende (nicht gespeichert)", L"\nUntil the game closes (not saved)"));
+            utf8(line, text, sizeof(text), &t);
+            text[t] = 0;
+            notify_show(text);
+            log_append_value("KEYMENU: walking gauge ", action);
+            break;
+        }
+        case LEVEL_HANDHELD: {
+            if (action < 0 || action >= WALK_HANDHELD_COUNT) break;
+            walking_set_handheld(action);
+            int saved = save_gripline_digit("WalkHandheld", action);
+            char text[192];
+            unsigned t = 0;
+            wchar_t line[128];
+            unsigned n = wcopy(line, 0, 128, tr(L"Handkamera: ", L"Handheld camera: "));
+            n = wcopy(line, n, 128, tr(hand_german[action], hand_english[action]));
+            if (!saved) wcopy(line, n, 128, tr(L"\nNur bis zum Spielende (nicht gespeichert)", L"\nUntil the game closes (not saved)"));
+            utf8(line, text, sizeof(text), &t);
+            text[t] = 0;
+            notify_show(text);
+            log_append_value("KEYMENU: walking handheld camera ", action);
+            break;
+        }
         case LEVEL_DAMAGE: {
             if (action < 0 || action >= NO_DAMAGE_COUNT) break;
             no_damage_set_mode(action);
@@ -1115,7 +1550,7 @@ static void choose(void) {
             break;
         }
         case LEVEL_WORLD: {
-            if (action >= 0 && action < 3) {
+            if (action >= 0 && action < WORLD_ROWS) {
                 unsigned id = world_ids[action];
                 int on = !rig_setting_get(id);
                 rig_setting_set(id, on); /* saves Gripline.ini and shows the restart card */
@@ -1214,6 +1649,74 @@ static void choose(void) {
                                         : (m.german ? "Update-Hinweis aus\nGripline fragt GitHub nicht mehr" : "Update notice off\nGripline no longer asks GitHub"))
                                   : (m.german ? "Update-Hinweis\nNicht gespeichert" : "Update notice\nNot saved"));
                 log_append(on ? "KEYMENU: update check on\r\n" : "KEYMENU: update check off\r\n");
+            } else if (action == SET_WALK_DOOR) { /* V7.2: at once */
+                int on = !noclip_walk_door();
+                int saved = save_gripline_digit("WalkDoor", on);
+                noclip_set_walk_door(on);
+                notify_show(saved ? (on ? (m.german ? "Aussteigen: Tür öffnen\nTür geht auf, Kamera gleitet raus (Autos ohne Tür-Animation: Abblenden)"
+                                                    : "Getting out: open the door\nThe door opens, the camera glides out (cars without a door animation: fade)")
+                                        : (m.german ? "Aussteigen: Abblenden\nSchwarzbild mit Türsounds wie bisher" : "Getting out: fade to black\nBlack picture with door sounds as before"))
+                                  : (m.german ? "Aussteigen\nNicht gespeichert" : "Getting out\nNot saved"));
+                log_append(on ? "KEYMENU: getting out with the door\r\n" : "KEYMENU: getting out with the fade\r\n");
+            } else if (action == SET_BLINKER) { /* V7.2 turn signals (15.11.2026) */
+                m.level = LEVEL_BLINKER;
+                m.sel[LEVEL_BLINKER] = 0;
+            } else if (action == SET_HEAD_DETAIL) { /* own values (15.11.2026) */
+                m.level = LEVEL_HEAD;
+                m.sel[LEVEL_HEAD] = 0;
+            } else if (action == SET_HEAD_TURN) { /* V7.2: at once, A steps Off - Light - Medium - Strong - Custom */
+                int level = (drive_look_head_turn() + 1) % HEAD_LEVELS;
+                int saved = save_gripline_digit("HeadTurn", level);
+                drive_look_set_head_turn(level);
+                static const char *const de[HEAD_LEVELS] = {"Kopf in die Kurve: aus\nDer Blick bleibt geradeaus",
+                                                  "Kopf in die Kurve: leicht\nIm Cockpit schaut der Blick etwas in die Kurve",
+                                                  "Kopf in die Kurve: mittel\nIm Cockpit schaut der Blick in die Kurve",
+                                                  "Kopf in die Kurve: stark\nIm Cockpit schaut der Blick weit in die Kurve",
+                                                  "Kopf in die Kurve: eigene Werte\nAus der Feineinstellung (Winkel, Tempo ...)"};
+                static const char *const en[HEAD_LEVELS] = {"Head into turns: off\nThe look stays straight ahead",
+                                                  "Head into turns: light\nIn the cockpit the look turns a little into the bend",
+                                                  "Head into turns: medium\nIn the cockpit the look turns into the bend",
+                                                  "Head into turns: strong\nIn the cockpit the look turns far into the bend",
+                                                  "Head into turns: custom\nYour fine-tuning (angle, speed ...)"};
+                notify_show(saved ? (m.german ? de[level] : en[level]) : (m.german ? "Kopf in die Kurve\nNicht gespeichert" : "Head into turns\nNot saved"));
+                log_append_value("KEYMENU: head into turns, level ", level);
+            } else if (action == SET_YIELD) { /* V7.2: read at start (the keyboard is set up before the menu exists) */
+                int on = !mod_partners_yield();
+                int saved = save_gripline_digit("YieldToMods", on);
+                mod_partners_remember_yield(on);
+                notify_show(saved ? (on ? (m.german ? "Andere Mods vorlassen: an\nab dem nächsten Start" : "Let other mods take over: on\nfrom the next start")
+                                        : (m.german ? "Andere Mods vorlassen: aus\nGripline nutzt immer seine eigenen Teile" : "Let other mods take over: off\nGripline always uses its own parts"))
+                                  : (m.german ? "Andere Mods vorlassen\nNicht gespeichert" : "Let other mods take over\nNot saved"));
+                log_append(on ? "KEYMENU: yield to other mods on\r\n" : "KEYMENU: yield to other mods off\r\n");
+            } else if (action == SET_NITRO) {
+                int on = !nitro_online_allowed();
+                int saved = save_gripline_digit("NitroOnline", on);
+                nitro_online_remember(on);
+                notify_show(saved ? (on ? (m.german ? "Nitro auch online\nGripline-Nitro-Taste bleibt online aktiv" : "Nitro also online\nThe Gripline nitro key stays active online")
+                                        : (m.german ? "Nitro online aus\nGripline schaltet Nitro in Online-Sitzungen ab" : "Nitro off online\nGripline switches nitro off in online sessions"))
+                                  : (m.german ? "Nitro online\nNicht gespeichert" : "Nitro online\nNot saved"));
+                log_append(on ? "KEYMENU: nitro online allowed\r\n" : "KEYMENU: nitro online blocked\r\n");
+            } else if (action == SET_SUMMON_STYLE) { /* Enter: the next style, at once */
+                int next = (summon_style() + 1) % SUMMON_STYLE_COUNT;
+                summon_set_style(next);
+                int saved = save_gripline_digit("SummonStyle", next);
+                char text[192];
+                unsigned t = 0;
+                wchar_t line[128];
+                unsigned n = wcopy(line, 0, 128, tr(L"Auto rufen: Fahrstil ", L"Summon car: driving style "));
+                n = wcopy(line, n, 128, tr(summon_german[next], summon_english[next]));
+                if (!saved) wcopy(line, n, 128, tr(L"\nNur bis zum Spielende (nicht gespeichert)", L"\nUntil the game closes (not saved)"));
+                utf8(line, text, sizeof(text), &t);
+                text[t] = 0;
+                notify_show(text);
+                log_append_value("KEYMENU: summon style ", next);
+            } else if (action == SET_SUMMON_SOUNDS) {
+                int on = !summon_sounds();
+                summon_set_sounds(on);
+                int saved = save_gripline_digit("SummonSounds", on);
+                notify_show(on ? (m.german ? "Autopilot-Sounds an" : "Autopilot sounds on") : (m.german ? "Autopilot-Sounds aus" : "Autopilot sounds off"));
+                if (!saved) log_append("KEYMENU: summon sounds not saved\r\n");
+                log_append(on ? "KEYMENU: summon sounds on\r\n" : "KEYMENU: summon sounds off\r\n");
             }
             break;
         case LEVEL_COLOR:
@@ -1227,7 +1730,7 @@ static void choose(void) {
             int forward = m.level == LEVEL_VIEW_FORWARD;
             int value = (forward ? VIEW_FORWARD_MIN : VIEW_UP_MIN) + action;
             rig_setting_set(forward ? RIG_GRIP_VIEW_FORWARD : RIG_GRIP_VIEW_UP, value); /* live, saved, card */
-            log_append_value(forward ? "KEYMENU: cockpit view 2 forward cm " : "KEYMENU: cockpit view 2 up cm ", value);
+            log_append_value(forward ? "KEYMENU: dashboard cam forward cm " : "KEYMENU: dashboard cam up cm ", value);
             break;
         }
         case LEVEL_TRAFFIC:
@@ -1343,6 +1846,10 @@ static void captured(unsigned char key) {
 #define PAD_LEFT 16
 #define PAD_RIGHT 32
 static volatile LONG pad_now, pad_toggle;
+
+void key_menu_request_toggle(void) {
+    InterlockedExchange(&pad_toggle, 1);
+}
 static volatile LONG64 pad_tick;
 static LONG pad_was;
 
@@ -1419,8 +1926,9 @@ int key_menu_pad_input(unsigned char *gamepad) {
     if (((buttons & 0x0008u) && !(buttons & 0x0040u)) || lx > 20000) bits |= PAD_RIGHT;
     InterlockedExchange(&pad_now, bits);
     InterlockedExchange64(&pad_tick, (LONG64)GetTickCount64());
-    int take = m.level != LEVEL_CLOSED || (buttons & 0x0040u);
-    if (m.level != LEVEL_CLOSED) {
+    int level = mirror_level >= 0 ? mirror_level : m.level;
+    int take = level != LEVEL_CLOSED || (buttons & 0x0040u);
+    if (level != LEVEL_CLOSED) {
         unsigned char zero[12] = {0}; /* buttons, triggers, sticks: nothing for the game */
         memory_copy(gamepad, zero, sizeof(zero));
     } else if (pad_swallow) {
@@ -1514,6 +2022,27 @@ static void key_menu_tick(ULONGLONG now) {
             return;
         }
     }
+    if ((left || right) && m.level == LEVEL_HEAD) {
+        int action = selected_action();
+        if (action >= HEAD_ROW_LEVEL && action < HEAD_ROW_RESET) {
+            head_step(action, left ? -1 : 1);
+            show();
+            return;
+        }
+    }
+    if ((left || right) && m.level == LEVEL_BLINKER && selected_action() == BLINK_ROW_VOLUME) {
+        blinker_step(BLINK_ROW_VOLUME, left ? -1 : 1);
+        show();
+        return;
+    }
+    if ((left || right) && m.level == LEVEL_LOOK) {
+        int action = selected_action();
+        if (action == LOOK_WALK || action == LOOK_DRIVE) {
+            look_step(action, left ? -1 : 1);
+            show();
+            return;
+        }
+    }
     int step = 0;
     if (up_pressed || down_pressed) {
         step = up_pressed ? -1 : 1;
@@ -1566,7 +2095,9 @@ static DWORD WINAPI menu_thread(LPVOID unused) {
     (void)unused;
     xinput_load();
     for (;;) {
+        AcquireSRWLockExclusive(&menu_lock);
         key_menu_tick(GetTickCount64());
+        ReleaseSRWLockExclusive(&menu_lock);
         Sleep(30);
     }
 }
@@ -1582,6 +2113,395 @@ void key_menu_start(void) {
     if (thread) CloseHandle(thread);
     else log_append("KEYMENU: no thread - key menu off.\r\n");
 #endif
+}
+
+
+/* ------------------------------------------------------------------ Mods page mirror (V7.1) */
+
+/* The F8 pages as pages under MODS > YOUR MODS > Gripline (Installed mods before platform 2.9.0) (plugin/gripline_plugin.c), for players
+   who use the game's own menus: the same rows, texts and actions as here (choose() does the work, so
+   both stay the same). Rows that are already settings rows on the Mods page are left out, and so is
+   everything about keys (a key has to be pressed on the keyboard). The menu thread and the game's UI
+   thread (page callbacks) share the state through menu_lock. */
+
+#define MIRROR_ALL (-1)
+#define MIRROR_PARTS 6
+/* parts[].view: where a part shows (the Mods page has its own rows for card colour, dashboard cam,
+   world and traffic; Gripline's page in the pause menu shows them too, so it has nearly all of F8) */
+enum { VIEW_BOTH, VIEW_TILE, VIEW_TILE_ALL /* skip[] only on the Mods page */ };
+/* where a page shows */
+enum { PAGE_BOTH, PAGE_MODS_ONLY, PAGE_TILE_ONLY };
+static const struct {
+    const char *title, *label, *description, *label_de, *description_de;
+    int where;
+    struct {
+        int level, only;  /* only: one action of that page (MIRROR_ALL = every row) */
+        int skip[8];      /* actions left out (on the Mods page already); ends at the first -1 or after 8 */
+        int no_info;      /* 1: the page's notes are about rows left out */
+        int view;         /* VIEW_* */
+    } parts[MIRROR_PARTS];
+} mirror_pages[KEY_MENU_MIRROR_PAGES] = {
+    {"Gripline Mouse", "Mouse & Look", "Mouse in the game menus, mouse steering, mouse look and head into turns with its fine-tuning (F8 menu).",
+     "Maus & Blick", "Maus im Spielmen\xc3\xbc, Maus-Lenkung, Maus-Blick und Kopf in die Kurve mit Feineinstellung (F8-Men\xc3\xbc).", PAGE_BOTH,
+     {{LEVEL_GROUPS, TOP_MENU_MOUSE, {-1}, 0, 0}, {LEVEL_MOUSE, MIRROR_ALL, {-1}, 0, 0}, {LEVEL_LOOK, MIRROR_ALL, {-1}, 0, 0},
+      {LEVEL_HEAD, MIRROR_ALL, {-1}, 1, 0}}},
+    {"Gripline Walking", "Walking", "Getting out, handheld camera and speedometer on foot (F8 menu).",
+     "Laufen", "Aussteigen, Handkamera und Tacho zu Fu\xc3\x9f (F8-Men\xc3\xbc).", PAGE_BOTH,
+     {{LEVEL_SETTINGS, SET_WALK_DOOR, {-1}, 1, 0}, {LEVEL_HANDHELD, MIRROR_ALL, {-1}, 0, 0}, {LEVEL_GAUGE, MIRROR_ALL, {-1}, 0, 0}}},
+    /* no damage first: its list sits right under the page name, not under "Cruise control" */
+    {"Gripline Driving", "Driving", "No damage, cruise control, turn signals and the telemetry panel (F8 menu).",
+     "Fahren", "Kein Schaden, Tempomat, Blinker und Telemetrie-Tafel (F8-Men\xc3\xbc).", PAGE_BOTH,
+     {{LEVEL_DAMAGE, MIRROR_ALL, {-1}, 0, 0}, {LEVEL_CRUISE, MIRROR_ALL, {-1}, 0, 0}, {LEVEL_BLINKER, MIRROR_ALL, {-1}, 1, 0},
+      {LEVEL_TELEMETRY, MIRROR_ALL, {0, -1}, 0, VIEW_TILE_ALL}}},
+    {"Gripline Summon & Online", "Summon, Nitro & Updates", "Summon car, nitro online and the update notice (F8 menu).",
+     "Auto rufen, Nitro & Updates", "Auto rufen, Nitro online und Update-Hinweis (F8-Men\xc3\xbc).", PAGE_BOTH,
+     {{LEVEL_SETTINGS, MIRROR_ALL, {SET_COLOR, SET_STEERING, SET_VIEW_FORWARD, SET_VIEW_UP, SET_WALK_DOOR, SET_HEAD_TURN, SET_HEAD_DETAIL, SET_BLINKER}, 1, 0}}},
+    /* card design first, then (Gripline's page) the colour: both lists right under the page name */
+    {"Gripline Cards", "Cards & Design", "Which cards show, their design and colour (F8 menu).",
+     "Karten & Design", "Welche Karten erscheinen, ihr Design und ihre Farbe (F8-Men\xc3\xbc).", PAGE_BOTH,
+     {{LEVEL_STYLE, MIRROR_ALL, {-1}, 0, 0}, {LEVEL_COLOR, MIRROR_ALL, {-1}, 1, VIEW_TILE}, {LEVEL_CARDS, MIRROR_ALL, {-1}, 0, 0}}},
+    {"Gripline Logbook", "Logbook & Records", "Distance driven, your cars and your records (F8 menu).",
+     "Fahrtenbuch & Rekorde", "Gefahrene Strecke, deine Autos und deine Rekorde (F8-Men\xc3\xbc).", PAGE_MODS_ONLY,
+     {{LEVEL_LOGBOOK, MIRROR_ALL, {-1}, 0, 0}, {LEVEL_RECORDS, MIRROR_ALL, {-1}, 0, 0}}},
+    /* V7.2 (15.11.2026): only on Gripline's page - the Mods page has these as its own rows */
+    {"Gripline World", "World & Cockpit", "Traffic, world, steering animation and dashboard cam (F8 menu).",
+     "Welt & Cockpit", "Verkehr, Welt, Lenkrad-Animation und Dashboard Cam (F8-Men\xc3\xbc).", PAGE_TILE_ONLY,
+     {{LEVEL_SETTINGS, SET_STEERING, {-1}, 1, VIEW_TILE}, {LEVEL_VIEW_FORWARD, MIRROR_ALL, {-1}, 1, VIEW_TILE},
+      {LEVEL_VIEW_UP, MIRROR_ALL, {-1}, 1, VIEW_TILE}, {LEVEL_TRAFFIC, MIRROR_ALL, {-1}, 1, VIEW_TILE},
+      {LEVEL_WORLD, MIRROR_ALL, {-1}, 1, VIEW_TILE}}},
+};
+
+/* the order on Gripline's page (world next to driving) */
+static const unsigned char tile_order[] = {0, 1, 2, 6, 3, 4};
+_Static_assert(sizeof(tile_order) <= KEY_MENU_MIRROR_PAGES, "tile pages");
+
+unsigned key_menu_tile_page_count(void) {
+    return sizeof(tile_order);
+}
+unsigned key_menu_tile_page(unsigned n) {
+    return n < sizeof(tile_order) ? tile_order[n] : 0;
+}
+int key_menu_mirror_on_mods(unsigned page) {
+    return page < KEY_MENU_MIRROR_PAGES && mirror_pages[page].where != PAGE_TILE_ONLY;
+}
+
+const char *key_menu_mirror_title(unsigned page) {
+    return page < KEY_MENU_MIRROR_PAGES ? mirror_pages[page].title : "";
+}
+const char *key_menu_mirror_label(unsigned page) {
+    return page < KEY_MENU_MIRROR_PAGES ? mirror_pages[page].label : "";
+}
+const char *key_menu_mirror_description(unsigned page) {
+    return page < KEY_MENU_MIRROR_PAGES ? mirror_pages[page].description : "";
+}
+static int mirror_german(void);
+/* in the game language (Gripline's page is built when the game shows its menus) */
+const char *key_menu_mirror_label_shown(unsigned page) {
+    return page >= KEY_MENU_MIRROR_PAGES ? "" : mirror_german() ? mirror_pages[page].label_de : mirror_pages[page].label;
+}
+const char *key_menu_mirror_description_shown(unsigned page) {
+    return page >= KEY_MENU_MIRROR_PAGES ? "" : mirror_german() ? mirror_pages[page].description_de : mirror_pages[page].description;
+}
+
+static int mirror_skipped(unsigned page, unsigned part, int action, int tile) {
+    if (tile && mirror_pages[page].parts[part].view == VIEW_TILE_ALL) return 0;
+    const int *skip = mirror_pages[page].parts[part].skip;
+    for (unsigned i = 0; i < 8 && skip[i] >= 0; ++i)
+        if (skip[i] == action) return 1;
+    return 0;
+}
+
+static int mirror_has(const wchar_t *text, const wchar_t *part) {
+    for (; *text; ++text) {
+        unsigned i = 0;
+        while (part[i] && text[i] == part[i]) ++i;
+        if (!part[i]) return 1;
+    }
+    return 0;
+}
+
+/* keyboard words have no place on a controller page */
+static int mirror_keyboard_text(const wchar_t *text) {
+    return mirror_has(text, L"Enter") || mirror_has(text, L"◄") || mirror_has(text, L"Esc");
+}
+
+/* UTF-8 of `text` without a " (...)" part that names keys: "Einzeln (Enter = an/aus)" -> "Einzeln" */
+static void mirror_text(const wchar_t *text, char *out, unsigned capacity) {
+    wchar_t clean[64];
+    unsigned n = 0;
+    for (unsigned i = 0; text[i] && n + 1 < 64; ++i) {
+        if (text[i] == L' ' && text[i + 1] == L'(' && mirror_keyboard_text(text + i)) break;
+        clean[n++] = text[i];
+    }
+    clean[n] = 0;
+    /* the game font has no check marks, dots or arrows: "✓ on" -> "on", "◄ ►" -> "< >" */
+    unsigned w = 0;
+    for (unsigned i = 0; clean[i]; ++i) {
+        wchar_t c = clean[i];
+        if (c == 0x25C4) c = L'<';
+        else if (c == 0x25BA) c = L'>';
+        else if (c > 0xFF && c != 0x20AC) {
+            if (clean[i + 1] == L' ' && (w == 0 || clean[w - 1] == L' ')) ++i; /* its space too */
+            continue;
+        }
+        clean[w++] = c;
+    }
+    while (w && clean[w - 1] == L' ') --w;
+    clean[w] = 0;
+    unsigned t = 0;
+    if (capacity) out[0] = 0;
+    utf8(clean, out, capacity, &t);
+    if (t < capacity) out[t] = 0;
+}
+
+static void mirror_key(int level, int action, char out[KEY_MENU_MIRROR_KEY]) {
+    unsigned n = 0, a = (unsigned)action;
+    char d[8];
+    unsigned k = 0;
+    out[n++] = 'L';
+    out[n++] = (char)('A' + level);
+    do d[k++] = (char)('0' + a % 10); while ((a /= 10) && k < 8);
+    while (k && n + 1 < KEY_MENU_MIRROR_KEY) out[n++] = d[--k];
+    out[n] = 0;
+}
+
+static int mirror_german(void) {
+    unsigned char *image = keyboard_game_image();
+    return image && game_language_is_german(image);
+}
+int key_menu_mirror_german(void) {
+    return mirror_german();
+}
+
+/* builds `level` like the F8 menu does, without touching what F8 shows */
+static void mirror_build(int level, wchar_t *title) {
+    m.level = level;
+    m.german = mirror_german();
+    m.sel[level] = -1; /* no row marked as selected */
+    build_page(title);
+    for (unsigned i = 0; i < row_count; ++i)
+        if (rows[i].style == NOTIFY_ROW_SELECTED) rows[i].style = 0;
+}
+
+static unsigned mirror_rows_for(unsigned page, KeyMenuMirrorRow *out, unsigned capacity, int tile) {
+    if (page >= KEY_MENU_MIRROR_PAGES) return 0;
+    unsigned count = 0;
+    AcquireSRWLockExclusive(&menu_lock);
+    int saved_sel[LEVEL_COUNT];
+    int saved_level = m.level, saved_german = m.german;
+    mirror_level = saved_level;
+    memory_copy(saved_sel, m.sel, sizeof(saved_sel));
+    for (unsigned part = 0; part < MIRROR_PARTS; ++part) {
+        int level = mirror_pages[page].parts[part].level, only = mirror_pages[page].parts[part].only;
+        if (level <= LEVEL_CLOSED) continue;
+        if (!tile && mirror_pages[page].parts[part].view == VIEW_TILE) continue;
+        wchar_t title[64];
+        mirror_build(level, title);
+        if (only == MIRROR_ALL && count < capacity) {
+            memory_copy(&out[count], &(KeyMenuMirrorRow){0}, sizeof(out[count]));
+            mirror_text(title, out[count].label, sizeof(out[count].label));
+            out[count++].style = KEY_MENU_MIRROR_HEADING;
+        }
+        for (unsigned i = 0; i < row_count && count < capacity; ++i) {
+            int action = row_action[i], style = rows[i].style;
+            if (style == NOTIFY_ROW_HINT) continue;
+            if (only != MIRROR_ALL && action != only) continue;
+            if (action >= 0 && mirror_skipped(page, part, action, tile)) continue;
+            if (style == NOTIFY_ROW_INFO && (mirror_pages[page].parts[part].no_info || mirror_keyboard_text(rows[i].label))) continue;
+            KeyMenuMirrorRow *row = &out[count++];
+            memory_copy(row, &(KeyMenuMirrorRow){0}, sizeof(*row));
+            mirror_text(rows[i].label, row->label, sizeof(row->label));
+            mirror_text(rows[i].keys, row->value, sizeof(row->value));
+            const wchar_t *keys = rows[i].keys;
+            if (keys[0] == 0x203A) row->value[0] = 0, row->flags |= KEY_MENU_MIRROR_FLAG_SUBPAGE; /* "›" opens a sub-page in F8 */
+            if (keys[0] == 0x2713 || keys[0] == 0x25CF) {
+                int on = mirror_has(keys, L"an") || mirror_has(keys, L"on") || mirror_has(keys, L"läuft");
+                row->flags |= on && !mirror_has(keys, L"aktiv") && !mirror_has(keys, L"active")
+                                  ? KEY_MENU_MIRROR_FLAG_ON : KEY_MENU_MIRROR_FLAG_ACTIVE | KEY_MENU_MIRROR_FLAG_CHOICE;
+            } else if (!keys[0] || mirror_has(keys, L"Standard") || mirror_has(keys, L"default")) {
+                if (!(row->flags & KEY_MENU_MIRROR_FLAG_SUBPAGE)) row->flags |= KEY_MENU_MIRROR_FLAG_CHOICE;
+            }
+            row->style = style == NOTIFY_ROW_SECTION ? KEY_MENU_MIRROR_HEADING
+                       : style == NOTIFY_ROW_INFO   ? KEY_MENU_MIRROR_DIM
+                                                    : KEY_MENU_MIRROR_NORMAL;
+            if (action >= 0) mirror_key(level, action, row->key);
+        }
+    }
+    m.level = saved_level, m.german = saved_german;
+    memory_copy(m.sel, saved_sel, sizeof(saved_sel));
+    mirror_level = -1;
+    if (m.level != LEVEL_CLOSED) {
+        wchar_t title[64];
+        build_page(title); /* F8's own rows back (its panel did not change) */
+    }
+    ReleaseSRWLockExclusive(&menu_lock);
+    return count;
+}
+unsigned key_menu_mirror_rows(unsigned page, KeyMenuMirrorRow *out, unsigned capacity) {
+    return mirror_rows_for(page, out, capacity, 0);
+}
+unsigned key_menu_mirror_tile_rows(unsigned page, KeyMenuMirrorRow *out, unsigned capacity) {
+    return mirror_rows_for(page, out, capacity, 1);
+}
+
+int key_menu_mirror_choose(const char *key) {
+    if (!key || key[0] != 'L' || key[1] < 'A' + LEVEL_GROUPS || key[1] >= 'A' + LEVEL_COUNT || !key[2]) return 0;
+    int level = key[1] - 'A', action = 0;
+    for (const char *c = key + 2; *c; ++c) {
+        if (*c < '0' || *c > '9' || action > 100000) return 0;
+        action = action * 10 + (*c - '0');
+    }
+    /* only rows the pages list */
+    int listed = 0;
+    for (unsigned p = 0; p < KEY_MENU_MIRROR_PAGES && !listed; ++p)
+        for (unsigned part = 0; part < MIRROR_PARTS; ++part) {
+            int l = mirror_pages[p].parts[part].level, only = mirror_pages[p].parts[part].only;
+            if (l == level && (only == MIRROR_ALL || only == action) && !mirror_skipped(p, part, action, 1)) listed = 1;
+        }
+    if (!listed) return 0;
+    AcquireSRWLockExclusive(&menu_lock);
+    if (!ini_path[0]) set_path();
+    int saved_sel[LEVEL_COUNT];
+    int saved_level = m.level, saved_german = m.german, saved_group = m.group, saved_binding = m.binding;
+    mirror_level = saved_level;
+    memory_copy(saved_sel, m.sel, sizeof(saved_sel));
+    wchar_t title[64];
+    mirror_build(level, title);
+    int k = 0, found = -1;
+    for (unsigned i = 0; i < row_count; ++i) {
+        if (row_action[i] < 0) continue;
+        if (row_action[i] == action) found = k;
+        ++k;
+    }
+    if (found >= 0) {
+        m.sel[level] = found;
+        mirror_quiet = 1;
+        choose();
+        mirror_quiet = 0;
+        log_append_value("KEYMENU: chosen on the Mods page, action ", action);
+    }
+    m.level = saved_level, m.german = saved_german, m.group = saved_group, m.binding = saved_binding;
+    memory_copy(m.sel, saved_sel, sizeof(saved_sel));
+    mirror_level = -1;
+    if (m.level != LEVEL_CLOSED) show(); /* F8 open as well: it shows the new value */
+    ReleaseSRWLockExclusive(&menu_lock);
+    return found >= 0;
+}
+
+/* V7.2 FH2 ANNA's entry (anna_link.c): turn signal arrows on / off, saved like in F8 */
+void key_menu_blinker_toggle(void) {
+    AcquireSRWLockExclusive(&menu_lock);
+    if (!ini_path[0]) set_path();
+    int saved_german = m.german;
+    m.german = mirror_german();
+    blinker_step(BLINK_ROW_ARROWS, 2);
+    m.german = saved_german;
+    if (m.level != LEVEL_CLOSED) show();
+    ReleaseSRWLockExclusive(&menu_lock);
+}
+
+/* V7.2 Gripline page: one value left (-1) or right (+1) like ◄ ► in F8, for the rows that have it
+   (telemetry look, mouse look, head into turns) - one save instead of A stepping round the whole list.
+   Returns 1 if the row has it. */
+int key_menu_mirror_step(const char *key, int delta) {
+    if (!key || key[0] != 'L' || key[1] < 'A' || !key[2] || (delta != 1 && delta != -1)) return 0;
+    int level = key[1] - 'A', action = 0;
+    for (const char *c = key + 2; *c; ++c) {
+        if (*c < '0' || *c > '9' || action > 100000) return 0;
+        action = action * 10 + (*c - '0');
+    }
+    int handled = 1;
+    AcquireSRWLockExclusive(&menu_lock);
+    if (!ini_path[0]) set_path();
+    int saved_german = m.german;
+    m.german = mirror_german();
+    mirror_quiet = 1;
+    if (level == LEVEL_TELEMETRY && action >= TELE_LOOK_POS && action <= TELE_LOOK_SIZE) tele_look_step(action, delta);
+    else if (level == LEVEL_HEAD && action >= HEAD_ROW_LEVEL && action < HEAD_ROW_RESET) head_step(action, delta);
+    else if (level == LEVEL_LOOK && (action == LOOK_WALK || action == LOOK_DRIVE)) look_step(action, delta);
+    else if (level == LEVEL_BLINKER && action == BLINK_ROW_VOLUME) blinker_step(action, delta);
+    else handled = 0;
+    mirror_quiet = 0;
+    m.german = saved_german;
+    if (handled && m.level != LEVEL_CLOSED) show(); /* F8 open as well: it shows the new value */
+    ReleaseSRWLockExclusive(&menu_lock);
+    if (handled) log_append_value("KEYMENU: stepped on Gripline's page, action ", action);
+    return handled;
+}
+
+/* V7.2 Gripline page (pause_tile.c): every value a row that A steps through can have, so the page can
+   show the row as the game's own left/right choice. Returns how many (0: not such a row), `current`
+   the one it is now (-1 if it is a value of its own from the INI). */
+static unsigned mirror_value(char (*out)[KEY_MENU_MIRROR_VALUE], unsigned n, unsigned cap, const wchar_t *text) {
+    if (n < cap) mirror_text(text, out[n], KEY_MENU_MIRROR_VALUE);
+    return n + 1;
+}
+
+unsigned key_menu_mirror_values(const char *key, char (*out)[KEY_MENU_MIRROR_VALUE], unsigned cap, int *current) {
+    *current = -1;
+    if (!key || key[0] != 'L' || key[1] < 'A' || !key[2]) return 0;
+    int level = key[1] - 'A', action = 0;
+    for (const char *c = key + 2; *c; ++c) {
+        if (*c < '0' || *c > '9' || action > 100000) return 0;
+        action = action * 10 + (*c - '0');
+    }
+    unsigned n = 0;
+    AcquireSRWLockExclusive(&menu_lock);
+    int saved_german = m.german;
+    m.german = mirror_german();
+    wchar_t v[16];
+    if (level == LEVEL_GROUPS && action == TOP_MENU_MOUSE && !mod_partners_takes_menu_mouse()) {
+        for (int i = 0; i < 3; ++i) n = mirror_value(out, n, cap, tr(menu_mouse_german[i], menu_mouse_english[i]));
+        *current = keyboard_menu_mouse_mode();
+    } else if (level == LEVEL_SETTINGS && action == SET_SUMMON_STYLE) {
+        for (int i = 0; i < SUMMON_STYLE_COUNT; ++i) n = mirror_value(out, n, cap, tr(summon_german[i], summon_english[i]));
+        *current = summon_style();
+    } else if ((level == LEVEL_SETTINGS && action == SET_HEAD_TURN) || (level == LEVEL_HEAD && action == HEAD_ROW_LEVEL)) {
+        for (int i = 0; i < HEAD_LEVELS; ++i) n = mirror_value(out, n, cap, tr(head_german[i], head_english[i]));
+        *current = drive_look_head_turn();
+    } else if (level == LEVEL_HEAD && action >= HEAD_ROW_ANGLE && action < HEAD_ROW_ANGLE + DRIVE_LOOK_HEAD_VALUES) {
+        int which = action - HEAD_ROW_ANGLE, now = drive_look_head_value(which), count;
+        const int *list;
+        head_list(which, &list, &count);
+        for (int i = 0; i < count; ++i) {
+            wchar_t text[32];
+            head_value_text(which, list[i], text);
+            n = mirror_value(out, n, cap, text);
+            if (list[i] == now) *current = i;
+        }
+    } else if (level == LEVEL_SETTINGS && action == SET_WALK_DOOR) {
+        n = mirror_value(out, n, cap, tr(L"Abblenden", L"Fade to black"));
+        n = mirror_value(out, n, cap, tr(L"Tür öffnen", L"Open the door"));
+        *current = noclip_walk_door() ? 1 : 0;
+    } else if (level == LEVEL_LOOK && (action == LOOK_WALK || action == LOOK_DRIVE)) {
+        int now = action == LOOK_WALK ? keyboard_walk_mouse_look() : keyboard_drive_mouse_look();
+        for (int i = 0; i < (int)ARRAY_COUNT(look_values); ++i) {
+            look_value_text(look_values[i], v);
+            n = mirror_value(out, n, cap, v);
+            if (look_values[i] == now) *current = i;
+        }
+    } else if (level == LEVEL_BLINKER && action == BLINK_ROW_VOLUME) {
+        for (int i = 0; i < (int)ARRAY_COUNT(blink_volumes); ++i) {
+            percent_text(blink_volumes[i], v);
+            n = mirror_value(out, n, cap, v);
+            if (blink_volumes[i] == blinker_volume()) *current = i;
+        }
+    } else if (level == LEVEL_TELEMETRY && action == TELE_LOOK_POS) {
+        for (int i = 0; i < NOTIFY_TELE_POS_COUNT; ++i) n = mirror_value(out, n, cap, tr(tele_pos_german[i], tele_pos_english[i]));
+        *current = notify_telemetry_position();
+    } else if (level == LEVEL_TELEMETRY && (action == TELE_LOOK_OPACITY || action == TELE_LOOK_SIZE)) {
+        const int *list = action == TELE_LOOK_OPACITY ? tele_opacities : tele_sizes;
+        int count = action == TELE_LOOK_OPACITY ? (int)ARRAY_COUNT(tele_opacities) : (int)ARRAY_COUNT(tele_sizes);
+        int now = action == TELE_LOOK_OPACITY ? notify_telemetry_opacity() : notify_telemetry_size();
+        for (int i = 0; i < count; ++i) {
+            percent_text(list[i], v);
+            n = mirror_value(out, n, cap, v);
+            if (list[i] == now) *current = i;
+        }
+    }
+    m.german = saved_german;
+    ReleaseSRWLockExclusive(&menu_lock);
+    return n < cap ? n : cap;
 }
 
 #ifdef FH2_TWEAKS_TEST
@@ -1620,6 +2540,30 @@ __declspec(dllexport) int Fh2TestKeyMenuCover(void) {
             ++n;
         }
     return n;
+}
+/* Mods page mirror: "label|value|key|style\n" per row */
+__declspec(dllexport) int Fh2TestKeyMenuMirrorRows(unsigned page, char *out, unsigned size) {
+    static KeyMenuMirrorRow list[64];
+    unsigned count = key_menu_mirror_rows(page, list, 64), n = 0;
+    for (unsigned i = 0; i < count; ++i) {
+        const char *parts[3] = {list[i].label, list[i].value, list[i].key};
+        for (unsigned p = 0; p < 3; ++p) {
+            for (const char *c = parts[p]; *c && n + 4 < size; ++c) out[n++] = *c;
+            if (n + 4 < size) out[n++] = '|';
+        }
+        if (n + 4 < size) out[n++] = (char)('0' + list[i].style);
+        if (n + 4 < size) out[n++] = '|';
+        if (n + 4 < size) out[n++] = (char)('0' + list[i].flags);
+        if (n + 4 < size) out[n++] = '\n';
+    }
+    if (size) out[n < size ? n : size - 1] = 0;
+    return (int)count;
+}
+__declspec(dllexport) int Fh2TestKeyMenuMirrorChoose(const char *key) {
+    return key_menu_mirror_choose(key);
+}
+__declspec(dllexport) int Fh2TestMenuMouseMode(void) {
+    return keyboard_menu_mouse_mode();
 }
 __declspec(dllexport) int Fh2TestKeyMenuSelected(wchar_t *label) {
     for (unsigned i = 0; i < row_count; ++i)

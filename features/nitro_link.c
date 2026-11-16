@@ -5,6 +5,9 @@
 #include "nitro_link.h"
 #include "notify.h"
 #include "game_language.h"
+#include "walking.h"
+#include "noclip.h"
+#include "mod_partners.h"
 
 typedef struct {
     DWORD packet;
@@ -28,6 +31,15 @@ static wchar_t ini_path[PATH_CAPACITY];
 static ULONGLONG next_search, next_ini;
 static unsigned char *game;
 static volatile LONG online_state = -1; /* -1 unknown, 0 offline, 1 online session */
+
+/* V7.2: NitroSystem's own switch (FnFNitro_SetBlocked, exported by NitroSystem 2.x, also published as
+   "NitroSystem.Control"): blocked per caller, NOS off with its gauge hidden. Gripline blocks it while
+   nitro makes no sense or is not wanted: online with NitroOnline=0, walking, noclip and freecam. */
+typedef void (*SetBlockedFn)(const char *who, int blocked);
+static SetBlockedFn set_blocked;
+static volatile LONG block_state = -1; /* what Gripline last told NitroSystem */
+static ULONGLONG next_block_check;
+static int linking_at_start; /* the card waits for the game's first picture */
 static ULONGLONG next_online_check;
 
 /* FH2's network connection object (DAT_1436e24f8): its state +0x10 is 1 while a network
@@ -43,14 +55,24 @@ static int session_online(void) {
     return state == 1;
 }
 
-/* Online: nitro off (NitroSystem would give an unfair boost to the other players' races). */
+static volatile LONG nitro_online_setting = 1;
+
+void nitro_online_remember(int allowed) {
+    InterlockedExchange(&nitro_online_setting, allowed ? 1 : 0);
+}
+
+int nitro_online_allowed(void) {
+    return (int)nitro_online_setting;
+}
+
+/* Online with NitroOnline=0: nitro off (the player chose to keep Gripline's nitro out of online races). */
 static int nitro_blocked(void) {
     ULONGLONG now = GetTickCount64();
     if (now >= next_online_check) {
         next_online_check = now + 500;
         LONG online = session_online();
         LONG before = InterlockedExchange(&online_state, online);
-        if (before != online && (before != -1 || online)) {
+        if (before != online && (before != -1 || online) && !nitro_online_setting) {
             if (online) {
                 log_append("NITRO: online session - nitro off.\r\n");
                 if (linked_module && notify_kind_on(NOTIFY_KIND_WHEEL)) {
@@ -67,7 +89,19 @@ static int nitro_blocked(void) {
             }
         }
     }
-    return online_state == 1;
+    return online_state == 1 && !nitro_online_setting;
+}
+
+static void update_block(int online_blocked) {
+    if (!set_blocked) return;
+    ULONGLONG now = GetTickCount64();
+    if (now < next_block_check) return;
+    next_block_check = now + 200;
+    LONG want = online_blocked || walking_active() || noclip_active();
+    if (InterlockedExchange(&block_state, want) == want) return;
+    set_blocked("Gripline", (int)want);
+    log_append(want ? "NITRO: NitroSystem blocked (online with NitroOnline=0, walking, noclip or freecam).\r\n"
+                    : "NITRO: NitroSystem allowed again.\r\n");
 }
 
 static const struct {
@@ -116,7 +150,9 @@ static DWORD WINAPI linked_get_state(DWORD user, PadState *state) {
     GetStateFn original = original_get_state;
     DWORD result = original ? original(user, state) : 1167; /* ERROR_DEVICE_NOT_CONNECTED */
     if (!state) return result;
-    if (nitro_blocked()) { /* also hide the real controller's NitroButton */
+    int blocked = nitro_blocked();
+    update_block(blocked);
+    if (blocked) { /* also hide the real controller's NitroButton */
         if (result == 0) {
             unsigned blocked = (unsigned)nitro_button;
             if (blocked == BUTTON_LT) state->left_trigger = 0;
@@ -193,11 +229,16 @@ static int link_module(HMODULE module, const wchar_t *ini) {
     VirtualProtect((void *)slot, sizeof(void *), old, &old);
     linked_module = module;
     linked_slot = slot;
+    set_blocked = (SetBlockedFn)(uintptr_t)GetProcAddress(module, "FnFNitro_SetBlocked");
+    log_append(set_blocked ? "NITRO: NitroSystem's FnFNitro_SetBlocked found - Gripline switches NOS off while walking, "
+                             "in noclip/freecam and (NitroOnline=0) online.\r\n"
+                           : "NITRO: older NitroSystem without FnFNitro_SetBlocked - only the button is hidden.\r\n");
     memory_copy(ini_path, ini, sizeof(ini_path));
     read_button();
     log_append("NITRO: NitroSystem found - Gripline nitro key and wheel button press its "
                "NitroButton.\r\n");
-    if (notify_kind_on(NOTIFY_KIND_START)) notify_show("NitroSystem found\nNitro: N / wheel button");
+    /* V7.2 calm start: no card any more. It named a wheel button even with no wheel connected and no
+       wheel button set to nitro (Marvin 14.11.2026); the log line above is enough */
     return 1;
 }
 
@@ -220,6 +261,11 @@ int game_session_online(void) {
 
 void nitro_link_start(unsigned char *game_image) {
     game = game_image;
+    /* V7.2: link straight away (FnFNitro.dll starts before Gripline.dll), so NitroSystem can be blocked while walking
+       even when neither the Gripline keyboard nor a wheel button ever pressed nitro */
+    linking_at_start = 1;
+    if (!linked_module) search();
+    linking_at_start = 0;
 }
 
 void nitro_link_set(unsigned source, int held) {
@@ -248,6 +294,10 @@ __declspec(dllexport) int Fh2TestNitroLink(void *module, const wchar_t *ini) {
 
 __declspec(dllexport) void Fh2TestNitroSet(unsigned source, int held) {
     nitro_link_set(source, held);
+}
+
+__declspec(dllexport) void Fh2TestNitroOnline(int allowed) {
+    nitro_online_remember(allowed);
 }
 
 __declspec(dllexport) void Fh2TestNitroGame(void *image) {

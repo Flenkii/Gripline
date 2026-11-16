@@ -23,6 +23,8 @@ void logbook_step(unsigned long long now);
 void logbook_total(double *metres, double *seconds, float *top);
 /* the car now (name empty when not known) */
 void logbook_current(wchar_t *name, size_t capacity, double *metres);
+/* V7.2: the car file stem of the car now (e.g. "NIS_GTR_12"); 0 and empty when not known */
+int logbook_current_stem(char *stem, size_t capacity);
 /* the cars with the most kilometres: rank 0.. ; returns 0 past the end */
 int logbook_top(unsigned rank, wchar_t *name, size_t capacity, double *metres);
 

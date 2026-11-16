@@ -1,11 +1,11 @@
-GRIPLINE V7 "THE BIG UPDATE" – keyboard, cockpit, walking & more for Forza Horizon 2 (Azimuth)
+GRIPLINE V7.2 - Immersion for Forza Horizon 2 (Azimuth)
 =========================================================================================
-An add-on next to Azimuth, the official Extra Options and FH2MP.
+One mod file, one in-game menu (F8). Works offline and online with FH2MP.
 
-*** NEW IN V7: WALKING MODE ***
-Press F (controller: hold LS + Y) to get out of your car and walk around on foot -
-with collision (trees, walls, buildings), run, jump, fade to black and door sounds.
-Your car stays parked; F / Y near it gets you back in. Offline only.
+  - WALKING: get out of the car (F / LS + Y) and walk the open world, with real collision.
+  - COCKPIT: dashboard cam (V), steering wheel that turns 1:1, keyboard and mouse driving.
+  - DRIVING TOOLS: live telemetry, cruise control, noclip, freecam, no damage on cars.
+  - WORLD: traffic presets, speed cameras / names / event icons off, calm Drivatars.
 
 Source code: https://github.com/Flenkii/Gripline
 
@@ -13,7 +13,7 @@ No game files, no Azimuth, no Extra Options and no FH2MP included. Never paste c
 into PowerShell to install a mod – anything like that is a scam.
 Not supported by the Extra Options author, the FH2MP team or the Azimuth developer.
 
-Tested with: Azimuth 1.0.4, Extra Options 0.4.4, FH2 Mod Platform 2.8.0, FH2MP 1.1.3.
+Tested with: Azimuth 1.0.4, Extra Options 0.6.1, FH2 Mod Platform 2.9.0, FH2MP 1.4.1.
 
 
 1. INSTALLATION
@@ -23,14 +23,15 @@ Tested with: Azimuth 1.0.4, Extra Options 0.4.4, FH2 Mod Platform 2.8.0, FH2MP 1
 2. Copy the CONTENTS of the folder "Azimuth" from this ZIP next to azimuth.exe:
      fh2-mods\Gripline.dll
 3. Do NOT replace winmm.dll - it stays the official Extra Options.
-4. Start the game. Settings: Pause > Settings > MODS.
+4. Start the game. Settings: F8, or Pause > CARS > Gripline (tile next to TUNE CAR).
 
 Updating from V5: delete the old Gripline winmm.dll (let the FH2MP launcher put the
 official one back), and mods\Gripline\plugins\GriplineTick.dll if you have it.
 Your [Traffic]/[Gripline] settings move to Gripline.ini on the first start.
 FH2_Wheel.ini is not used any more.
 
-Uninstall: delete fh2-mods\Gripline.dll AND the folder mods\Gripline.
+Uninstall: delete fh2-mods\Gripline.dll AND the folder mods\Forza Horizon 2\Gripline
+(older Extra Options: mods\Gripline).
 
 Gripline never changes the game files. It writes its own copies (cockpit animations,
 traffic data) into mods\Gripline\media, which Extra Options loads over the game's files.
@@ -41,24 +42,47 @@ after removing Gripline? Delete the folder mods\Gripline - then everything is or
 2. WHAT GRIPLINE DOES - AND WHAT THE OTHERS DO
 ---------------------------------------------
 Gripline:
-  - Keyboard driving (WASD, arrows = camera), works together with a controller.
-  - Cockpit: the steering wheel turns 1:1 with your real wheel (rotation from the Azimuth
-    launcher), cockpit view 2 like in FH5 (Tab or V).
-  - More Traffic: Original, Much More Traffic, No Traffic or Drivatars Only, picked by name
-    (MODS > Installed mods > Gripline > Traffic), 30-100 cars, rush hour all day (restart needed).
-  - Nitro key N for the mod NitroSystem (off online), key list F5, Gripline cards,
-    problem report (Gripline_Report.zip).
-  - V7: Gripline menu (F8), walking (F), freecam (F7), noclip (F6), cruise control (K),
-    live telemetry, logbook, records, no damage on cars, world options, update notice.
+  - Walking (F), dashboard cam (V), 1:1 cockpit wheel, keyboard and mouse driving.
+  - Live telemetry, cruise control (K), noclip (F6), freecam (F7), no damage on cars.
+  - Traffic presets and world options, Gripline cards, Gripline menu (F8), problem report.
+  - Nitro key N for the mod NitroSystem (off online), key list F5.
 Azimuth (its launcher): wheel, pedals, buttons, rotation and force feedback.
 Extra Options: weather, time of day, hiding the HUD (F1), autodrive (F2).
+All settings: press F8 in the game. A short list is also under Pause > Settings > MODS.
 
+
+NEW IN V7.2 (includes V7.1)
+---------------------------
+  - Get out like in the game (F): the driver's door opens, the camera glides out through
+    the door and the door shuts; back in the other way round. Cars without a door
+    animation fade to black with door sounds. F8 > Settings > Getting out.
+  - Turn signals you can see and hear: for Extra Options' indicators, green arrows above
+    the speedometer and a click-clack sound (F8 > Settings > Turn signals).
+  - Head into turns: the head looks into the corner in the cockpit / driver camera
+    (Off / Light / Medium / Strong / Custom).
+  - Dashboard cam per car: each car keeps its own dashboard cam place.
+  - Freecam while driving (F7): your car keeps driving, only the camera is free.
+  - Gripline tile in the pause menu: Pause > CARS, next to TUNE CAR, with pages for almost
+    all settings. Gripline in FH2 ANNA's menu (D-pad down > Gripline).
+  - Makes room for other mods: with FH2 Mouse & Keyboard, its keyboard driving, menu mouse
+    and mouse look are used. NitroSystem is switched off while you walk or fly.
+  - Traffic changes while you play; No Traffic is really empty.
+  - Calmer start (one card), FH2MP 1.4.1 / FH2 Mod Platform 2.9.0 support, fixes.
+
+NEW IN V7.1
+-----------
+  - Mouse in the menus: press Esc, move the mouse over a tile to select it, left click
+    opens it, wheel = tabs at the top / scroll lists, right click = back.
+  - Mouse look in the car (every view; outside the camera circles the car).
+  - Mouse look sensitivity for walking and driving: F8 > Mouse look: sensitivity.
+  - Smoother walking: easing, mouse look, crouch (hold Ctrl / B), handheld camera (F8),
+    driver hidden while you walk, follow camera when you get out.
 
 3. NEW IN V7 – THE BIG UPDATE
 -----------------------------
   - Gripline menu (F8; controller: hold LS + D-pad right): all Gripline settings in the
     game - keys (change, add, reset), traffic, cards, card design, steering animation,
-    cockpit view 2, telemetry, cruise control, world, no damage, problem report.
+    dashboard cam, telemetry, cruise control, world, no damage, problem report.
     Arrows/Enter/Esc or D-pad/A/B. Changes show up at once in the key list (F5).
   - Walking (F; controller: hold LS + Y): get out and walk around on foot, with collision
     (trees, walls, buildings). WASD walk, arrows look, Shift run, Space jump; controller
@@ -115,7 +139,7 @@ NEW IN V6
   - Runs next to the official Extra Options (FH2MP-compatible, no winmm.dll swap).
   - Only what the others don't have: Gripline's own wheel, force feedback, weather,
     time of day and creator mode are gone - Azimuth and Extra Options do those now.
-  - Cockpit wheel turns 1:1, cockpit view 2, More Traffic with real traffic data,
+  - Cockpit wheel turns 1:1, dashboard cam, More Traffic with real traffic data,
     key list (F5), problem report, Azimuth Mapper detection, cards in a window over the game.
 
 
@@ -123,13 +147,15 @@ PROBLEMS? https://github.com/Flenkii/Gripline/issues
 Pause > Settings > MODS > "Gripline: Create Problem Report", then attach
 Gripline_Report.zip (next to azimuth.exe). Nothing is sent anywhere.
 
-Known limits: traffic, steering animation and keyboard on/off need a restart.
+Known limits: steering animation, keyboard on/off and the highest number of traffic
+cars need a restart.
 Online, traffic comes from the session and nitro is off.
 
 Credits: RokkuDayo (Extra Options, base of Gripline's code), Trinculo54 (FH2 Mod Platform
 API, MIT), Lancaster, qiangqiang101 (NitroSystem), bigdamnhero6 (Azimuth Mapper), a YouTube
-viewer (cockpit view 2 idea), MRAlexis99 and the Discord community (ideas for V7),
-Sounds From The Lab (car door sounds, royalty-free, soundsfromthelab.com).
+viewer (dashboard cam idea), MRAlexis99 and the Discord community (ideas for V7),
+Sounds From The Lab (car door sounds, royalty-free, soundsfromthelab.com), qiangqiang101
+(FH2 ANNA menu API, MIT; FH2 Mouse & Keyboard).
 
 ----------------------------------------------------------------------------------------
 DEUTSCH (kurz)
@@ -137,6 +163,13 @@ fh2-mods\Gripline.dll aus dem Ordner "Azimuth" neben azimuth.exe kopieren. winmm
 ersetzen (bleibt das offizielle Extra Options). Einstellungen: Pause > Einstellungen > MODS.
 Lenkrad und Force Feedback: im Azimuth-Launcher. Wetter, Tageszeit, HUD aus (F1):
 Extra Options. Gripline: Tastatur, Cockpit, Verkehr, Nitro-Taste, Fehlerbericht.
+NEU IN V7.2: Aussteigen mit Tür (Tür geht auf, Kamera gleitet raus), Blinker-Anzeige +
+Klick-Klack für die Extra-Options-Blinker, Kopf schaut in die Kurve, Dashboard Cam pro Auto,
+Freecam mit fahrendem Auto, Gripline-Kachel im Pausemenü (CARS, neben TUNE CAR), Gripline
+im ANNA-Menü, Verkehr ändert sich im laufenden Spiel. Deinstallieren: Gripline.dll UND
+Ordner mods\Forza Horizon 2\Gripline löschen.
+NEU IN V7.1: Maus im Menü (Esc: Kachel anklicken, Rad, Rechtsklick = zurück), Maus-Blick im
+Auto, weicheres Laufen mit Ducken und Handkamera.
 NEU IN V7: Gripline-Menü (F8), Laufen (F), Freecam (F7), Tempomat (K), Live-Telemetrie,
 Fahrtenbuch, Rekorde, Kein Schaden an Autos, Welt-Optionen, 3 Karten-Designs, Update-Hinweis.
 Probleme: im MODS-Menü "Gripline: Create Problem Report" und Gripline_Report.zip auf

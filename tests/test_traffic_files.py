@@ -79,12 +79,15 @@ for level, c in LEVELS.items():
     check(run(0, level, CAR_LOADING) == ref, f'CarLoadingSettings.xml, TrafficLevel={level}')
 got = run(1, 6, DENSITIES)
 check(got.count('min="0" max="0"') == 6 and 'min="0.1" max="0.2"' in got, 'Kein Verkehr: Verkehr + Festival 0, Polizei bleibt')
-check(run(0, 6, CAR_LOADING) == CAR_LOADING, 'Kein Verkehr: CarLoadingSettings unverändert')
+check(run(0, 6, CAR_LOADING) == CAR_LOADING.replace('InitialNumFestival="3"', 'InitialNumFestival="0"').replace('InitialNumTraffic="6"', 'InitialNumTraffic="0"'),
+      'Kein Verkehr: keine Start-Autos (InitialNumTraffic/Festival 0), Rest unverändert')
 got = run(1, 7, DENSITIES)
 check('densityNameTagValue="a" min="0" max="0" speed="25"' in got, 'Nur Drivatare: kein Zivilverkehr')
 check('densityNameTagValue="a" min="0.8" max="2" spawnAwayChance="0.75" speed="25"/>' in got, 'Nur Drivatare: Drivatare x8 mit Tempo der Straße')
 check('densityNameTagValue="open_world" min="0.4" max="0.8" spawnAwayChance="0.7" speed="15" />' in got, 'Nur Drivatare: Tempo auch vor " />"')
-check('MaxActiveFestival="80"' in run(0, 7, CAR_LOADING) and 'MaxActiveTraffic="18"' in run(0, 7, CAR_LOADING), 'Nur Drivatare: 80 Drivatare, Verkehr wie im Spiel')
+check('MaxActiveFestival="80"' in run(0, 7, CAR_LOADING) and 'MaxActiveTraffic="18"' in run(0, 7, CAR_LOADING)
+      and 'InitialNumTraffic="0"' in run(0, 7, CAR_LOADING) and 'InitialNumFestival="3"' in run(0, 7, CAR_LOADING),
+      'Nur Drivatare: 80 Drivatare, keine Start-Verkehrsautos')
 check(run(1, 0, DENSITIES) == DENSITIES and run(0, 0, CAR_LOADING) == CAR_LOADING, 'TrafficLevel=0: unverändert')
 got = run(1, 4, DENSITIES)
 check('densityNameTagValue="open_world" min="1.6" max="2.8"' in got, 'open_world bekommt Zivilverkehr (wie "b")')

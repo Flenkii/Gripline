@@ -432,14 +432,17 @@ static void show_news(void) {
         if (save_news_seen()) log_append("LOGBOOK: what's-new cards hidden (CardsHidden), NewsSeen saved.\r\n");
         return;
     }
-    const char *badge = de ? "NEU IN V7" : "NEW IN V7";
-    /* the last one shown ends up on top */
-    notify_show_tinted(de ? "Freecam & Fahrtenbuch\nF7 Freecam, km pro Auto in F8" : "Freecam & logbook\nF7 freecam, km per car in F8",
-                       NOTIFY_COLOR_GREEN, badge, 1);
-    notify_show_tinted(de ? "Live-Telemetrie\nViertelmeile, Bremsweg & mehr (F8)" : "Live telemetry\nQuarter mile, braking & more (F8)",
-                       NOTIFY_COLOR_GREEN, badge, 1);
-    notify_show_tinted(de ? "Das Gripline-Menü\nF8: Tasten, Kein Schaden, Welt" : "The Gripline menu\nF8: keys, no damage, world",
-                       NOTIFY_COLOR_GREEN, badge, 1);
+    /* V7.2: one big card instead of three small ones */
+    notify_show_big(de ? "Neu in Gripline " GRIPLINE_VERSION : "New in Gripline " GRIPLINE_VERSION,
+                    de ? "Aussteigen: Tür geht auf, Kamera gleitet raus\n"
+                         "Freecam: dein Auto fährt weiter\n"
+                         "Kopf in die Kurve + Dashboard Cam pro Auto\n"
+                         "Gripline-Kachel: Pause > CARS (oder F8)"
+                       : "Getting out: the door opens, the camera glides out\n"
+                         "Freecam: your car drives on\n"
+                         "Head into turns + Dashboard Cam per car\n"
+                         "Gripline tile: pause > CARS (or F8)",
+                    NOTIFY_COLOR_GREEN, de ? "NEU" : "NEW", 0);
     if (save_news_seen()) log_append("LOGBOOK: what's-new cards shown, NewsSeen saved.\r\n");
     else log_append("LOGBOOK: what's-new cards shown, but Gripline.ini could not be written.\r\n");
 }
@@ -555,6 +558,19 @@ void logbook_current(wchar_t *name, size_t capacity, double *metres) {
         *metres = 0;
     }
     ReleaseSRWLockShared(&lock);
+}
+
+int logbook_current_stem(char *stem, size_t capacity) {
+    if (!capacity) return 0;
+    stem[0] = 0;
+    AcquireSRWLockShared(&lock);
+    if (current >= 0) {
+        size_t k = 0;
+        while (cars[current].stem[k] && k + 1 < capacity) stem[k] = cars[current].stem[k], ++k;
+        stem[k] = 0;
+    }
+    ReleaseSRWLockShared(&lock);
+    return stem[0] != 0;
 }
 
 int logbook_top(unsigned rank, wchar_t *name, size_t capacity, double *metres) {

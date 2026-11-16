@@ -282,32 +282,6 @@ size_t ini_set_value(const char *text, size_t length, const char *section, const
     return o.length;
 }
 
-size_t ini_rename_key(const char *text, size_t length, const char *section, const char *key,
-                      const char *new_key, char *out, size_t capacity) {
-    if (!out || !capacity) {
-        return 0;
-    }
-    Location where;
-    locate(text, length, section, key, &where);
-    if (!where.found_key) {
-        return 0;
-    }
-    Line line = {where.key_line_start, where.key_line_end, 0};
-    size_t a, b, c;
-    if (!key_of(text, &line, &a, &b, &c)) {
-        return 0;
-    }
-    Output o = {out, 0, capacity, 1};
-    put(&o, text, a);
-    put_text(&o, new_key);
-    put(&o, text + b, length - b);
-    if (!o.ok) {
-        return 0;
-    }
-    out[o.length] = 0;
-    return o.length;
-}
-
 const char *ini_format_int(int value, char buffer[12]) {
     char *cursor = buffer + 11;
     unsigned magnitude = value < 0 ? 0u - (unsigned)value : (unsigned)value;
